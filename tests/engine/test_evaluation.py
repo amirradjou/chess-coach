@@ -41,3 +41,5 @@ def test_judge_best_and_forced_moves() -> None:
         Judgement.BEST
     )
     assert judge(played_uci="a2a3", best_uci="e2e4", wp_before=60, wp_after=20)[1] == 40.0
+    # best moves report zero loss even when the two searches disagree slightly
+    assert judge(played_uci="e2e4", best_uci="e2e4", wp_before=60, wp_after=58)[1] == 0.0

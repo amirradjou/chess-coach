@@ -38,9 +38,11 @@ def judge(
     forced: bool = False,
 ) -> tuple[Judgement, float]:
     """Classify a move by win-probability lost, Lichess thresholds. Returns (judgement, wp_loss)."""
-    wp_loss = round(max(0.0, wp_before - wp_after), 2)
     if forced or played_uci == best_uci:
-        return Judgement.BEST, wp_loss
+        # Search horizons differ between the two positions, so even the best move can show a
+        # small drift; by definition the mover lost nothing.
+        return Judgement.BEST, 0.0
+    wp_loss = round(max(0.0, wp_before - wp_after), 2)
     if wp_loss >= BLUNDER_WP_LOSS:
         return Judgement.BLUNDER, wp_loss
     if wp_loss >= MISTAKE_WP_LOSS:
