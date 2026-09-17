@@ -69,7 +69,10 @@ web UI for digests and puzzle drills; Lichess/Chess.com API clients.
 
 ## Status
 
-Idea stage — nothing runs yet.
+**v0 in progress** (branch `v0-import-and-analysis`): importing from Lichess, Chess.com and PGN
+files works, Stockfish analysis stores per-move facts, `stats` prints a per-game accuracy table.
+Motif tagging and opening classification are next. See [docs/PLAN.md](docs/PLAN.md) for the
+build plan and how to pick the work up.
 
 ## Getting started
 

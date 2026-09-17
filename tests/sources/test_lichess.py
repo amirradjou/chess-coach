@@ -64,6 +64,12 @@ def test_fetch_games_skips_variants() -> None:
     assert [g.id for g in fetch_games("coachme", client=client)] == ["lichess:yyyyyyyy"]
 
 
+def test_fetch_games_caps_at_max_games(sample_pgn_text: str) -> None:
+    client = make_client()
+    client._transport = httpx.MockTransport(lambda _: httpx.Response(200, text=sample_pgn_text))
+    assert len(list(fetch_games("coachme", max_games=1, client=client))) == 1
+
+
 def test_fetch_games_raises_on_http_error() -> None:
     client = make_client()
     client._transport = httpx.MockTransport(lambda _: httpx.Response(429, text="slow down"))

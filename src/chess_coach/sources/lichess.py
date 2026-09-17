@@ -47,6 +47,7 @@ def fetch_games(
 
     own_client = client is None
     client = client or make_client(token)
+    yielded = 0
     try:
         with client.stream("GET", f"/api/games/user/{username}", params=params) as response:
             response.raise_for_status()
@@ -54,8 +55,13 @@ def fetch_games(
                 if '[Variant "' in chunk and '[Variant "Standard"]' not in chunk:
                     continue
                 game = game_from_pgn(chunk, username, source="lichess", source_id=None)
-                if game is not None:
-                    yield game
+                if game is None:
+                    continue
+                yield game
+                yielded += 1
+                # Lichess has been seen to return a few more games than `max`; cap client-side.
+                if max_games is not None and yielded >= max_games:
+                    return
     finally:
         if own_client:
             client.close()
