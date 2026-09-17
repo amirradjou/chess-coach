@@ -1,0 +1,50 @@
+"""Score arithmetic: centipawns, mates, win probability and Lichess-style move judgements."""
+
+from __future__ import annotations
+
+import math
+
+from chess_coach.models import Judgement
+
+MATE_CP = 10_000
+# Lichess's logistic model mapping centipawns to winning chances (lila/ui/ceval/winningChances).
+_WIN_K = -0.00368208
+
+INACCURACY_WP_LOSS = 10.0
+MISTAKE_WP_LOSS = 20.0
+BLUNDER_WP_LOSS = 30.0
+
+
+def mate_to_cp(mate_in: int) -> int:
+    """Map a signed mate distance (mover's view) onto the cp scale; shorter mates score higher."""
+    if mate_in == 0:
+        return -MATE_CP
+    sign = 1 if mate_in > 0 else -1
+    return sign * (MATE_CP - abs(mate_in))
+
+
+def win_probability(cp: int) -> float:
+    """Percentage (0-100) that the side to move wins, from Lichess's centipawn model."""
+    chances = 2 / (1 + math.exp(_WIN_K * cp)) - 1
+    return round(50 + 50 * chances, 2)
+
+
+def judge(
+    *,
+    played_uci: str,
+    best_uci: str,
+    wp_before: float,
+    wp_after: float,
+    forced: bool = False,
+) -> tuple[Judgement, float]:
+    """Classify a move by win-probability lost, Lichess thresholds. Returns (judgement, wp_loss)."""
+    wp_loss = round(max(0.0, wp_before - wp_after), 2)
+    if forced or played_uci == best_uci:
+        return Judgement.BEST, wp_loss
+    if wp_loss >= BLUNDER_WP_LOSS:
+        return Judgement.BLUNDER, wp_loss
+    if wp_loss >= MISTAKE_WP_LOSS:
+        return Judgement.MISTAKE, wp_loss
+    if wp_loss >= INACCURACY_WP_LOSS:
+        return Judgement.INACCURACY, wp_loss
+    return Judgement.GOOD, wp_loss
