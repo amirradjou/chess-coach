@@ -1,0 +1,43 @@
+[project]
+name = "chess-coach"
+version = "0.1.0"
+description = "A chess coach that reads your games, finds the patterns behind your losses, and trains you on exactly those spots."
+authors = [
+    { name = "amirradjou", email = "amir.radical.78@gmail.com" }
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "chess>=1.11.2",
+    "httpx>=0.28.1",
+    "rich>=15.0.0",
+    "typer>=0.27.2",
+]
+
+[project.scripts]
+chess-coach = "chess_coach.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.12.15,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.8",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "engine: needs a Stockfish binary (skipped when none is found)",
+    "network: talks to Lichess / Chess.com over the internet (opt in with -m network)",
+]
+addopts = "-m 'not network'"

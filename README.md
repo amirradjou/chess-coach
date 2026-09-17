@@ -70,3 +70,18 @@ web UI for digests and puzzle drills; Lichess/Chess.com API clients.
 ## Status
 
 Idea stage — nothing runs yet.
+
+## Getting started
+
+```sh
+uv sync                     # install
+scripts/get-stockfish.sh    # fetch a Stockfish binary into ./.stockfish (no sudo needed)
+uv run chess-coach --help
+```
+
+## Development
+
+```sh
+uv run pytest                                   # tests (engine tests skip without Stockfish)
+uv run ruff check . && uv run ruff format .     # lint + format
+```
