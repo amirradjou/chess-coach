@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 
 import chess.pgn
@@ -158,6 +158,22 @@ def game_from_pgn(
         opening=headers.get("Opening") or None,
         termination=headers.get("Termination") or None,
     )
+
+
+def iter_pgn_chunks(lines: Iterable[str]) -> Iterator[str]:
+    """Split a stream of PGN lines into one chunk per game without buffering the whole export."""
+    buffer: list[str] = []
+    seen_moves = False
+    for raw in lines:
+        line = raw.rstrip("\r\n")
+        if line.startswith("[") and seen_moves:
+            yield "\n".join(buffer).strip()
+            buffer, seen_moves = [], False
+        if line.strip() and not line.startswith("[") and not line.startswith("%"):
+            seen_moves = True
+        buffer.append(line)
+    if any(line.strip() for line in buffer):
+        yield "\n".join(buffer).strip()
 
 
 def split_pgn(text: str) -> Iterator[str]:
