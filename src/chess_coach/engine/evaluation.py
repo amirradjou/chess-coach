@@ -7,6 +7,9 @@ import math
 from chess_coach.models import Judgement
 
 MATE_CP = 10_000
+# Centipawn loss is computed on values clamped to this, as Lichess does for ACPL, so one missed
+# mate does not weigh as much as a hundred blunders.
+CP_LOSS_CEILING = 1_000
 # Lichess's logistic model mapping centipawns to winning chances (lila/ui/ceval/winningChances).
 _WIN_K = -0.00368208
 
@@ -50,3 +53,10 @@ def judge(
     if wp_loss >= INACCURACY_WP_LOSS:
         return Judgement.INACCURACY, wp_loss
     return Judgement.GOOD, wp_loss
+
+
+def cp_loss(eval_before: int, eval_after: int) -> int:
+    """Centipawns lost by the move, both evals clamped to +-CP_LOSS_CEILING first."""
+    before = max(-CP_LOSS_CEILING, min(CP_LOSS_CEILING, eval_before))
+    after = max(-CP_LOSS_CEILING, min(CP_LOSS_CEILING, eval_after))
+    return max(0, before - after)

@@ -1,6 +1,6 @@
 import pytest
 
-from chess_coach.engine.evaluation import MATE_CP, judge, mate_to_cp, win_probability
+from chess_coach.engine.evaluation import MATE_CP, cp_loss, judge, mate_to_cp, win_probability
 from chess_coach.models import Judgement
 
 
@@ -43,3 +43,11 @@ def test_judge_best_and_forced_moves() -> None:
     assert judge(played_uci="a2a3", best_uci="e2e4", wp_before=60, wp_after=20)[1] == 40.0
     # best moves report zero loss even when the two searches disagree slightly
     assert judge(played_uci="e2e4", best_uci="e2e4", wp_before=60, wp_after=58)[1] == 0.0
+
+
+def test_cp_loss_is_clamped_like_lichess_acpl() -> None:
+    assert cp_loss(30, -70) == 100
+    assert cp_loss(30, 80) == 0
+    assert cp_loss(MATE_CP - 1, 300) == 700  # a missed mate counts as losing "+10" not "+100"
+    assert cp_loss(-50, -MATE_CP) == 950
+    assert cp_loss(MATE_CP, -MATE_CP) == 2000

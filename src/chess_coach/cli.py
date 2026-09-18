@@ -162,6 +162,9 @@ def analyze(
     depth: Annotated[int | None, typer.Option(help="Search depth per position.")] = None,
     limit: Annotated[int | None, typer.Option(help="Stop after this many games.")] = None,
     threads: Annotated[int | None, typer.Option(help="Engine threads.")] = None,
+    force: Annotated[
+        bool, typer.Option("--force", help="Re-analyze games that are already analyzed.")
+    ] = False,
 ) -> None:
     """Run Stockfish over every game not yet analyzed at this depth and store per-move facts."""
     from chess_coach.engine.analysis import analyze_game
@@ -170,7 +173,7 @@ def analyze(
     settings: Settings = ctx.obj
     depth = depth or settings.analysis_depth
     with Store(settings.db_path) as store:
-        pending = list(store.iter_games(unanalyzed_below_depth=depth))
+        pending = list(store.iter_games(unanalyzed_below_depth=None if force else depth))
         if limit is not None:
             pending = pending[:limit]
         if not pending:

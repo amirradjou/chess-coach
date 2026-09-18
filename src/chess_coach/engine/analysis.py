@@ -8,7 +8,7 @@ from collections.abc import Callable
 import chess
 import chess.pgn
 
-from chess_coach.engine.evaluation import judge, win_probability
+from chess_coach.engine.evaluation import cp_loss, judge, win_probability
 from chess_coach.engine.phases import phase_of
 from chess_coach.engine.stockfish import Engine, LineEval
 from chess_coach.models import Color, Game, Judgement, MoveFact, Phase
@@ -81,7 +81,7 @@ def analyze_game(
                 eval_after=eval_after,
                 best_move=best_move_uci,
                 best_san=before.san(best.move) if best.move else before.san(node.move),
-                cp_loss=0 if judgement is Judgement.BEST else max(0, best.cp - eval_after),
+                cp_loss=0 if judgement is Judgement.BEST else cp_loss(best.cp, eval_after),
                 wp_before=wp_before,
                 wp_after=wp_after,
                 wp_loss=wp_loss,
