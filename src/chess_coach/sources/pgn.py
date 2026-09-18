@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 import chess.pgn
 
 from chess_coach.models import Color, Game, Speed
+from chess_coach.openings import classify_pgn
 
 _LICHESS_URL = re.compile(r"https?://lichess\.org/([A-Za-z0-9]{8})")
 _CHESSCOM_URL = re.compile(r"https?://(?:www\.)?chess\.com/(?:game/)?(?:live|daily)/(\d+)")
@@ -137,6 +138,10 @@ def game_from_pgn(
         rated = True if "rated" in lowered else (False if "casual" in lowered else None)
 
     time_control = headers.get("TimeControl")
+    eco, opening = headers.get("ECO") or None, headers.get("Opening") or None
+    if opening is None and (classified := classify_pgn(pgn_text)) is not None:
+        eco, opening = classified.eco, classified.name
+
     return Game(
         id=f"{source}:{source_id}",
         source=source,
@@ -154,8 +159,8 @@ def game_from_pgn(
         time_control=time_control,
         speed=classify_speed(time_control, event),
         rated=rated,
-        eco=headers.get("ECO") or None,
-        opening=headers.get("Opening") or None,
+        eco=eco,
+        opening=opening,
         termination=headers.get("Termination") or None,
     )
 

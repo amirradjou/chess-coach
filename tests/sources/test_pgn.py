@@ -46,8 +46,10 @@ def test_chesscom_export_is_parsed_case_insensitively(sample_pgn_text: str) -> N
     assert chesscom.user_result == "loss"
     assert chesscom.speed is Speed.RAPID
     assert chesscom.rated is None  # chess.com PGN headers do not say
-    assert chesscom.eco == "D53"
-    assert chesscom.opening is None  # only an ECOUrl; names come from the ECO table later
+    # Chess.com gives only an ECOUrl; the name comes from the vendored table by position
+    assert chesscom.eco is not None and chesscom.eco.startswith("D")  # table's, not the header's
+    assert chesscom.opening is not None and chesscom.opening.startswith("Queen's Gambit Declined")
+    assert chesscom.opening_family == "Queen's Gambit Declined"
 
 
 def test_plain_pgn_gets_a_content_hash_id(sample_pgn_text: str) -> None:
@@ -58,6 +60,8 @@ def test_plain_pgn_gets_a_content_hash_id(sample_pgn_text: str) -> None:
     assert plain.url is None
     assert plain.speed is Speed.UNKNOWN
     assert plain.user_result == "draw"
+    assert plain.eco is not None and plain.eco.startswith("C6")
+    assert plain.opening_family == "Ruy Lopez"
     # same content -> same id
     assert game_from_pgn(plain.pgn, "coachme").id == plain.id  # type: ignore[union-attr]
 

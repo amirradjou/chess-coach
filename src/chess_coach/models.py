@@ -79,6 +79,11 @@ class Game:
         return "unknown"
 
     @property
+    def opening_family(self) -> str | None:
+        """The part of the opening name before the colon, for grouping across variations."""
+        return self.opening.split(":", 1)[0].strip() if self.opening else None
+
+    @property
     def user_elo(self) -> int | None:
         return self.white_elo if self.user_color is Color.WHITE else self.black_elo
 
