@@ -76,6 +76,13 @@ def test_analyze_game_flags_the_blunder_from_the_movers_side(
     final = facts[-1]
     assert final.san == "dxe5" and final.mate_after == -1
     assert final.wp_after == 0.0
+    assert "allowed_mate" in final.motifs and "back_rank" in final.motifs
+    # 17...Qxe6 hangs the queen to Rxe6; 22.Qxc6?? grabs a pawn and hangs the queen to bxc6;
+    # 22...Rxe5 failed to punish it
+    assert "hanging_piece" in blunder.motifs
+    assert {"hanging_piece", "pawn_grab"} <= set(qxc6.motifs)
+    rxe5 = next(f for f in facts if f.san == "Rxe5")
+    assert "missed_tactic" in rxe5.motifs
     # progress callback sees every ply
     seen: list[int] = []
     analyze_game(qgd, engine, depth=4, on_ply=lambda i, n: seen.append(i))

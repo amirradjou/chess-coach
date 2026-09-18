@@ -9,9 +9,11 @@ import chess
 import chess.pgn
 
 from chess_coach.engine.evaluation import cp_loss, judge, win_probability
+from chess_coach.engine.motifs import MoveContext, tag_motifs
 from chess_coach.engine.phases import phase_of
 from chess_coach.engine.stockfish import Engine, LineEval
 from chess_coach.models import Color, Game, Judgement, MoveFact, Phase
+from chess_coach.sources.pgn import parse_time_control
 
 PV_PLIES = 6
 
@@ -47,6 +49,8 @@ def analyze_game(
         if on_ply:
             on_ply(index + 1, total)
 
+    time_control = parse_time_control(game.time_control)
+    initial_time = time_control[0] if time_control else None
     facts: list[MoveFact] = []
     phase = Phase.OPENING
     for index, node in enumerate(nodes):
@@ -67,31 +71,45 @@ def analyze_game(
             wp_after=wp_after,
             forced=before.legal_moves.count() == 1,
         )
-        facts.append(
-            MoveFact(
-                game_id=game.id,
-                ply=index + 1,
-                move_number=before.fullmove_number,
-                color=mover,
-                is_user=mover is game.user_color,
-                san=before.san(node.move),
-                uci=node.move.uci(),
-                fen_before=before.fen(),
-                eval_before=best.cp,
-                eval_after=eval_after,
-                best_move=best_move_uci,
-                best_san=before.san(best.move) if best.move else before.san(node.move),
-                cp_loss=0 if judgement is Judgement.BEST else cp_loss(best.cp, eval_after),
-                wp_before=wp_before,
-                wp_after=wp_after,
-                wp_loss=wp_loss,
-                judgement=judgement,
-                phase=phase,
-                depth=depth,
-                mate_before=best.mate,
-                mate_after=mate_after,
-                pv=_pv_san(before, best.pv),
-                clock_after=node.clock(),
+        fact = MoveFact(
+            game_id=game.id,
+            ply=index + 1,
+            move_number=before.fullmove_number,
+            color=mover,
+            is_user=mover is game.user_color,
+            san=before.san(node.move),
+            uci=node.move.uci(),
+            fen_before=before.fen(),
+            eval_before=best.cp,
+            eval_after=eval_after,
+            best_move=best_move_uci,
+            best_san=before.san(best.move) if best.move else before.san(node.move),
+            cp_loss=0 if judgement is Judgement.BEST else cp_loss(best.cp, eval_after),
+            wp_before=wp_before,
+            wp_after=wp_after,
+            wp_loss=wp_loss,
+            judgement=judgement,
+            phase=phase,
+            depth=depth,
+            mate_before=best.mate,
+            mate_after=mate_after,
+            pv=_pv_san(before, best.pv),
+            clock_after=node.clock(),
+        )
+        reply = evals[index + 1]
+        fact.motifs = tag_motifs(
+            MoveContext(
+                fact=fact,
+                board_before=before,
+                move=node.move,
+                board_after=boards[index + 1],
+                best_move=best.move,
+                best_pv=best.pv,
+                best_reply=reply.move,
+                reply_pv=reply.pv,
+                previous=facts[-1] if facts else None,
+                initial_time=initial_time,
             )
         )
+        facts.append(fact)
     return facts
