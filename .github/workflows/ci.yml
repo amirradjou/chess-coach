@@ -7,13 +7,23 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # Engine tests assert specific judgements, which shift between Stockfish
+      # versions (apt ships 16), so CI uses the same pinned build as local dev.
+      STOCKFISH_VERSION: sf_19
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+      - uses: actions/cache@v4
+        id: stockfish
+        with:
+          path: .stockfish
+          key: stockfish-${{ runner.os }}-${{ env.STOCKFISH_VERSION }}
       - name: Install Stockfish
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq stockfish
+        if: steps.stockfish.outputs.cache-hit != 'true'
+        run: scripts/get-stockfish.sh "$STOCKFISH_VERSION"
       - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
