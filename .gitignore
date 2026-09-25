@@ -32,7 +32,8 @@ htmlcov/
 
 # chess-coach
 .stockfish/
-data/
+# local databases only; tests/data and src/chess_coach/data are committed
+/data/
 *.db
 *.db-wal
 *.db-shm
