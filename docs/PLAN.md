@@ -31,7 +31,19 @@ table): `hanging_piece`/`hanging_pawn`, `allowed_fork`/`missed_fork`, `allowed_m
 all only on inaccuracies or worse; `queen_trade_behind` (development deficit ≥ 2) on any move.
 On `data/demo.db` 243 of 5,258 moves carry a tag.
 
-## v1 — pattern mining + digest (next branch: `v1-patterns-and-digest`)
+## v1 — pattern mining + digest (branch `v1-patterns-and-digest`)
+
+**Done (2026-10-29), no model:** `patterns/features.py` (move rows: phase, colour, speed,
+opening family, move bucket, clock bucket; game rows: colour, speed, opening, castling, queen
+trade behind), `patterns/mining.py` (singles and pairs; n ≥ 30 moves / 8 games; lift ≥ 1.5 for
+moves, 1.25 for losses because a loss rate starts near 50%; Wilson lower bound above baseline;
+pairs must be 1.2× each half; values on ≥ 90% of rows never pair; ranked by excess errors;
+worst-move evidence with Lichess ply links), `coach/digest.py` (template text, motif table
+with a practice line each) and `chess-coach digest`. Motif tags are reported as counts, not
+mined as slices: they are only set on errors, so their error rate is trivially high.
+
+**Left in v1:** the optional narrative below (`coach/llm.py`), verified against the evidence.
+
 
 - `patterns/features.py`: per-move feature table for the user's moves — phase, speed, colour,
   opening family, move bucket (1–10/11–20/21–30/31+), clock bucket, motif tags, result;

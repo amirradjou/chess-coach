@@ -64,14 +64,16 @@ table for opening names. Planned: a small web UI for digests and puzzle drills.
 ## Milestones
 
 - **v0 (done)** — import games, run engine analysis, store per-move facts with motif tags.
-- **v1** — pattern mining + first plain-language digest citing games.
+- **v1 (done, without a model)** — pattern mining + a plain-language digest citing games. The
+  optional model-written narrative (checked against the evidence) is next.
 - **v2** — puzzle generation and spaced repetition drills.
 - **v3** — weekly digests, opening study suggestions, progress tracking.
 
 ## Status
 
-**v0 done.** Next is v1, pattern mining and the digest; [docs/PLAN.md](docs/PLAN.md) has the
-build plan and how to pick the work up.
+**v1 done, without a model.** `digest` finds the situations where you go wrong more than usual
+and links every claim to the moves behind it; the optional model-written narrative is next.
+[docs/PLAN.md](docs/PLAN.md) has the build plan and how to pick the work up.
 
 - `import lichess|chesscom|pgn` stores games in SQLite with your colour, the speed (Lichess's
   rule) and the opening: Lichess's own header when it has one, otherwise the longest matching
@@ -81,6 +83,12 @@ build plan and how to pick the work up.
   loss, a Lichess-style judgement (inaccuracy, mistake, blunder), the game phase, the clock, and
   motif tags. It resumes where it stopped and re-runs only at a greater depth (or `--force`).
 - `stats` prints a per-game accuracy table and how often each motif shows up in your moves.
+- `digest` slices your moves by phase, colour, speed, opening, move number and clock (and
+  pairs of them), and your games by colour, speed, opening, castling and queen trades. It keeps a
+  slice only when it has enough moves (30) or games (8), your mistake rate (or loss rate) there
+  is well above your own (1.5×, or 1.25× for losses), and the low end of its 95% interval is
+  still above it. Each pattern cites its worst moves with links; then a motif table with one
+  thing to practise for each. All counted, no model, so it can't invent a pattern.
 
 Motif tags are computed in code from the board and the engine's facts, never by a model:
 
@@ -131,6 +139,7 @@ uv run chess-coach import pgn games.pgn --user "<your name in the PGN>"
 uv run chess-coach games                                         # what is stored
 uv run chess-coach analyze --depth 12 --threads 4
 uv run chess-coach stats
+uv run chess-coach digest -o digest.md                           # patterns across your games
 ```
 
 `--db <file>` picks another database (default `data/chess-coach.db`).
