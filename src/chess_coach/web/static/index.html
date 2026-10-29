@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chess coach</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Chess coach</h1>
+    <p id="summary" class="muted">Loading your games…</p>
+    <nav>
+      <button data-tab="mistakes" class="on">What you get wrong</button>
+      <button data-tab="practice">Practice</button>
+      <button data-tab="openings">Your openings</button>
+      <button data-tab="progress">Progress</button>
+    </nav>
+  </header>
+  <main>
+    <section id="mistakes"></section>
+    <section id="practice" hidden>
+      <div class="toolbar">
+        <label>Practise <select id="tag"><option value="">everything due</option></select></label>
+        <span id="due" class="muted"></span>
+      </div>
+      <div class="drill">
+        <div id="board" class="board big"></div>
+        <div class="side">
+          <p id="prompt"></p>
+          <p id="feedback"></p>
+          <div class="buttons">
+            <button id="giveup">Show the answer</button>
+            <button id="next" hidden>Next puzzle</button>
+          </div>
+          <p class="muted small">Click the piece, then the square. The red arrow in the other tabs
+            is what you played; green is what to play instead.</p>
+        </div>
+      </div>
+    </section>
+    <section id="openings" hidden></section>
+    <section id="progress" hidden></section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
