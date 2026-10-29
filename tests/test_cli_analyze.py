@@ -43,6 +43,7 @@ def test_analyze_then_stats(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     assert "3 analyzed games" in result.output
     assert "chesscom:123456789" in result.output
     assert "best fxe6" in result.output or "best h6" in result.output
+    assert "Motifs on your" in result.output
 
 
 def test_analyze_without_engine_fails_cleanly(

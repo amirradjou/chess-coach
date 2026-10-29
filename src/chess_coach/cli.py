@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Annotated
@@ -152,10 +153,6 @@ def games(ctx: typer.Context, limit: int = 30) -> None:
     console.print(table)
 
 
-if __name__ == "__main__":
-    app()
-
-
 @app.command()
 def analyze(
     ctx: typer.Context,
@@ -248,3 +245,19 @@ def stats(ctx: typer.Context) -> None:
             f"(-{worst.wp_loss:.0f}%, best {worst.best_san})",
         )
     console.print(table)
+
+    own_moves = [m for m in moves if m.game_id in games_by_id]
+    motifs = Counter(tag for m in own_moves for tag in m.motifs)
+    if motifs:
+        summary = Table(title=f"Motifs on your {len(own_moves)} moves")
+        summary.add_column("motif")
+        summary.add_column("moves", justify="right")
+        summary.add_column("games", justify="right")
+        for tag, count in motifs.most_common():
+            games_with = len({m.game_id for m in own_moves if tag in m.motifs})
+            summary.add_row(tag, str(count), str(games_with))
+        console.print(summary)
+
+
+if __name__ == "__main__":
+    app()
