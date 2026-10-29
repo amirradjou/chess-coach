@@ -40,6 +40,10 @@ class Evidence:
     best_san: str
     wp_loss: float
     url: str | None
+    # For drawing the position: before the move, what was played, what the engine wanted.
+    fen: str = ""
+    uci: str = ""
+    best_uci: str = ""
 
     @property
     def move(self) -> str:
@@ -136,6 +140,9 @@ def _evidence(rows: Sequence[MoveRow], limit: int, errors_only: bool = True) -> 
             r.fact.best_san,
             r.fact.wp_loss,
             _ply_url(r.game.url, r.fact.ply),
+            r.fact.fen_before,
+            r.fact.uci,
+            r.fact.best_move,
         )
         for r in worst
     ]
@@ -186,7 +193,7 @@ class MotifCount:
     evidence: list[Evidence]
 
 
-def motif_counts(rows: Sequence[MoveRow], examples: int = 2) -> list[MotifCount]:
+def motif_counts(rows: Sequence[MoveRow], examples: int = 3) -> list[MotifCount]:
     """How often each motif tag shows up in the user's moves, most common first."""
     by_tag: dict[str, list[MoveRow]] = {}
     for r in rows:
@@ -206,3 +213,15 @@ def motif_counts(rows: Sequence[MoveRow], examples: int = 2) -> list[MotifCount]
 
 def baseline(rows: Sequence[MoveRow], flag: Callable[[MoveRow], bool] = lambda r: r.error) -> float:
     return sum(flag(r) for r in rows) / len(rows) if rows else 0.0
+
+
+def repeated_under_pressure(rows: Sequence[MoveRow]) -> list[MotifCount]:
+    """Motifs among moves played short on time that keep happening (REPEAT_MOVES moves across
+    REPEAT_GAMES games). time_trouble itself is left out: every rushed mistake has it."""
+    from chess_coach.patterns.features import REPEAT_GAMES, REPEAT_MOVES
+
+    return [
+        m
+        for m in motif_counts([r for r in rows if r.error])
+        if m.tag != "time_trouble" and m.moves >= REPEAT_MOVES and m.games >= REPEAT_GAMES
+    ]

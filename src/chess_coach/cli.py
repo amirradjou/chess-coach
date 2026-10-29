@@ -331,9 +331,12 @@ def puzzles_make(
     limit: Annotated[int, typer.Option(help="How many candidate moves to check this run.")] = 50,
     depth: Annotated[int, typer.Option(help="Search depth for the check.")] = 18,
     threads: Annotated[int | None, typer.Option(help="Engine threads.")] = None,
+    openings: Annotated[
+        bool, typer.Option("--openings", help="Also drill the fixes in your favourite openings.")
+    ] = False,
 ) -> None:
     """Check your costliest moves (newest games first) and keep the ones with one clear answer."""
-    from chess_coach.puzzles.make import make
+    from chess_coach.puzzles.make import make, make_opening_fixes
 
     settings: Settings = ctx.obj
     with Store(settings.db_path) as store, _engine(settings, threads) as engine:
@@ -350,11 +353,29 @@ def puzzles_make(
                 progress.update(task, completed=done, total=total)
 
             result = make(store, engine, depth=depth, limit=limit, on_check=on_check)
+        if openings:
+            with console.status("Checking the fixes in your favourite openings..."):
+                fixes = make_opening_fixes(store, engine, depth=depth)
+            result.checked += fixes.checked
+            result.made += fixes.made
         total = len(store.puzzles())
     console.print(
         f"Checked {result.checked} moves, made [green]{result.made}[/green] puzzles "
         f"({total} in all). Practise with `chess-coach drill`."
     )
+
+
+@puzzles_app.command("prune")
+def puzzles_prune(ctx: typer.Context) -> None:
+    """Drop puzzles you haven't tried that came from moves made short on time (unless that
+    mistake keeps repeating)."""
+    from chess_coach.puzzles.make import prune_rushed
+
+    settings: Settings = ctx.obj
+    with Store(settings.db_path) as store:
+        removed = prune_rushed(store)
+        left = len(store.puzzles())
+    console.print(f"Removed {len(removed)} rushed puzzles; {left} left.")
 
 
 @puzzles_app.command("list")
@@ -436,7 +457,7 @@ def drill(
                         "That isn't a legal move here; try again (or ? to see the answer)."
                     )
                     continue
-                correct = move.uci() == p.solution
+                correct = p.is_right(move.uci())
                 break
             line = _san_line(board, p.solution, p.line)
             if correct:
@@ -537,6 +558,28 @@ def openings(
                 f"  You played {slip.move} in {slip.games} games; the engine prefers "
                 f"{slip.best}.{where}"
             )
+
+
+@app.command()
+def serve(
+    ctx: typer.Context,
+    port: Annotated[int, typer.Option(help="Port on localhost.")] = 8765,
+    host: Annotated[str, typer.Option(help="Interface to bind (keep it local).")] = "127.0.0.1",
+    open_browser: Annotated[bool, typer.Option("--open", help="Open it in the browser.")] = False,
+) -> None:
+    """The coach in your browser: your mistakes on boards, practice, your openings, progress."""
+    import webbrowser
+
+    import uvicorn
+
+    from chess_coach.web.app import create_app
+
+    settings: Settings = ctx.obj
+    url = f"http://{host}:{port}"
+    console.print(f"Chess coach on [bold]{url}[/bold] ({settings.db_path}). Ctrl+C to stop.")
+    if open_browser:
+        webbrowser.open(url)
+    uvicorn.run(create_app(settings.db_path), host=host, port=port, log_level="warning")
 
 
 if __name__ == "__main__":

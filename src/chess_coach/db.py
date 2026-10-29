@@ -77,7 +77,8 @@ CREATE TABLE IF NOT EXISTS puzzles (
     gap_cp       INTEGER NOT NULL,
     depth        INTEGER NOT NULL,
     tags         TEXT NOT NULL DEFAULT '[]',
-    created_at   TEXT NOT NULL
+    created_at   TEXT NOT NULL,
+    accept       TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS puzzle_checks (
@@ -122,6 +123,9 @@ class Store:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.executescript(SCHEMA)
+        columns = {r[1] for r in self.conn.execute("PRAGMA table_info(puzzles)")}
+        if "accept" not in columns:  # databases from before opening-fix drills
+            self.conn.execute("ALTER TABLE puzzles ADD COLUMN accept TEXT NOT NULL DEFAULT '[]'")
 
     def close(self) -> None:
         self.conn.close()
@@ -286,8 +290,8 @@ class Store:
                 """
                 INSERT OR REPLACE INTO puzzles (
                     id, game_id, ply, fen, solution, solution_san, played_san, line, gap_cp,
-                    depth, tags, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    depth, tags, created_at, accept
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     p.id,
@@ -302,6 +306,7 @@ class Store:
                     p.depth,
                     json.dumps(p.tags),
                     datetime.now(UTC).isoformat(),
+                    json.dumps(p.accept),
                 ),
             )
             self.conn.execute(
@@ -309,6 +314,10 @@ class Store:
                 "VALUES (?, ?, 0, 2.5, 0, 0)",
                 (p.id, datetime.now(UTC).date().isoformat()),
             )
+
+    def delete_puzzle(self, puzzle_id: str) -> None:
+        with self.conn:
+            self.conn.execute("DELETE FROM puzzles WHERE id = ?", (puzzle_id,))
 
     def puzzles(self, tag: str | None = None) -> list[Puzzle]:
         rows = self.conn.execute("SELECT * FROM puzzles ORDER BY created_at, id")
@@ -428,4 +437,5 @@ def _row_to_puzzle(row: sqlite3.Row) -> Puzzle:
         gap_cp=row["gap_cp"],
         depth=row["depth"],
         tags=json.loads(row["tags"]),
+        accept=json.loads(row["accept"]),
     )

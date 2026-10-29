@@ -7,11 +7,11 @@ invent a pattern.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from chess_coach.models import Game, MoveFact
-from chess_coach.patterns.features import game_rows, move_rows
+from chess_coach.patterns.features import game_rows, move_rows, rushed_rows
 from chess_coach.patterns.mining import (
     Evidence,
     MotifCount,
@@ -20,6 +20,7 @@ from chess_coach.patterns.mining import (
     mine_games,
     mine_moves,
     motif_counts,
+    repeated_under_pressure,
 )
 
 _FIXED: dict[str, dict[str, str]] = {
@@ -42,6 +43,20 @@ _FIXED: dict[str, dict[str, str]] = {
     },
     "queens": {
         "traded queens behind in development": "when you trade queens while behind in development"
+    },
+    "piece": {
+        "pawn": "with pawn moves",
+        "knight": "with your knights",
+        "bishop": "with your bishops",
+        "rook": "with your rooks",
+        "queen": "with your queen",
+        "king": "with your king",
+    },
+    "kind": {
+        "capture": "when you capture",
+        "check": "when you give check",
+        "castle": "when you castle",
+        "quiet": "with quiet moves",
     },
 }
 
@@ -130,6 +145,9 @@ class Digest:
     since: str | None = None
     before_error_rate: float | None = None
     before_acpl: float | None = None
+    # Moves played short on time are left out above; these are their mistakes that keep repeating.
+    rushed_moves: int = 0
+    pressure: list[MotifCount] = field(default_factory=list)
 
 
 def build(
@@ -149,6 +167,7 @@ def build(
         analysed = [g for g in analysed if g.played_at and g.played_at >= since]
     brows = move_rows(before, moves)
     mrows = move_rows(analysed, moves)
+    rrows = rushed_rows(analysed, moves)
     grows = game_rows(analysed, moves)
     dates = sorted(g.played_at for g in analysed if g.played_at)
     return Digest(
@@ -163,7 +182,8 @@ def build(
         decided=len(grows),
         move_patterns=mine_moves(mrows, min_moves, min_lift),
         game_patterns=mine_games(grows, min_games, game_lift),
-        motifs=motif_counts(mrows),
+        # Time trouble is what the short-on-time rule discounts; it has its own section below.
+        motifs=[m for m in motif_counts(mrows) if m.tag != "time_trouble"],
         min_moves=min_moves,
         min_games=min_games,
         min_lift=min_lift,
@@ -171,6 +191,8 @@ def build(
         since=since.strftime("%Y-%m-%d") if since else None,
         before_error_rate=baseline(brows) if brows else None,
         before_acpl=sum(r.fact.cp_loss for r in brows) / len(brows) if brows else None,
+        rushed_moves=len(rrows),
+        pressure=repeated_under_pressure(rrows),
     )
 
 
@@ -209,6 +231,11 @@ def render(d: Digest, top: int = 5) -> str:
             f" That is {trend} before {d.since}: {d.before_error_rate:.1%} of moves "
             f"(average centipawn loss {d.before_acpl:.0f})."
         )
+    if d.rushed_moves:
+        summary += (
+            f" {d.rushed_moves} moves played short on time (under 15 s in bullet, or under a "
+            "tenth of the clock) are left out, unless the same mistake keeps repeating."
+        )
     title = f"# Chess digest: {d.user or 'you'}" + (f", since {d.since}" if d.since else "")
     out = [title, "", summary, ""]
 
@@ -243,6 +270,19 @@ def render(d: Digest, top: int = 5) -> str:
             what, tip = MOTIFS.get(m.tag, (m.tag.replace("_", " "), ""))
             example = _move(m.evidence[0]) if m.evidence else ""
             out.append(f"| {what} | {m.moves} | {m.games} | {example} | {tip} |")
+        out.append("")
+
+    if d.pressure:
+        out += [
+            "## Short on time, but it keeps happening",
+            "",
+            "| What happens | Moves | Games | Worst example |",
+            "|---|---:|---:|---|",
+        ]
+        for m in d.pressure:
+            what, _ = MOTIFS.get(m.tag, (m.tag.replace("_", " "), ""))
+            example = _move(m.evidence[0]) if m.evidence else ""
+            out.append(f"| {what} | {m.moves} | {m.games} | {example} |")
         out.append("")
 
     out += [

@@ -15,6 +15,8 @@ import chess
 from chess_coach.db import Store
 from chess_coach.engine.stockfish import Engine
 from chess_coach.models import Game, MoveFact, Puzzle
+from chess_coach.patterns.features import rushed, rushed_rows
+from chess_coach.patterns.mining import repeated_under_pressure
 
 MIN_WP_LOSS = 20.0
 MIN_GAP_CP = 150
@@ -27,9 +29,15 @@ class MakeResult:
     made: int = 0
 
 
-def candidates(games: Iterable[Game], moves: Iterable[MoveFact], skip: set[str]) -> list[MoveFact]:
+def candidates(
+    games: Iterable[Game],
+    moves: Iterable[MoveFact],
+    skip: set[str],
+    repeated: frozenset[str] = frozenset(),
+) -> list[MoveFact]:
     """The user's costly moves not checked yet: newest games first, worst move first in a game."""
-    order = {g.id: (g.played_at.isoformat() if g.played_at else "") for g in games}
+    by_id = {g.id: g for g in games}
+    order = {g.id: (g.played_at.isoformat() if g.played_at else "") for g in by_id.values()}
     picked = [
         m
         for m in moves
@@ -37,8 +45,18 @@ def candidates(games: Iterable[Game], moves: Iterable[MoveFact], skip: set[str])
         and m.wp_loss >= MIN_WP_LOSS
         and m.game_id in order
         and f"{m.game_id}:{m.ply}" not in skip
+        and keep(m, by_id[m.game_id], repeated)
     ]
     return sorted(picked, key=lambda m: (order[m.game_id], m.wp_loss), reverse=True)
+
+
+def keep(m: MoveFact, game: Game, repeated: frozenset[str]) -> bool:
+    """A mistake made short on time is only worth a puzzle when it's one you keep repeating."""
+    return not rushed(m, game) or any(tag in repeated for tag in m.motifs)
+
+
+def repeated_tags(games: Iterable[Game], moves: Iterable[MoveFact]) -> frozenset[str]:
+    return frozenset(m.tag for m in repeated_under_pressure(rushed_rows(games, moves)))
 
 
 def verify(engine: Engine, m: MoveFact, depth: int = VERIFY_DEPTH) -> Puzzle | None:
@@ -87,7 +105,8 @@ def make(
 ) -> MakeResult:
     """Check up to `limit` new candidates and store the ones that make good puzzles."""
     games = [g for g in store.iter_games() if g.analyzed_depth]
-    todo = candidates(games, store.iter_moves(user_only=True), store.checked_moves())[:limit]
+    moves = list(store.iter_moves(user_only=True))
+    todo = candidates(games, moves, store.checked_moves(), repeated_tags(games, moves))[:limit]
     result = MakeResult()
     for i, m in enumerate(todo, 1):
         puzzle = verify(engine, m, depth)
@@ -99,3 +118,76 @@ def make(
         if on_check:
             on_check(i, len(todo))
     return result
+
+
+FIX_MARGIN_CP = 30  # opening fixes: any move this close to the best also counts
+
+
+def verify_fix(engine: Engine, fix, family: str, depth: int = VERIFY_DEPTH) -> Puzzle | None:
+    """A drill for an opening fix: find a better move than your habitual one. Every move within
+    30 cp of the best counts; None when, searched deeper, your habit is fine after all."""
+    board = chess.Board(fix.fen)
+    lines = engine.evaluate(board, depth=depth, multipv=4)
+    best = lines[0]
+    if best.move is None:
+        return None
+    good = [ln.move for ln in lines if ln.move is not None and best.cp - ln.cp <= FIX_MARGIN_CP]
+    habit = chess.Move.from_uci(fix.played_uci)
+    if habit in good:
+        return None
+    game_id, ply, _ = fix.games[0]
+    return Puzzle(
+        id=f"{game_id}:{ply}",
+        game_id=game_id,
+        ply=ply,
+        fen=fix.fen,
+        solution=best.move.uci(),
+        solution_san=board.san(best.move),
+        played_san=fix.played_san,
+        line=" ".join(mv.uci() for mv in best.pv[1:8]),
+        gap_cp=round(fix.avg_cp_loss),
+        depth=depth,
+        tags=["opening-fix", family],
+        accept=[m.uci() for m in good if m != best.move],
+    )
+
+
+def make_opening_fixes(store: Store, engine: Engine, *, depth: int = VERIFY_DEPTH) -> MakeResult:
+    """Drills for the fixes in your favourite openings (see coach.repertoire), checked once each."""
+    from chess_coach.coach.repertoire import favorites
+
+    games = list(store.iter_games())
+    moves = list(store.iter_moves(user_only=True))
+    done = store.checked_moves()
+    result = MakeResult()
+    for favs in favorites(games, moves).values():
+        for fav in favs:
+            for fix in fav.fixes:
+                key = f"fix:{fix.fen}:{fix.played_uci}"
+                if key in done:
+                    continue
+                puzzle = verify_fix(engine, fix, fav.family, depth)
+                if puzzle is not None:
+                    store.add_puzzle(puzzle)
+                    result.made += 1
+                store.record_check(key, puzzle is not None)
+                result.checked += 1
+    return result
+
+
+def prune_rushed(store: Store) -> list[str]:
+    """Remove puzzles never attempted that came from a move made short on time and not repeated
+    often enough to count. Returns the removed ids."""
+    games = {g.id: g for g in store.iter_games()}
+    moves = {(m.game_id, m.ply): m for m in store.iter_moves(user_only=True)}
+    repeated = repeated_tags(games.values(), moves.values())
+    tried = {pid for pid, _, _ in store.attempts()}
+    removed = []
+    for p in store.puzzles():
+        m = moves.get((p.game_id, p.ply))
+        if p.id in tried or "opening-fix" in p.tags or m is None or p.game_id not in games:
+            continue
+        if not keep(m, games[p.game_id], repeated):
+            store.delete_puzzle(p.id)
+            removed.append(p.id)
+    return removed

@@ -137,6 +137,11 @@ class Puzzle:
     gap_cp: int  # how much better the solution is than the second-best move
     depth: int
     tags: list[str] = field(default_factory=list)
+    # Other moves that also count as right (opening fixes, where several moves are fine), UCI.
+    accept: list[str] = field(default_factory=list)
+
+    def is_right(self, uci: str) -> bool:
+        return uci == self.solution or uci in self.accept
 
 
 @dataclass(slots=True)

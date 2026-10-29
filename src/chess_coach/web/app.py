@@ -1,0 +1,280 @@
+"""A small local web app over the same database: what you get wrong (with boards), practice,
+and your openings. Run it with `chess-coach serve`; it binds to localhost and needs no account or
+key."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from importlib import resources
+from pathlib import Path
+
+import chess
+import chess.svg
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse, Response
+from pydantic import BaseModel
+
+from chess_coach.coach.digest import build
+from chess_coach.coach.habits import (
+    Habit,
+    from_motifs,
+    from_patterns,
+    from_pressure,
+    missed_kinds,
+)
+from chess_coach.coach.progress import periods, solve_rates
+from chess_coach.coach.repertoire import Favorite, Fix, favorites
+from chess_coach.db import Store
+from chess_coach.patterns.features import move_rows
+from chess_coach.patterns.mining import Evidence
+from chess_coach.puzzles.srs import schedule
+
+PLAYED = "#d1495b"  # your move
+BETTER = "#2a9d8f"  # the engine's move
+TRIED = "#3d5a80"  # your answer in practice
+
+
+def board_svg(fen: str, arrows: list[tuple[str, str]] = (), size: int = 320) -> str:
+    """The position from the side to move, with (uci, colour) arrows."""
+    board = chess.Board(fen)
+    drawn = []
+    for uci, color in arrows:
+        if uci and len(uci) >= 4:
+            move = chess.Move.from_uci(uci)
+            drawn.append(chess.svg.Arrow(move.from_square, move.to_square, color=color))
+    return chess.svg.board(board, orientation=board.turn, arrows=drawn, size=size)
+
+
+def _example(e: Evidence) -> dict:
+    return {
+        "svg": board_svg(e.fen, [(e.uci, PLAYED), (e.best_uci, BETTER)]) if e.fen else "",
+        "move": e.move,
+        "best": e.best_san,
+        "loss": round(e.wp_loss),
+        "url": e.url,
+    }
+
+
+def _habit(h: Habit) -> dict:
+    return {
+        "title": h.title,
+        "detail": h.detail,
+        "lesson": h.lesson,
+        "mistakes": h.mistakes,
+        "games": h.games,
+        "practice": h.practice,
+        "examples": [_example(e) for e in h.examples],
+    }
+
+
+def _fix(f: Fix) -> dict:
+    return {
+        "svg": board_svg(f.fen, [(f.played_uci, PLAYED), (f.best_uci, BETTER)]),
+        "move": f.move,
+        "best": f.best_san,
+        "times": f.times,
+        "loss_cp": round(f.avg_cp_loss),
+        "urls": [url for _, _, url in f.games if url],
+    }
+
+
+def _favorite(f: Favorite) -> dict:
+    return {
+        "family": f.family,
+        "color": f.color,
+        "games": f.games,
+        "wins": f.wins,
+        "draws": f.draws,
+        "losses": f.losses,
+        "score": round(f.score * 100),
+        "names": [{"name": n, "games": c} for n, c in f.names],
+        "line": f.line,
+        "book": f.book,
+        "opening_error_rate": round(f.opening_error_rate * 100, 1),
+        "fixes": [_fix(x) for x in f.fixes],
+    }
+
+
+class Answer(BaseModel):
+    id: str
+    uci: str  # "?" gives up
+
+
+def create_app(db_path: Path) -> FastAPI:
+    app = FastAPI(title="chess-coach", docs_url=None, redoc_url=None)
+    cache: dict[str, tuple[tuple[int, int], dict]] = {}
+
+    def data(store: Store):
+        games = list(store.iter_games())
+        moves = list(store.iter_moves(user_only=True))
+        return games, moves, (sum(1 for g in games if g.analyzed_depth), len(moves))
+
+    def cached(name: str, key: tuple[int, int], make) -> dict:
+        if name in cache and cache[name][0] == key:
+            return cache[name][1]
+        value = make()
+        cache[name] = (key, value)
+        return value
+
+    @app.get("/", response_class=HTMLResponse)
+    def index() -> str:
+        return resources.files("chess_coach.web").joinpath("static/index.html").read_text()
+
+    @app.get("/static/{name}")
+    def static(name: str) -> Response:
+        types = {".js": "text/javascript", ".css": "text/css"}
+        suffix = Path(name).suffix
+        if suffix not in types or "/" in name:
+            raise HTTPException(404)
+        path = resources.files("chess_coach.web").joinpath(f"static/{name}")
+        if not path.is_file():
+            raise HTTPException(404)
+        return Response(path.read_text(), media_type=types[suffix])
+
+    @app.get("/api/overview")
+    def overview() -> dict:
+        with Store(db_path) as store:
+            games, moves, key = data(store)
+
+        def make() -> dict:
+            d = build(games, moves)
+            analysed = [g for g in games if g.analyzed_depth]
+            rows = move_rows(analysed, moves)
+            return {
+                "user": d.user,
+                "games": d.games,
+                "moves": d.moves,
+                "first": d.first,
+                "last": d.last,
+                "error_rate": round(d.error_rate * 100, 1),
+                "acpl": round(d.acpl),
+                "losses": d.losses,
+                "decided": d.decided,
+                "habits": [_habit(h) for h in missed_kinds(rows) + from_motifs(d.motifs)],
+                "situations": [_habit(h) for h in from_patterns(d.move_patterns)],
+                "pressure": [_habit(h) for h in from_pressure(d.pressure)],
+                "rushed_moves": d.rushed_moves,
+            }
+
+        return cached("overview", key, make)
+
+    @app.get("/api/openings")
+    def openings() -> dict:
+        with Store(db_path) as store:
+            games, moves, key = data(store)
+        return cached(
+            "openings",
+            key,
+            lambda: {c: [_favorite(f) for f in fs] for c, fs in favorites(games, moves).items()},
+        )
+
+    @app.get("/api/drill/next")
+    def drill_next(tag: str | None = None) -> dict:
+        today = datetime.now(UTC).date().isoformat()
+        with Store(db_path) as store:
+            due = store.due(today, tag, 1)
+            total_due = len(store.due(today, tag))
+            if not due:
+                return {"done": True, "puzzles": len(store.puzzles(tag))}
+            p = due[0]
+            game = store.get_game(p.game_id)
+        board = chess.Board(p.fen)
+        return {
+            "done": False,
+            "id": p.id,
+            "fen": p.fen,
+            "svg": board_svg(p.fen, size=400),
+            "side": "white" if board.turn == chess.WHITE else "black",
+            "played": p.played_san,
+            "tags": p.tags,
+            "due": total_due,
+            "opening_fix": "opening-fix" in p.tags,
+            "game": (game.url + f"#{p.ply}")
+            if game and game.url and "lichess" in game.url
+            else (game.url if game else None),
+        }
+
+    @app.post("/api/drill/answer")
+    def drill_answer(a: Answer) -> dict:
+        now = datetime.now(UTC)
+        with Store(db_path) as store:
+            puzzle = next((p for p in store.puzzles() if p.id == a.id), None)
+            review = store.review(a.id)
+            if puzzle is None or review is None:
+                raise HTTPException(404, "no such puzzle")
+            board = chess.Board(puzzle.fen)
+            tried = None
+            if a.uci != "?":
+                try:
+                    tried = chess.Move.from_uci(a.uci)
+                except ValueError as exc:
+                    raise HTTPException(400, "not a move") from exc
+                if tried not in board.legal_moves:
+                    promo = chess.Move(tried.from_square, tried.to_square, chess.QUEEN)
+                    if promo not in board.legal_moves:
+                        raise HTTPException(400, "not a legal move here")
+                    tried = promo
+            correct = tried is not None and puzzle.is_right(tried.uci())
+            after = schedule(review, correct, now.date())
+            store.save_attempt(after, a.uci, correct, now)
+        arrows = [(puzzle.solution, BETTER)]
+        if tried is not None and not correct:
+            arrows.append((tried.uci(), TRIED))
+        line, b = [], board.copy()
+        for uci in [puzzle.solution, *puzzle.line.split()]:
+            move = chess.Move.from_uci(uci)
+            if move not in b.legal_moves:
+                break
+            line.append(b.san(move))
+            b.push(move)
+        also = [board.san(chess.Move.from_uci(u)) for u in puzzle.accept]
+        return {
+            "correct": correct,
+            "answer": board.san(tried) if tried is not None else None,
+            "solution": puzzle.solution_san,
+            "also": also,
+            "line": " ".join(line),
+            "svg": board_svg(puzzle.fen, arrows, size=400),
+            "next_due": after.due,
+        }
+
+    @app.get("/api/drill/tags")
+    def drill_tags() -> list[dict]:
+        today = datetime.now(UTC).date().isoformat()
+        with Store(db_path) as store:
+            puzzles = store.puzzles()
+            due = {p.id for p in store.due(today)}
+        counts: dict[str, list[int]] = {}
+        for p in puzzles:
+            for t in p.tags:
+                c = counts.setdefault(t, [0, 0])
+                c[0] += 1
+                c[1] += p.id in due
+        return [
+            {"tag": t, "puzzles": n, "due": d}
+            for t, (n, d) in sorted(counts.items(), key=lambda kv: -kv[1][0])
+        ]
+
+    @app.get("/api/progress")
+    def progress(by: str = "month") -> dict:
+        with Store(db_path) as store:
+            games, moves, _ = data(store)
+            overall, tags = solve_rates(store.puzzles(), store.attempts())
+        return {
+            "periods": [
+                {
+                    "label": p.label,
+                    "games": p.games,
+                    "score": round(p.score * 100),
+                    "error_rate": round(p.error_rate * 100, 1),
+                    "acpl": round(p.acpl),
+                }
+                for p in periods(games, moves, by)
+            ],
+            "puzzles": {"attempts": overall.attempts, "solved": overall.solved},
+            "tags": [
+                {"tag": t.name, "attempts": t.attempts, "rate": round(t.rate * 100)} for t in tags
+            ],
+        }
+
+    return app

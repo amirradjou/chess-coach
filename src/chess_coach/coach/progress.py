@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from chess_coach.models import Game, MoveFact, Puzzle
-from chess_coach.patterns.features import ERRORS
+from chess_coach.patterns.features import ERRORS, rushed
 
 
 @dataclass(slots=True)
@@ -56,7 +56,7 @@ def periods(
         p.points += {"win": 1.0, "draw": 0.5}.get(g.user_result, 0.0)
     for m in moves:
         g = chosen.get(m.game_id)
-        if g is None or not m.is_user:
+        if g is None or not m.is_user or rushed(m, g):  # short on time: see features.rushed
             continue
         p = rows[_label(g.played_at, by)]
         p.moves += 1
