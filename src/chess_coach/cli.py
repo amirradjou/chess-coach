@@ -259,5 +259,30 @@ def stats(ctx: typer.Context) -> None:
         console.print(summary)
 
 
+@app.command()
+def digest(
+    ctx: typer.Context,
+    out: Annotated[
+        Path | None, typer.Option("--out", "-o", help="Write the Markdown here instead of stdout.")
+    ] = None,
+    top: Annotated[int, typer.Option(help="How many patterns per section.")] = 5,
+    min_moves: Annotated[int, typer.Option(help="Smallest move slice worth reporting.")] = 30,
+    min_games: Annotated[int, typer.Option(help="Smallest game slice worth reporting.")] = 8,
+) -> None:
+    """Patterns across your analysed games: where you go wrong, with the moves behind each claim."""
+    from chess_coach.coach.digest import build, render
+
+    settings: Settings = ctx.obj
+    with Store(settings.db_path) as store:
+        games = list(store.iter_games())
+        moves = list(store.iter_moves(user_only=True))
+    text = render(build(games, moves, min_moves=min_moves, min_games=min_games), top=top)
+    if out is None:
+        typer.echo(text, nl=False)
+    else:
+        out.write_text(text, encoding="utf-8")
+        console.print(f"Wrote the digest -> [dim]{out}[/dim]")
+
+
 if __name__ == "__main__":
     app()
