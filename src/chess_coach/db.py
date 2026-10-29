@@ -8,7 +8,7 @@ from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
-from chess_coach.models import Color, Game, Judgement, MoveFact, Phase, Speed
+from chess_coach.models import Color, Game, Judgement, MoveFact, Phase, Puzzle, Review, Speed
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS games (
@@ -64,6 +64,43 @@ CREATE TABLE IF NOT EXISTS moves (
     PRIMARY KEY (game_id, ply)
 );
 CREATE INDEX IF NOT EXISTS moves_user_judgement ON moves (is_user, judgement);
+
+CREATE TABLE IF NOT EXISTS puzzles (
+    id           TEXT PRIMARY KEY,
+    game_id      TEXT NOT NULL REFERENCES games (id) ON DELETE CASCADE,
+    ply          INTEGER NOT NULL,
+    fen          TEXT NOT NULL,
+    solution     TEXT NOT NULL,
+    solution_san TEXT NOT NULL,
+    played_san   TEXT NOT NULL,
+    line         TEXT NOT NULL DEFAULT '',
+    gap_cp       INTEGER NOT NULL,
+    depth        INTEGER NOT NULL,
+    tags         TEXT NOT NULL DEFAULT '[]',
+    created_at   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS puzzle_checks (
+    move_id    TEXT PRIMARY KEY,  -- "<game_id>:<ply>"; a candidate checked once is not re-checked
+    accepted   INTEGER NOT NULL,
+    checked_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS reviews (
+    puzzle_id TEXT PRIMARY KEY REFERENCES puzzles (id) ON DELETE CASCADE,
+    due       TEXT NOT NULL,
+    interval  INTEGER NOT NULL,
+    ease      REAL NOT NULL,
+    reps      INTEGER NOT NULL,
+    lapses    INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS attempts (
+    puzzle_id TEXT NOT NULL REFERENCES puzzles (id) ON DELETE CASCADE,
+    at        TEXT NOT NULL,
+    answer    TEXT NOT NULL,
+    correct   INTEGER NOT NULL
+);
 """
 
 
@@ -229,6 +266,100 @@ class Store:
     def count_moves(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM moves").fetchone()[0]
 
+    # -- puzzles -----------------------------------------------------------------
+
+    def checked_moves(self) -> set[str]:
+        return {r[0] for r in self.conn.execute("SELECT move_id FROM puzzle_checks")}
+
+    def record_check(self, move_id: str, accepted: bool) -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO puzzle_checks (move_id, accepted, checked_at) "
+                "VALUES (?, ?, ?)",
+                (move_id, int(accepted), datetime.now(UTC).isoformat()),
+            )
+
+    def add_puzzle(self, p: Puzzle) -> None:
+        """Store a puzzle and schedule it for today."""
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT OR REPLACE INTO puzzles (
+                    id, game_id, ply, fen, solution, solution_san, played_san, line, gap_cp,
+                    depth, tags, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    p.id,
+                    p.game_id,
+                    p.ply,
+                    p.fen,
+                    p.solution,
+                    p.solution_san,
+                    p.played_san,
+                    p.line,
+                    p.gap_cp,
+                    p.depth,
+                    json.dumps(p.tags),
+                    datetime.now(UTC).isoformat(),
+                ),
+            )
+            self.conn.execute(
+                "INSERT OR IGNORE INTO reviews (puzzle_id, due, interval, ease, reps, lapses) "
+                "VALUES (?, ?, 0, 2.5, 0, 0)",
+                (p.id, datetime.now(UTC).date().isoformat()),
+            )
+
+    def puzzles(self, tag: str | None = None) -> list[Puzzle]:
+        rows = self.conn.execute("SELECT * FROM puzzles ORDER BY created_at, id")
+        out = [_row_to_puzzle(r) for r in rows]
+        return [p for p in out if tag is None or tag in p.tags]
+
+    def due(self, today: str, tag: str | None = None, limit: int | None = None) -> list[Puzzle]:
+        """Puzzles due on or before `today`, most overdue first."""
+        rows = self.conn.execute(
+            "SELECT p.* FROM puzzles p JOIN reviews r ON r.puzzle_id = p.id "
+            "WHERE r.due <= ? ORDER BY r.due, p.id",
+            (today,),
+        )
+        out = [p for p in (_row_to_puzzle(r) for r in rows) if tag is None or tag in p.tags]
+        return out[:limit] if limit is not None else out
+
+    def review(self, puzzle_id: str) -> Review | None:
+        row = self.conn.execute(
+            "SELECT * FROM reviews WHERE puzzle_id = ?", (puzzle_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return Review(
+            row["puzzle_id"], row["due"], row["interval"], row["ease"], row["reps"], row["lapses"]
+        )
+
+    def save_attempt(self, review: Review, answer: str, correct: bool, at: datetime) -> None:
+        """Record an attempt and the puzzle's new schedule together."""
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO attempts (puzzle_id, at, answer, correct) VALUES (?, ?, ?, ?)",
+                (review.puzzle_id, at.isoformat(), answer, int(correct)),
+            )
+            self.conn.execute(
+                "UPDATE reviews SET due = ?, interval = ?, ease = ?, reps = ?, lapses = ? "
+                "WHERE puzzle_id = ?",
+                (
+                    review.due,
+                    review.interval,
+                    review.ease,
+                    review.reps,
+                    review.lapses,
+                    review.puzzle_id,
+                ),
+            )
+
+    def attempts(self) -> list[tuple[str, str, bool]]:
+        """(puzzle_id, ISO time, correct) for every attempt, oldest first."""
+        rows = self.conn.execute("SELECT puzzle_id, at, correct FROM attempts ORDER BY at")
+        return [(r[0], r[1], bool(r[2])) for r in rows]
+
 
 def _row_to_game(row: sqlite3.Row) -> Game:
     return Game(
@@ -281,4 +412,20 @@ def _row_to_move(row: sqlite3.Row) -> MoveFact:
         pv=row["pv"],
         clock_after=row["clock_after"],
         motifs=json.loads(row["motifs"]),
+    )
+
+
+def _row_to_puzzle(row: sqlite3.Row) -> Puzzle:
+    return Puzzle(
+        id=row["id"],
+        game_id=row["game_id"],
+        ply=row["ply"],
+        fen=row["fen"],
+        solution=row["solution"],
+        solution_san=row["solution_san"],
+        played_san=row["played_san"],
+        line=row["line"],
+        gap_cp=row["gap_cp"],
+        depth=row["depth"],
+        tags=json.loads(row["tags"]),
     )

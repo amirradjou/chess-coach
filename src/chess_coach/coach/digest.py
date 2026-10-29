@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 
 from chess_coach.models import Game, MoveFact
 from chess_coach.patterns.features import game_rows, move_rows
@@ -125,6 +126,10 @@ class Digest:
     min_games: int
     min_lift: float
     game_lift: float
+    # With --since: the same rates over the games before that date, for comparison.
+    since: str | None = None
+    before_error_rate: float | None = None
+    before_acpl: float | None = None
 
 
 def build(
@@ -135,8 +140,14 @@ def build(
     min_games: int = 8,
     min_lift: float = 1.5,
     game_lift: float = 1.25,
+    since: datetime | None = None,
 ) -> Digest:
     analysed = [g for g in games if g.analyzed_depth]
+    before: list = []
+    if since is not None:
+        before = [g for g in analysed if g.played_at and g.played_at < since]
+        analysed = [g for g in analysed if g.played_at and g.played_at >= since]
+    brows = move_rows(before, moves)
     mrows = move_rows(analysed, moves)
     grows = game_rows(analysed, moves)
     dates = sorted(g.played_at for g in analysed if g.played_at)
@@ -157,6 +168,9 @@ def build(
         min_games=min_games,
         min_lift=min_lift,
         game_lift=game_lift,
+        since=since.strftime("%Y-%m-%d") if since else None,
+        before_error_rate=baseline(brows) if brows else None,
+        before_acpl=sum(r.fact.cp_loss for r in brows) / len(brows) if brows else None,
     )
 
 
@@ -186,7 +200,17 @@ def render(d: Digest, top: int = 5) -> str:
     )
     if d.decided:
         summary += f", and lost {d.losses} of {d.decided} games ({d.losses / d.decided:.0%})"
-    out = [f"# Chess digest: {d.user or 'you'}", "", summary + ".", ""]
+    summary += "."
+    if d.before_error_rate is not None and d.before_acpl is not None:
+        trend = "better than" if d.error_rate < d.before_error_rate else "worse than"
+        if abs(d.error_rate - d.before_error_rate) < 0.002:
+            trend = "about the same as"
+        summary += (
+            f" That is {trend} before {d.since}: {d.before_error_rate:.1%} of moves "
+            f"(average centipawn loss {d.before_acpl:.0f})."
+        )
+    title = f"# Chess digest: {d.user or 'you'}" + (f", since {d.since}" if d.since else "")
+    out = [title, "", summary, ""]
 
     out += ["## Where your moves go wrong", ""]
     if d.move_patterns:

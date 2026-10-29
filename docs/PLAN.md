@@ -60,13 +60,27 @@ mined as slices: they are only set on errors, so their error rate is trivially h
 - `coach/digest.py`: facts → prompt → narrative; verify every cited game id / move number exists
   in the evidence; drop or flag anything unverifiable. `digest` CLI command writes markdown.
 
-## v2 — puzzles + spaced repetition (`v2-puzzles-and-drills`)
+## v2 — puzzles + spaced repetition (done 2026-10-29, branch `v2-puzzles-and-progress`)
 
-- Candidates: user moves with `wp_loss` ≥ 20. Re-verify with multipv=3 at depth ≥ 18: ship only
-  if best beats second-best by ≥ 150 cp or is the only mate. Store `puzzles` + `reviews`
-  (SM-2). `drill` CLI: ASCII board, answer in SAN/UCI, schedule update. Tags from motifs.
+- Candidates: user moves with `wp_loss` ≥ 20, newest games first, each checked once
+  (`puzzle_checks`). Re-verified with multipv=3 at depth 18: kept only if the best move is the only
+  mate or beats the second-best by ≥ 150 cp, and differs from the move played. Tables `puzzles`,
+  `reviews` (SM-2: quality 4 for a solve, 1 for a miss) and `attempts`. `drill`: Unicode board from
+  the side to move, SAN or UCI, `?` gives up, three tries for an illegal entry. Tags = motifs +
+  phase (+ `mate`).
 
-## v3 — weekly digest, opening study line, progress tracking
+## v3 — weekly digest, opening study, progress (done 2026-10-29)
+
+- `digest --since` (weekly digest vs the games before), `progress` (month/week: games, score,
+  error rate, ACPL; puzzle solve rate overall and per tag), `openings` (worst-scoring families by
+  colour, book line from the vendored table, opening errors repeated in 2+ games).
+- v1's optional narrative: `coach/narrate.py`, OpenAI-compatible chat (presets ollama, openrouter);
+  sentences citing moves outside the evidence are dropped. No paid key by default.
+
+## Next
+
+- A small web page for the digest and drills (the owner's live-demo rule: no paid model key).
+- Rating trend against practice (Lichess rating history API), Chess.com ply links.
 
 ## Conventions that matter here
 

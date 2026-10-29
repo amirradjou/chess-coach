@@ -64,15 +64,16 @@ table for opening names. Planned: a small web UI for digests and puzzle drills.
 ## Milestones
 
 - **v0 (done)** — import games, run engine analysis, store per-move facts with motif tags.
-- **v1 (done, without a model)** — pattern mining + a plain-language digest citing games. The
-  optional model-written narrative (checked against the evidence) is next.
-- **v2** — puzzle generation and spaced repetition drills.
-- **v3** — weekly digests, opening study suggestions, progress tracking.
+- **v1 (done)** — pattern mining + a plain-language digest citing games, with an optional
+  model-written summary checked against the evidence.
+- **v2 (done)** — puzzle generation and spaced repetition drills.
+- **v3 (done)** — weekly digests, opening study suggestions, progress tracking.
+- **Later** — a small web page for the digest and the drills; rating trend against practice.
 
 ## Status
 
-**v1 done, without a model.** `digest` finds the situations where you go wrong more than usual
-and links every claim to the moves behind it; the optional model-written narrative is next.
+**v0–v3 done.** The whole loop runs from the command line: import, analyse, find your patterns,
+turn your own mistakes into puzzles, drill them on a schedule, and watch the numbers move.
 [docs/PLAN.md](docs/PLAN.md) has the build plan and how to pick the work up.
 
 - `import lichess|chesscom|pgn` stores games in SQLite with your colour, the speed (Lichess's
@@ -89,6 +90,22 @@ and links every claim to the moves behind it; the optional model-written narrati
   is well above your own (1.5×, or 1.25× for losses), and the low end of its 95% interval is
   still above it. Each pattern cites its worst moves with links; then a motif table with one
   thing to practise for each. All counted, no model, so it can't invent a pattern.
+- `digest --since 7d` is the weekly digest: only those games, compared with the ones before.
+  `digest --narrate ollama` adds a short summary from a local model (free); `--narrate
+  openrouter --model …` uses any OpenAI-compatible server with `OPENROUTER_API_KEY`. The model
+  only explains: any sentence that cites a move outside the evidence is removed. It checks moves,
+  not every word, so read it as a gloss on the counted patterns above it.
+- `puzzles make` re-checks your costliest moves (20+ points of win probability lost) at depth 18
+  with three lines, and keeps a position only when one move is the only mate or beats the next
+  best by 150 centipawns, so there is one answer to find. `puzzles list` shows them with their
+  motif tags.
+- `drill` shows each due puzzle as a board from your side, takes your answer in SAN or UCI,
+  shows the engine's line, and schedules the puzzle with SM-2: solved ones come back later and
+  later, missed ones tomorrow. Every attempt is kept.
+- `progress --by month|week [--speed blitz]` shows your games, score, mistake rate and centipawn
+  loss over time, and your puzzle solve rate overall and per tag.
+- `openings` lists the openings you score worst in (by your colour), the book line for the one
+  you play most, and the opening mistakes you have repeated in more than one game.
 
 Motif tags are computed in code from the board and the engine's facts, never by a model:
 
@@ -140,7 +157,14 @@ uv run chess-coach games                                         # what is store
 uv run chess-coach analyze --depth 12 --threads 4
 uv run chess-coach stats
 uv run chess-coach digest -o digest.md                           # patterns across your games
+uv run chess-coach digest --since 7d                             # this week vs before
+uv run chess-coach puzzles make --limit 50                       # your mistakes as puzzles
+uv run chess-coach drill                                         # practise what is due
+uv run chess-coach progress --by week
+uv run chess-coach openings
 ```
+
+`analyze --newest` starts with your latest games, so a big import is useful early.
 
 `--db <file>` picks another database (default `data/chess-coach.db`).
 

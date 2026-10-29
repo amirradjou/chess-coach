@@ -70,3 +70,20 @@ def classify_pgn(pgn_text: str) -> Opening | None:
 
 def family_of(name: str | None) -> str | None:
     return Opening(eco="", name=name).family if name else None
+
+
+@lru_cache(maxsize=1)
+def _lines_by_name() -> dict[str, str]:
+    text = resources.files("chess_coach.data").joinpath("openings.tsv").read_text(encoding="utf-8")
+    out: dict[str, str] = {}
+    for line in text.splitlines():
+        if not line or line.startswith("#") or line.startswith("eco\t"):
+            continue
+        _, name, pgn = line.split("\t", 2)
+        out.setdefault(name, pgn)
+    return out
+
+
+def book_line(name: str) -> str | None:
+    """The table's move sequence for an exact opening name, e.g. '1. e4 e5 2. Nf3 Nc6 3. Bc4'."""
+    return _lines_by_name().get(name)
