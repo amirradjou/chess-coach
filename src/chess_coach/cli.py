@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Annotated
 
+import httpx
 import typer
 from rich.console import Console
 from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
@@ -21,6 +22,8 @@ from chess_coach.util import parse_since
 app = typer.Typer(no_args_is_help=True)
 import_app = typer.Typer(no_args_is_help=True, help="Pull games into the local database.")
 app.add_typer(import_app, name="import")
+puzzles_app = typer.Typer(no_args_is_help=True, help="Puzzles from your own mistakes.")
+app.add_typer(puzzles_app, name="puzzles")
 console = Console()
 
 SinceOption = Annotated[
@@ -162,6 +165,9 @@ def analyze(
     force: Annotated[
         bool, typer.Option("--force", help="Re-analyze games that are already analyzed.")
     ] = False,
+    newest: Annotated[
+        bool, typer.Option("--newest", help="Start with the most recent games (default: oldest).")
+    ] = False,
 ) -> None:
     """Run Stockfish over every game not yet analyzed at this depth and store per-move facts."""
     from chess_coach.engine.analysis import analyze_game
@@ -171,6 +177,8 @@ def analyze(
     depth = depth or settings.analysis_depth
     with Store(settings.db_path) as store:
         pending = list(store.iter_games(unanalyzed_below_depth=None if force else depth))
+        if newest:
+            pending.reverse()
         if limit is not None:
             pending = pending[:limit]
         if not pending:
@@ -268,20 +276,267 @@ def digest(
     top: Annotated[int, typer.Option(help="How many patterns per section.")] = 5,
     min_moves: Annotated[int, typer.Option(help="Smallest move slice worth reporting.")] = 30,
     min_games: Annotated[int, typer.Option(help="Smallest game slice worth reporting.")] = 8,
+    since: SinceOption = None,
+    narrate: Annotated[
+        str | None,
+        typer.Option(help="Add a plain-language summary by a model: ollama (local) or openrouter."),
+    ] = None,
+    model: Annotated[str | None, typer.Option(help="Model for --narrate.")] = None,
 ) -> None:
-    """Patterns across your analysed games: where you go wrong, with the moves behind each claim."""
+    """Patterns across your analysed games: where you go wrong, with the moves behind each claim.
+
+    With --since (e.g. 7d for a weekly digest) only those games count, compared with the ones
+    before."""
     from chess_coach.coach.digest import build, render
 
     settings: Settings = ctx.obj
     with Store(settings.db_path) as store:
         games = list(store.iter_games())
         moves = list(store.iter_moves(user_only=True))
-    text = render(build(games, moves, min_moves=min_moves, min_games=min_games), top=top)
+    built = build(games, moves, min_moves=min_moves, min_games=min_games, since=parse_since(since))
+    text = render(built, top=top)
+    if narrate:
+        from chess_coach.coach.narrate import model_for
+        from chess_coach.coach.narrate import narrate as write_summary
+
+        try:
+            with console.status(f"Asking {narrate} for a summary..."):
+                text += "\n" + write_summary(built, model_for(narrate, model))
+        except (ValueError, RuntimeError, httpx.HTTPError) as exc:
+            console.print(f"[yellow]No summary: {exc}[/yellow]")
     if out is None:
         typer.echo(text, nl=False)
     else:
         out.write_text(text, encoding="utf-8")
         console.print(f"Wrote the digest -> [dim]{out}[/dim]")
+
+
+def _engine(settings: Settings, threads: int | None):
+    from chess_coach.engine.stockfish import Engine, EngineNotFoundError
+
+    try:
+        return Engine(
+            settings.stockfish_path,
+            threads=threads or settings.engine_threads,
+            hash_mb=settings.engine_hash_mb,
+        )
+    except EngineNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+
+@puzzles_app.command("make")
+def puzzles_make(
+    ctx: typer.Context,
+    limit: Annotated[int, typer.Option(help="How many candidate moves to check this run.")] = 50,
+    depth: Annotated[int, typer.Option(help="Search depth for the check.")] = 18,
+    threads: Annotated[int | None, typer.Option(help="Engine threads.")] = None,
+) -> None:
+    """Check your costliest moves (newest games first) and keep the ones with one clear answer."""
+    from chess_coach.puzzles.make import make
+
+    settings: Settings = ctx.obj
+    with Store(settings.db_path) as store, _engine(settings, threads) as engine:
+        progress = Progress(
+            TextColumn("checking"),
+            BarColumn(),
+            TextColumn("{task.completed}/{task.total}"),
+            console=console,
+        )
+        with progress:
+            task = progress.add_task("check", total=limit)
+
+            def on_check(done: int, total: int) -> None:
+                progress.update(task, completed=done, total=total)
+
+            result = make(store, engine, depth=depth, limit=limit, on_check=on_check)
+        total = len(store.puzzles())
+    console.print(
+        f"Checked {result.checked} moves, made [green]{result.made}[/green] puzzles "
+        f"({total} in all). Practise with `chess-coach drill`."
+    )
+
+
+@puzzles_app.command("list")
+def puzzles_list(
+    ctx: typer.Context,
+    tag: Annotated[str | None, typer.Option(help="Only puzzles with this tag.")] = None,
+) -> None:
+    """Your puzzles, with their tags and when each is due."""
+    settings: Settings = ctx.obj
+    with Store(settings.db_path) as store:
+        puzzles = store.puzzles(tag)
+        due = {p.id: r.due for p in puzzles if (r := store.review(p.id))}
+    table = Table(title=f"{len(puzzles)} puzzles")
+    for column in ("puzzle", "you played", "answer", "tags", "due"):
+        table.add_column(column)
+    for p in puzzles:
+        table.add_row(p.id, p.played_san, p.solution_san, ", ".join(p.tags), due.get(p.id, "-"))
+    console.print(table)
+
+
+def _board_text(fen: str) -> str:
+    import chess
+
+    board = chess.Board(fen)
+    return board.unicode(empty_square="·", orientation=board.turn)
+
+
+@app.command()
+def drill(
+    ctx: typer.Context,
+    count: Annotated[int, typer.Option("--count", "-n", help="Puzzles this session.")] = 10,
+    tag: Annotated[str | None, typer.Option(help="Only puzzles with this tag.")] = None,
+) -> None:
+    """Practise the puzzles that are due. Answer in SAN (Nf3) or UCI (g1f3); ? shows the answer."""
+    from datetime import UTC, datetime
+
+    import chess
+
+    from chess_coach.puzzles.srs import schedule
+
+    settings: Settings = ctx.obj
+    now = datetime.now(UTC)
+    with Store(settings.db_path) as store:
+        due = store.due(now.date().isoformat(), tag, count)
+        if not due:
+            console.print(
+                "Nothing due. Make more with `chess-coach puzzles make`, or come back tomorrow."
+            )
+            return
+        solved = 0
+        for i, p in enumerate(due, 1):
+            board = chess.Board(p.fen)
+            side = "White" if board.turn == chess.WHITE else "Black"
+            game = store.get_game(p.game_id)
+            console.print(
+                f"\n[bold]Puzzle {i} of {len(due)}[/bold]  ({side} to move; {', '.join(p.tags)})"
+            )
+            console.print(_board_text(p.fen))
+            console.print(f"In the game you played [red]{p.played_san}[/red]. Find the best move.")
+            answer = ""
+            correct = False
+            for _ in range(3):
+                answer = typer.prompt("Your move").strip()
+                if answer == "?":
+                    break
+                try:
+                    move = (
+                        chess.Move.from_uci(answer)
+                        if len(answer) in (4, 5) and answer[1].isdigit()
+                        else board.parse_san(answer)
+                    )
+                except ValueError:
+                    console.print(
+                        "That isn't a legal move here; try again (or ? to see the answer)."
+                    )
+                    continue
+                if move not in board.legal_moves:
+                    console.print(
+                        "That isn't a legal move here; try again (or ? to see the answer)."
+                    )
+                    continue
+                correct = move.uci() == p.solution
+                break
+            line = _san_line(board, p.solution, p.line)
+            if correct:
+                solved += 1
+                console.print(f"[green]Correct.[/green] {line}")
+            else:
+                console.print(f"[yellow]The move was {p.solution_san}.[/yellow] {line}")
+            review = store.review(p.id)
+            if review is not None:
+                after = schedule(review, correct, now.date())
+                store.save_attempt(after, answer, correct, now)
+                console.print(f"[dim]Next time: {after.due}.[/dim]")
+            if game is not None and game.url:
+                console.print(
+                    f"[dim]The game: {game.url}#{p.ply}[/dim]"
+                    if "lichess" in game.url
+                    else f"[dim]The game: {game.url}[/dim]"
+                )
+        console.print(f"\nSolved {solved} of {len(due)}.")
+
+
+def _san_line(board, solution: str, line: str) -> str:
+    import chess
+
+    b = board.copy()
+    sans = []
+    for uci in [solution, *line.split()]:
+        move = chess.Move.from_uci(uci)
+        if move not in b.legal_moves:
+            break
+        sans.append(b.san(move))
+        b.push(move)
+    return f"Line: {' '.join(sans)}" if sans else ""
+
+
+@app.command()
+def progress(
+    ctx: typer.Context,
+    by: Annotated[str, typer.Option(help="month or week")] = "month",
+    speed: Annotated[str | None, typer.Option(help="Only this speed, e.g. blitz.")] = None,
+) -> None:
+    """Your error rate, centipawn loss and score over time, and how your puzzle practice goes."""
+    from chess_coach.coach.progress import periods, solve_rates
+
+    settings: Settings = ctx.obj
+    with Store(settings.db_path) as store:
+        rows = periods(list(store.iter_games()), list(store.iter_moves(user_only=True)), by, speed)
+        overall, tags = solve_rates(store.puzzles(), store.attempts())
+    if not rows:
+        console.print("No analysed games yet. Run `chess-coach analyze` first.")
+        return
+    table = Table(title=f"Your games by {by}" + (f" ({speed})" if speed else ""))
+    for column in (by, "games", "score", "mistakes+blunders", "acpl"):
+        table.add_column(column, justify="left" if column == by else "right")
+    for r in rows:
+        table.add_row(
+            r.label, str(r.games), f"{r.score:.0%}", f"{r.error_rate:.1%}", f"{r.acpl:.0f}"
+        )
+    console.print(table)
+    if overall.attempts:
+        t = Table(
+            title=f"Puzzles: solved {overall.solved} of {overall.attempts} ({overall.rate:.0%})"
+        )
+        for column in ("tag", "attempts", "solved"):
+            t.add_column(column, justify="left" if column == "tag" else "right")
+        for r in tags:
+            t.add_row(r.name, str(r.attempts), f"{r.rate:.0%}")
+        console.print(t)
+
+
+@app.command()
+def openings(
+    ctx: typer.Context,
+    min_games: Annotated[int, typer.Option(help="Smallest number of games per opening.")] = 5,
+    top: Annotated[int, typer.Option(help="How many openings to show.")] = 3,
+) -> None:
+    """The openings you score worst in, the book line, and the slips you repeat in them."""
+    from chess_coach.coach.study import openings as opening_stats
+
+    settings: Settings = ctx.obj
+    with Store(settings.db_path) as store:
+        stats = opening_stats(
+            list(store.iter_games()), list(store.iter_moves(user_only=True)), min_games
+        )
+    if not stats:
+        console.print(f"No opening has {min_games} analysed games yet.")
+        return
+    for o in stats[:top]:
+        console.print(
+            f"\n[bold]{o.family}[/bold] with {o.color.capitalize()}: {o.games} games, "
+            f"scored {o.score:.0%} ({o.wins} won, {o.draws} drawn, {o.losses} lost)"
+        )
+        if o.book:
+            console.print(f"  Book line ({o.name}): {o.book}")
+        for slip in o.slips:
+            where = f" e.g. {slip.example_url}" if slip.example_url else ""
+            console.print(
+                f"  You played {slip.move} in {slip.games} games; the engine prefers "
+                f"{slip.best}.{where}"
+            )
 
 
 if __name__ == "__main__":
