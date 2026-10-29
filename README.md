@@ -15,6 +15,14 @@ plain language, and trains you on exactly those spots.
   repetition so the ones you keep failing come back.
 - Weekly digest: what changed, what to work on next, one opening line to study.
 
+`chess-coach serve` on the author's own Lichess games: the mistakes you repeat, on your own
+positions (red arrow: what you played; green: what to play), and your openings with the habitual
+moves worth fixing.
+
+![What you get wrong](docs/screenshots/mistakes.png)
+
+![Your openings](docs/screenshots/openings.png)
+
 ## Why build it
 
 Because generic chess trainers don't know you, and a coach that says "here's the
@@ -23,22 +31,20 @@ because it is a satisfying shape of project: a hard, exact engine does the truth
 and the language model does the explaining — and you can check whether the explanation
 was right.
 
-## How it works (planned)
+## How it works
 
 ```
-Lichess / Chess.com APIs, PGN files ──► game store (PGN + metadata)          v0, built
+Lichess / Chess.com APIs, PGN files ──► game store (SQLite, on your machine)
         │
         ▼
-Stockfish analysis (eval swings, best lines, motifs) ──► per-move facts     v0, built
+Stockfish analysis ──► per-move facts: eval swing, best move and line, motifs, clock
         │
         ▼
-pattern mining (openings, phases, time controls, motif tags, eval-drop clusters)   v1
+pattern mining ──► the situations, moves and openings where you go wrong more than usual
         │
-        ▼
-language model: explain patterns in plain language, citing games/moves ──► digest  v1
-        │
-        ▼
-puzzle generator (your positions, engine-verified solutions) + spaced repetition   v2
+        ├──► digest (Markdown) and the web coach, every claim linked to your moves
+        ├──► optional plain-language summary by a model, checked against the evidence
+        └──► puzzles from your own mistakes (engine-verified) + spaced repetition drills
 ```
 
 - **The engine is the source of truth.** The model never judges a move; it explains
@@ -50,10 +56,19 @@ puzzle generator (your positions, engine-verified solutions) + spaced repetition
 
 ## What gets measured
 
-- Puzzle solve rate over time per weakness tag.
-- Rating trend vs. digest adoption (did the advice change anything?).
-- Explanation quality: a small hand-graded set of digests, scored for accuracy against
-  engine facts.
+- Your mistake rate, centipawn loss and score by month or week (`progress`), with moves made
+  short on time left out.
+- Puzzle solve rate per theme, from every attempt.
+- Not yet: rating trend against practice, and a hand-graded check of the model summaries
+  beyond the automatic move check.
+
+## Privacy
+
+Your games, analyses and puzzle history stay in a SQLite file in `data/` on your machine. The
+only network calls are the Lichess and Chess.com game exports (public APIs) and, if you ask for
+one, the model summary: `--narrate` sends the counted patterns and the cited moves to the model
+server you choose (a local Ollama by default), not the games themselves. `serve` binds to localhost and
+has no login, so keep it there.
 
 ## Stack
 
@@ -198,3 +213,9 @@ uv run chess-coach serve --open                                  # the coach in 
 uv run pytest                                   # tests (engine tests skip without Stockfish)
 uv run ruff check . && uv run ruff format .     # lint + format
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE). Stockfish is GPL-3.0 and is downloaded separately by
+`scripts/get-stockfish.sh`, not distributed here. The opening names come from
+[lichess-org/chess-openings](https://github.com/lichess-org/chess-openings) (CC0).

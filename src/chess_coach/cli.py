@@ -576,6 +576,11 @@ def serve(
 
     settings: Settings = ctx.obj
     url = f"http://{host}:{port}"
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        console.print(
+            f"[yellow]Warning: {host} exposes your games and lets anyone on the network record "
+            "puzzle attempts; there is no login. Prefer the default 127.0.0.1.[/yellow]"
+        )
     console.print(f"Chess coach on [bold]{url}[/bold] ({settings.db_path}). Ctrl+C to stop.")
     if open_browser:
         webbrowser.open(url)

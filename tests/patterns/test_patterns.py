@@ -154,6 +154,10 @@ def test_games_lost_without_castling():
         games.append(game(i, result="0-1" if lost else "1-0"))
     for g in games:
         moves.append(move(g.id, 1))
+        if g.pgn == CASTLES:  # analysed games carry the castling move itself
+            castle = move(g.id, 7)
+            castle.san = "O-O"
+            moves.append(castle)
     found = mine_games(game_rows(games, moves))
     assert [p.features for p in found] == [(("castling", "never castled"),)]
     assert (found[0].hits, found[0].n) == (15, 20)

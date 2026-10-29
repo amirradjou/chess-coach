@@ -120,8 +120,13 @@ def castling_move(game: Game) -> int | None:
     return None
 
 
-def castling(game: Game) -> str:
-    n = castling_move(game)
+def castling(game: Game, moves: Iterable[MoveFact] | None = None) -> str:
+    """The game's castling slice. With the game's stored moves it reads them (fast); otherwise
+    it replays the PGN."""
+    if moves is None:
+        n = castling_move(game)
+    else:
+        n = next((m.move_number for m in moves if m.is_user and m.san.startswith("O-O")), None)
     if n is None:
         return "never castled"
     return (
@@ -173,7 +178,11 @@ def game_rows(games: Iterable[Game], moves: Iterable[MoveFact]) -> list[GameRow]
     for g in games:
         if g.user_result == "unknown" or g.id not in by_game:
             continue
-        feats = {"colour": g.user_color.value, "speed": g.speed.value, "castling": castling(g)}
+        feats = {
+            "colour": g.user_color.value,
+            "speed": g.speed.value,
+            "castling": castling(g, by_game[g.id]),
+        }
         if family := g.opening_family:
             feats["opening"] = family
         if any("queen_trade_behind" in m.motifs for m in by_game[g.id]):

@@ -19,9 +19,9 @@ Done in v0:
 
 Local-only state (gitignored, may be missing on another machine):
 - `.stockfish/stockfish` — Stockfish 19, from `scripts/get-stockfish.sh`.
-- `data/demo.db` — 84 rated blitz games of the public Lichess user `pipinpo` (~1530 blitz),
-  fully analyzed at depth 12. Rebuild with:
-  `uv run chess-coach --db data/demo.db import lichess pipinpo --max 80 --rated && uv run chess-coach --db data/demo.db analyze --depth 12 --threads 4`
+- `data/demo.db` — about 80 rated blitz games of a public ~1500 Lichess player, analyzed at
+  depth 12. Rebuild with any username:
+  `uv run chess-coach --db data/demo.db import lichess <username> --max 80 --rated && uv run chess-coach --db data/demo.db analyze --depth 12 --threads 4`
 - `data/chess-coach.db` — the three fixture games, analyzed at depth 12.
 
 Motif tags as built (thresholds at the top of `engine/motifs.py`; README has the plain-language
@@ -99,7 +99,6 @@ mined as slices: they are only set on errors, so their error rate is trivially h
 
 ## Conventions that matter here
 
-- Feature branch per milestone, many small conventional commits, PR for the owner to merge.
-- No AI attribution in commits (global rule; the guard hook refuses it).
+- Feature branch per milestone, many small conventional commits, merged with a merge commit.
 - Engine tests are marked `engine` and skip without Stockfish; `-m network` runs live API tests.
-- HQ registry: `~/Projects/hq/projects.yaml` + `roadmaps/chess-coach.md` mirror this file.
+- Your own games live in `data/` (gitignored) and never leave the machine.

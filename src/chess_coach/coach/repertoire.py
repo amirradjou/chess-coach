@@ -7,13 +7,12 @@ engine's numbers) and what it prefers instead.
 
 from __future__ import annotations
 
-import io
+import re
 from collections import Counter, defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 import chess
-import chess.pgn
 
 from chess_coach.models import Game, MoveFact
 from chess_coach.openings import book_line, opening_table
@@ -60,15 +59,20 @@ class Favorite:
         return (self.wins + self.draws / 2) / self.games if self.games else 0.0
 
 
+_COMMENT = re.compile(r"\{[^}]*\}|\([^)]*\)|;[^\n]*")
+_NUMBER = re.compile(r"^\d+\.+")
+_NOT_A_MOVE = re.compile(r"^(\$\d+|1-0|0-1|1/2-1/2|\*)$")
+
+
 def _san_moves(pgn: str, plies: int) -> list[str]:
-    parsed = chess.pgn.read_game(io.StringIO(pgn))
-    if parsed is None:
-        return []
-    board, out = parsed.board(), []
-    for move in list(parsed.mainline_moves())[:plies]:
-        out.append(board.san(move))
-        board.push(move)
-    return out
+    """The first moves of a PGN as written (already SAN), without replaying the whole game."""
+    body = "\n".join(line for line in pgn.splitlines() if not line.startswith("["))
+    sans = []
+    for token in _COMMENT.sub(" ", body).split():
+        token = _NUMBER.sub("", token).rstrip("!?")  # "1.e4", "1...", "12." -> "e4", "", ""
+        if token and not _NOT_A_MOVE.match(token):
+            sans.append(token)
+    return sans[:plies]
 
 
 def _numbered(sans: Sequence[str]) -> str:
