@@ -13,10 +13,27 @@ from dataclasses import dataclass, field
 import chess
 import chess.pgn
 
-from chess_coach.models import Game, Judgement, MoveFact
+from chess_coach.models import Game, Judgement, MoveFact, Speed
+from chess_coach.sources.pgn import parse_time_control
 
 ERRORS = (Judgement.MISTAKE, Judgement.BLUNDER)
 CASTLED_BY = 10  # "castled by move 10"
+# Short on time: moves played this fast are reflexes, so their mistakes only count when the same
+# thing keeps happening (see REPEAT_MOVES / REPEAT_GAMES).
+RUSHED_BULLET_SECONDS = 15.0  # bullet: the last quarter of a 1-minute game
+RUSHED_FRACTION = 0.10  # any speed: under a tenth of the starting time
+REPEAT_MOVES = 15  # a rushed mistake counts once it happens this often...
+REPEAT_GAMES = 8  # ...across this many games
+
+
+def rushed(m: MoveFact, game: Game) -> bool:
+    """Played short on time: under 15 s left in bullet, or under 10% of the starting time."""
+    if m.clock_after is None:
+        return False
+    if game.speed in (Speed.BULLET, Speed.ULTRABULLET) and m.clock_after < RUSHED_BULLET_SECONDS:
+        return True
+    tc = parse_time_control(game.time_control)
+    return tc is not None and m.clock_after < RUSHED_FRACTION * tc[0]
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +43,7 @@ class MoveRow:
     fact: MoveFact
     game: Game
     features: dict[str, str]
+    rushed: bool = False
 
     @property
     def error(self) -> bool:
@@ -67,6 +85,27 @@ def clock_bucket(seconds: float | None) -> str | None:
     return "over 3 min"
 
 
+_PIECES = {"K": "king", "Q": "queen", "R": "rook", "B": "bishop", "N": "knight"}
+
+
+def piece_of(san: str) -> str:
+    """Which piece a SAN move moves: pawn, knight, bishop, rook, queen or king (castling = king)."""
+    if san.startswith("O-O"):
+        return "king"
+    return _PIECES.get(san[:1], "pawn")
+
+
+def kind_of(san: str) -> str:
+    """capture, check, castle or quiet (a capturing check counts as a capture)."""
+    if san.startswith("O-O"):
+        return "castle"
+    if "x" in san:
+        return "capture"
+    if "+" in san or "#" in san:
+        return "check"
+    return "quiet"
+
+
 def castling_move(game: Game) -> int | None:
     """The move number on which the user castled; None if they never did or the PGN won't parse."""
     parsed = chess.pgn.read_game(io.StringIO(game.pgn))
@@ -90,13 +129,18 @@ def castling(game: Game) -> str:
     )
 
 
-def move_rows(games: Iterable[Game], moves: Iterable[MoveFact]) -> list[MoveRow]:
+def move_rows(
+    games: Iterable[Game], moves: Iterable[MoveFact], *, include_rushed: bool = False
+) -> list[MoveRow]:
     """The user's moves in analysed games, sliced by phase, colour, speed, opening, move, clock."""
     by_id = {g.id: g for g in games}
     rows = []
     for m in moves:
         game = by_id.get(m.game_id)
         if game is None or not m.is_user:
+            continue
+        hurried = rushed(m, game)
+        if hurried and not include_rushed:
             continue
         feats = {
             "phase": m.phase.value,
@@ -108,8 +152,15 @@ def move_rows(games: Iterable[Game], moves: Iterable[MoveFact]) -> list[MoveRow]
             feats["opening"] = family
         if clock := clock_bucket(m.clock_after):
             feats["clock"] = clock
-        rows.append(MoveRow(m, game, feats))
+        feats["piece"] = piece_of(m.san)
+        feats["kind"] = kind_of(m.san)
+        rows.append(MoveRow(m, game, feats, hurried))
     return rows
+
+
+def rushed_rows(games: Iterable[Game], moves: Iterable[MoveFact]) -> list[MoveRow]:
+    """Only the moves played short on time."""
+    return [r for r in move_rows(games, moves, include_rushed=True) if r.rushed]
 
 
 def game_rows(games: Iterable[Game], moves: Iterable[MoveFact]) -> list[GameRow]:
