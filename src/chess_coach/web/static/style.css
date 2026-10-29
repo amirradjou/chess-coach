@@ -85,3 +85,11 @@ button.chip.on { background: var(--accent); border-color: var(--accent); color: 
 .reasons { margin: 6px 0; padding-left: 18px; font-size: 14px; }
 .reasons li { margin: 2px 0; }
 .idea { display: block; font-size: 14px; margin-top: 8px; padding: 6px 10px; border-left: 3px solid var(--accent); background: var(--soft); border-radius: 4px; }
+.modes { display: flex; gap: 6px; flex-wrap: wrap; }
+.modes button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.move-row { border-bottom: 1px solid var(--line); padding: 8px 0; }
+.verdict { font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--line); }
+.verdict.best, .verdict.good { background: var(--soft); color: var(--accent); }
+.verdict.inaccuracy { background: #f4e3c1; color: #7a5a12; }
+.verdict.mistake, .verdict.blunder { background: #f6d5d9; color: var(--bad); }
+#coach-feedback { margin: 10px 0; }

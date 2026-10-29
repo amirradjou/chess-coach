@@ -46,6 +46,7 @@ function show(tab, arg) {
   for (const b of document.querySelectorAll("nav button")) b.classList.toggle("on", b.dataset.tab === tab);
   for (const s of document.querySelectorAll("main section")) s.hidden = s.id !== tab;
   if (tab === "practice") return openPractice(arg);
+  if (tab === "coach") return openCoach();
   if (!loaded[tab]) loaded[tab] = { mistakes: loadMistakes, openings: loadOpenings, progress: loadProgress }[tab]();
 }
 for (const b of document.querySelectorAll("nav button")) b.addEventListener("click", () => show(b.dataset.tab));
@@ -205,8 +206,8 @@ function shown() {
   };
 }
 
-async function boardSvg({ fen, last, next, color }) {
-  const q = new URLSearchParams({ fen, orientation: drill.puzzle.side, color });
+async function boardSvg({ fen, last, next, color }, orientation) {
+  const q = new URLSearchParams({ fen, orientation, color });
   if (last) q.set("last", last);
   if (next) q.set("arrow", next);
   const url = `/api/board?${q}`;
@@ -220,7 +221,7 @@ async function boardSvg({ fen, last, next, color }) {
 
 async function draw() {
   const token = ++drawn;
-  const svg = await boardSvg(shown());
+  const svg = await boardSvg(shown(), drill.puzzle.side);
   if (token !== drawn || !drill) return; // a later step or puzzle took over
   drill.from = null;
   fill($("#board"), boardNode(svg, "board"));
@@ -371,6 +372,226 @@ async function explore(uci) {
 $("#retry").addEventListener("click", () => { drill.ply = 0; draw(); });
 $("#giveup").addEventListener("click", () => (drill.result ? reveal(null) : answer("?")));
 $("#next").addEventListener("click", nextPuzzle);
+
+// -- learn openings ------------------------------------------------------------------------
+// Your openings as a tree of the moves played in your games. Explore it; train your side (they
+// play the replies you meet, as often as you meet them; the engine takes over where your games
+// stop); or work through the mistakes your opponents make, finding the punishment for each.
+const LINE_END = 20; // plies of training before a line counts as done
+let coach = null;
+
+const games = (n) => `${n} game${n === 1 ? "" : "s"}`;
+const a = (word) => `${/^[aeiou]/.test(word) ? "an" : "a"} ${word}`;
+
+async function openCoach() {
+  if (coach) return;
+  const o = await api("/api/coach/openings");
+  fill($("#coach-opening"), [["white", "With White"], ["black", "With Black"]].map(([color, label]) => (o[color].length
+    ? el("optgroup", { label }, o[color].map((x) => el("option", { value: `${color}|${x.family}` }, `${x.family} (${x.games} games, you score ${x.score}%)`)))
+    : null)));
+  coach = { openings: o, color: null, family: null, mode: "explore", path: [], node: null, from: null, check: null, reveal: false, deck: null, card: 0, pending: null };
+  await pickOpening();
+}
+$("#coach-opening").addEventListener("change", pickOpening);
+
+async function pickOpening() {
+  const value = $("#coach-opening").value;
+  if (!value) return fill($("#coach-title"), "No opening with 5+ analysed games yet.");
+  const [color, family] = [value.slice(0, value.indexOf("|")), value.slice(value.indexOf("|") + 1)];
+  Object.assign(coach, { color, family, deck: null, card: 0 });
+  const info = coach.openings[color].find((x) => x.family === family);
+  fill($("#coach-idea"), info?.idea ? el("div", { class: "idea" }, el("b", {}, `${family}: `), info.idea) : null);
+  await coachStart();
+}
+
+for (const b of document.querySelectorAll("#coach .modes button")) {
+  b.addEventListener("click", () => {
+    for (const o of document.querySelectorAll("#coach .modes button")) o.classList.toggle("on", o === b);
+    coach.mode = b.dataset.mode;
+    coachStart();
+  });
+}
+
+function coachStart() {
+  coach.pending = null;
+  return coach.mode === "punish" ? nextMistake() : coachGo([]);
+}
+
+// Load the position after `path`; the path and node change together, and the board ignores
+// clicks until they have, so a move is never judged against the previous position.
+async function coachGo(path, note) {
+  const q = new URLSearchParams({ family: coach.family, color: coach.color, path: path.join(",") });
+  coach.loading = true;
+  let node;
+  try {
+    node = await api(`/api/coach/node?${q}`);
+  } finally {
+    coach.loading = false;
+  }
+  coach.path = [...path];
+  coach.node = node;
+  coach.reveal = false;
+  coach.check = null;
+  await coachDraw();
+  fill($("#coach-feedback"), note ?? null);
+  const n = coach.node;
+  $("#coach-back").hidden = coach.mode === "punish";
+  $("#coach-show").hidden = coach.mode === "explore" || n.turn !== "you";
+  if (coach.mode === "play" && n.turn === "them") {
+    const at = coach.path.length;
+    setTimeout(() => { if (coach.node === n && coach.path.length === at) theyMove(); }, 700);
+  }
+}
+
+async function coachDraw() {
+  const n = coach.node;
+  const arrow = coach.mode === "explore" ? n.best?.uci : coach.reveal ? n.target?.uci : null;
+  const svg = await boardSvg({ fen: n.fen, last: n.path.at(-1)?.uci, next: arrow, color: "best" }, coach.color);
+  coach.from = null;
+  fill($("#coach-board"), boardNode(svg, "board"));
+  $("#coach-board svg").addEventListener("click", onCoachBoard);
+  fill($("#coach-path"), n.path.length
+    ? n.path.map((p, i) => el("button", { class: "chip", onclick: () => coachJump(i + 1) }, i === 0 || !p.number.endsWith("...") ? `${p.number}${p.san}` : p.san))
+    : el("span", { class: "muted small" }, "start position"));
+  const who = n.turn === "you" ? "Your move" : "Their move";
+  fill($("#coach-title"),
+    el("b", {}, n.name || coach.family), el("br"),
+    el("span", { class: "muted small" }, n.games
+      ? `${who} · reached in ${n.games} of your games · you scored ${n.score}% from here`
+      : `${who} · none of your games reached this position`),
+    coach.mode === "explore" && n.best ? el("div", {}, n.turn === "you" ? "Engine's move: " : "Their best: ", el("b", { class: "better" }, n.best.san), ` (${n.best.score} for you)`) : null);
+  fill($("#coach-moves"), coach.mode === "explore" ? coachMoves(n) : null);
+}
+
+function coachJump(plies) {
+  if (coach.mode !== "explore") return;
+  coachGo(coach.path.slice(0, plies));
+}
+
+function answered(m) {
+  if (!m.answers?.length) return "You haven't met it yet.";
+  const found = m.answers.filter((a) => a.right).reduce((n, a) => n + a.games, 0);
+  const total = m.answers.reduce((n, a) => n + a.games, 0);
+  return `You answered ${m.answers.map((a) => `${a.san} ×${a.games}`).join(", ")}: the punishment ${found} of ${total} time${total === 1 ? "" : "s"}.`;
+}
+
+function coachMoves(n) {
+  if (!n.moves.length) return el("p", { class: "muted" }, "Your games don't go further from here. Play a move on the board to keep exploring with the engine.");
+  return el("div", {},
+    el("h3", {}, n.turn === "you" ? "What you played here" : "What they played here"),
+    n.moves.map((m) => el("div", { class: "move-row" },
+      el("div", { class: "line-head" },
+        el("span", {},
+          el("button", { class: "link", onclick: () => coachGo([...coach.path, m.uci]) }, `${m.number}${m.san}`),
+          el("span", { class: "muted small" }, ` · ${games(m.games)} · you scored ${m.score}%`)),
+        el("span", { class: `verdict ${m.verdict}` }, m.verdict)),
+      m.punish ? el("div", { class: "small" }, "Punish it with ", el("b", { class: "better" }, m.punish.san),
+        ` (${m.punish.score} for you). ${answered(m)}`) : null,
+      reasons(m.reasons))));
+}
+
+function weighted(list) {
+  let r = Math.random() * list.reduce((n, m) => n + m.games, 0);
+  for (const m of list) if ((r -= m.games) <= 0) return m;
+  return list.at(-1);
+}
+
+function theyMove() {
+  const n = coach.node;
+  if (coach.path.length >= LINE_END) return fill($("#coach-feedback"), "End of the line: well played. ", restartButton());
+  if (n.moves.length) {
+    const m = weighted(n.moves);
+    coach.pending = m.punish ? m : null;
+    return coachGo([...coach.path, m.uci], m.punish
+      ? [el("b", { class: "played" }, `They play ${m.number}${m.san}`), `, ${a(m.verdict)} (${m.games} of your games). Punish it.`]
+      : [el("b", {}, `They play ${m.number}${m.san}`), ` (${m.games} of your games). Your move.`]);
+  }
+  if (!n.best) return fill($("#coach-feedback"), "End of the line. ", restartButton());
+  coach.pending = null;
+  coachGo([...coach.path, n.best.uci], [el("b", {}, `They play ${n.best.san}`), " (the engine's move: your games stop here). Your move."]);
+}
+
+async function nextMistake() {
+  if (!coach.deck) coach.deck = await api(`/api/coach/punish?${new URLSearchParams({ family: coach.family, color: coach.color })}`);
+  if (!coach.deck.length) {
+    fill($("#coach-board"));
+    fill($("#coach-moves"));
+    fill($("#coach-title"), "No opponent mistakes seen twice in this opening yet.");
+    return fill($("#coach-feedback"));
+  }
+  const m = coach.deck[coach.card++ % coach.deck.length];
+  coach.pending = m;
+  await coachGo(m.path, [el("b", { class: "played" }, `They play ${m.number}${m.san}`),
+    `, ${a(m.verdict)} you've met in ${games(m.games)}. Punish it. (${(coach.card - 1) % coach.deck.length + 1} of ${coach.deck.length})`]);
+}
+
+function restartButton() {
+  return el("button", { onclick: coachStart }, coach.mode === "punish" ? "Next mistake" : "Start again");
+}
+
+async function onCoachBoard(evt) {
+  if (coach.loading) return;
+  const svg = evt.currentTarget;
+  const sq = squareAt(svg, evt, coach.color);
+  if (!sq) return;
+  if (!coach.from) { coach.from = sq; mark(svg, sq, coach.color); return; }
+  const uci = coach.from.name + sq.name;
+  coach.from = null;
+  mark(svg, null);
+  if (uci.slice(0, 2) === uci.slice(2)) return;
+  if (coach.mode === "explore") {
+    try { await coachGo([...coach.path, uci]); } catch (err) { fill($("#coach-feedback"), "That isn't a legal move here."); }
+    return;
+  }
+  if (coach.node.turn !== "you") return;
+  const usual = coach.mode === "play" && coach.node.moves.find((m) => m.uci === uci && (m.verdict === "best" || m.verdict === "good"));
+  if (usual) {
+    return coachGo([...coach.path, uci], [el("b", { class: "better" }, `${usual.san}: good.`),
+      ` Your usual move here (${games(usual.games)}, you scored ${usual.score}%), and a sound one.`]);
+  }
+  let r;
+  try {
+    r = await api("/api/coach/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fen: coach.node.fen, uci, best: coach.node.best?.uci }),
+    });
+  } catch (err) {
+    return fill($("#coach-feedback"), "That isn't a legal move here.");
+  }
+  coach.check = r;
+  if (!r.ok) {
+    return fill($("#coach-feedback"),
+      el("b", { class: "played" }, `${r.san} isn't it`),
+      r.loss !== null ? `: it gives away ${r.loss} against the best move.` : ".",
+      reasons(r.faults), el("div", {}, "Try again, or show the move."));
+  }
+  const met = coach.pending;
+  coach.pending = null;
+  const praise = [el("b", { class: "better" }, `${r.san}: good.`),
+    r.best && r.best.uci !== r.uci ? ` The engine's choice is ${r.best.san}; yours is within ${r.loss}.` : " That's the engine's move.",
+    r.score ? ` ${r.score} for you.` : "",
+    met ? el("div", { class: "small" }, answered(met)) : null];
+  await coachGo([...coach.path, r.uci], coach.mode === "punish" ? [...praise, el("div", {}, restartButton())] : praise);
+}
+
+$("#coach-show").addEventListener("click", async () => {
+  coach.reveal = true;
+  await coachDraw();
+  const n = coach.node;
+  const t = n.target;
+  fill($("#coach-feedback"),
+    t ? ["The move: ", el("b", { class: "better" }, t.san),
+      t.uci === n.best?.uci ? ` (the engine's move, ${n.best.score} for you).` : " (your usual move here, and a sound one).",
+      " Play it to go on."] : "No move known here.",
+    reasons(coach.check?.ideas));
+});
+$("#coach-back").addEventListener("click", () => {
+  const steps = coach.mode === "play" ? 2 : 1;
+  coach.pending = null;
+  coachGo(coach.path.slice(0, Math.max(0, coach.path.length - steps)));
+});
+$("#coach-restart").addEventListener("click", coachStart);
 
 // -- openings ------------------------------------------------------------------------------
 function favoriteCard(f) {

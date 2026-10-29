@@ -14,6 +14,7 @@
       <button data-tab="mistakes" class="on">What you get wrong</button>
       <button data-tab="practice">Practice</button>
       <button data-tab="openings">Your openings</button>
+      <button data-tab="coach">Learn openings</button>
       <button data-tab="progress">Progress</button>
     </nav>
   </header>
@@ -52,6 +53,38 @@
       </div>
     </section>
     <section id="openings" hidden></section>
+    <section id="coach" hidden>
+      <div class="toolbar">
+        <label>Opening <select id="coach-opening"></select></label>
+        <span class="modes">
+          <button data-mode="explore" class="on">Explore</button>
+          <button data-mode="play">Train your moves</button>
+          <button data-mode="punish">Punish their mistakes</button>
+        </span>
+      </div>
+      <div id="coach-idea"></div>
+      <div class="drill">
+        <div class="boardcol">
+          <div id="coach-board" class="board big"></div>
+          <div class="steps">
+            <button id="coach-restart" title="Start again" aria-label="Start again">⏮</button>
+            <button id="coach-back" title="Back" aria-label="Back">◀</button>
+            <span id="coach-path" class="moves"></span>
+          </div>
+        </div>
+        <div class="side">
+          <p id="coach-title"></p>
+          <div id="coach-feedback"></div>
+          <div class="buttons"><button id="coach-show" hidden>Show the move</button></div>
+          <div id="coach-moves"></div>
+          <p class="muted small">Built from your own games: what you and your opponents played here, how you
+            scored, and the engine's verdict on each move. <b>Explore</b> walks the tree (click a move, or play
+            one on the board). <b>Train your moves</b>: they play the replies you meet, as often as you meet
+            them, and you find a good answer (within 0.3 of the engine's best). <b>Punish their mistakes</b>:
+            every opponent mistake you've met twice or more, one at a time.</p>
+        </div>
+      </div>
+    </section>
     <section id="progress" hidden></section>
   </main>
   <script src="/static/app.js"></script>
