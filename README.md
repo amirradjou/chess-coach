@@ -150,6 +150,15 @@ section, when the same one keeps happening: 15+ times across 8+ games.
   - **Your openings**: your most-played openings with each colour, score, your usual line, the
     book line, and the fixes: positions you reached in several games where your habitual move
     loses ground (named book moves are never flagged), with "Drill these fixes".
+  - **Learn openings**: your most-played openings with each colour as a tree of the moves
+    actually played in your games (first 8 moves each), with how often each came up, how you
+    scored after it and the stored engine verdict. Where your opponent went wrong, it shows the
+    punishment (the engine's answer and the score it gives you) and how you actually answered in
+    your games. Three modes: *Explore* the tree; *Train your moves*, where they play the replies
+    you meet as often as you meet them and you find a sound answer (your usual move if the engine
+    rates it fine, else within 0.3 of the engine's best; the engine takes over where your games
+    stop); and *Punish their mistakes*, every opponent mistake you've met twice or more, one at a
+    time.
   - **Progress**: month by month, and your puzzle solve rate per theme.
 - `puzzles make --openings` turns those opening fixes into drills; any move within 30 cp of the
   best counts, since openings often have several good moves. `puzzles prune` drops untried

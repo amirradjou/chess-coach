@@ -19,6 +19,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
+from chess_coach.coach import tree as optree
 from chess_coach.coach.digest import build
 from chess_coach.coach.habits import (
     Habit,
@@ -27,12 +28,13 @@ from chess_coach.coach.habits import (
     from_pressure,
     missed_kinds,
 )
-from chess_coach.coach.principles import explain, opening_idea
+from chess_coach.coach.principles import Reasons, explain, opening_idea
 from chess_coach.coach.progress import periods, solve_rates
 from chess_coach.coach.repertoire import Favorite, Fix, favorites
 from chess_coach.db import Store
 from chess_coach.engine.stockfish import Engine, EngineNotFoundError, LineEval
 from chess_coach.models import Puzzle
+from chess_coach.openings import opening_table
 from chess_coach.patterns.features import move_rows
 from chess_coach.patterns.mining import Evidence
 from chess_coach.puzzles import review
@@ -43,6 +45,7 @@ BETTER = "#2a9d8f"  # the engine's move
 TRIED = "#3d5a80"  # your answer in practice
 ARROWS = {"best": BETTER, "played": PLAYED, "tried": TRIED}
 OPENING_NOTE_MOVES = 15  # puzzles this early get a note on what their opening is about
+COACH_MARGIN_CP = 30  # in opening training, a move this close to the engine's best counts
 EXPLORE_DEPTH = 16  # quick enough to answer while you click through a line
 CACHE_POSITIONS = 10_000
 
@@ -193,6 +196,20 @@ class Explore(BaseModel):
     moves: list[str]
 
 
+class CoachMove(BaseModel):
+    fen: str
+    uci: str
+    best: str | None = None  # the move stored for this position, used when there's no engine
+
+
+def _pct(value: float | None) -> int | None:
+    return None if value is None else round(value * 100)
+
+
+def _number(board: chess.Board) -> str:
+    return f"{board.fullmove_number}{'.' if board.turn == chess.WHITE else '...'}"
+
+
 def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
     analyst = Analyst(engine)
 
@@ -202,7 +219,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
         analyst.close()
 
     app = FastAPI(title="chess-coach", docs_url=None, redoc_url=None, lifespan=lifespan)
-    cache: dict[str, tuple[tuple[int, int], dict]] = {}
+    cache: dict[str, tuple[tuple[int, int], object]] = {}
 
     def puzzle_or_404(store: Store, puzzle_id: str) -> Puzzle:
         puzzle = next((p for p in store.puzzles() if p.id == puzzle_id), None)
@@ -379,6 +396,171 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         return Response(svg, media_type="image/svg+xml")
+
+    def opening_tree(family: str, color: str) -> tuple[optree.Node, dict[str, str]]:
+        with Store(db_path) as store:
+            games = [
+                g
+                for g in store.iter_games()
+                if g.analyzed_depth and g.opening_family == family and g.user_color.value == color
+            ]
+            key = (len(games), store.count_moves())
+            name = f"tree:{color}:{family}"
+            if name in cache and cache[name][0] == key:
+                return cache[name][1]  # type: ignore[return-value]
+            ids = {g.id for g in games}
+            moves = [m for m in store.iter_moves(max_ply=optree.TREE_PLIES) if m.game_id in ids]
+        value = (optree.build(games, moves), {g.id: g.user_result for g in games})
+        cache[name] = (key, value)
+        return value
+
+    def score_of(fact, sign: int) -> str:
+        mate = None if fact.mate_before is None else sign * fact.mate_before
+        return review.Score(sign * fact.eval_before, mate).text
+
+    def node_json(root: optree.Node, results: dict[str, str], path: list[str], color: str):
+        board = chess.Board()
+        plies = []
+        for uci in path:
+            move = review.legal(board, uci)
+            plies.append({"uci": move.uci(), "san": board.san(move), "number": _number(board)})
+            board.push(move)
+        mine = board.turn == (chess.WHITE if color == "white" else chess.BLACK)
+        node = optree.walk(root, [p["uci"] for p in plies])
+        opening = opening_table().get(board.epd())
+        best = None
+        if node is not None and node.best is not None:
+            f = node.best
+            best = {"uci": f.best_move, "san": f.best_san, "score": score_of(f, 1 if mine else -1)}
+        elif (ev := analyst(board.fen())) is not None and ev.move is not None:
+            sign = 1 if mine else -1
+            mate = None if ev.mate is None else sign * ev.mate
+            best = {
+                "uci": ev.move.uci(),
+                "san": board.san(ev.move),
+                "score": review.Score(sign * ev.cp, mate).text,
+            }
+        moves = []
+        edges = sorted(node.edges.values(), key=lambda e: -len(e.facts)) if node else []
+        for edge in edges:
+            item: dict = {
+                "uci": edge.uci,
+                "san": edge.san,
+                "number": _number(board),
+                "by": "you" if edge.by_user else "them",
+                "games": len(edge.facts),
+                "score": _pct(optree.score(edge.child.games, results)),
+                "verdict": edge.verdict,
+                "loss": round(edge.cp_loss),
+            }
+            if edge.punishable:
+                f = edge.child.best
+                item["punish"] = {"uci": f.best_move, "san": f.best_san, "score": score_of(f, 1)}
+                item["answers"] = [
+                    {"san": e.san, "games": len(e.facts), "right": e.uci == f.best_move}
+                    for e in sorted(edge.child.edges.values(), key=lambda e: -len(e.facts))
+                ]
+            if edge.by_user and edge.verdict not in ("best", "good") and node.best is not None:
+                item["reasons"] = explain(node.fen, edge.uci, node.best.best_move).all()[:3]
+            moves.append(item)
+        # The move to learn here: your most-played sound move, so training keeps to your
+        # opening; the engine's move only where you have none.
+        sound = [m for m in moves if m["by"] == "you" and m["verdict"] in ("best", "good")]
+        target = {"uci": sound[0]["uci"], "san": sound[0]["san"]} if sound else best
+        return {
+            "fen": board.fen(),
+            "turn": "you" if mine else "them",
+            "target": target if mine else None,
+            "path": plies,
+            "name": opening.name if opening else None,
+            "games": len(node.games) if node else 0,
+            "score": _pct(optree.score(node.games, results)) if node else None,
+            "best": best,
+            "moves": moves,
+        }
+
+    @app.get("/api/coach/openings")
+    def coach_openings() -> dict:
+        with Store(db_path) as store:
+            games = list(store.iter_games())
+        out: dict[str, list[dict]] = {"white": [], "black": []}
+        for o in optree.openings(games):
+            out[o.color].append(
+                {
+                    "family": o.family,
+                    "games": o.games,
+                    "score": _pct(o.score),
+                    "idea": opening_idea(o.family),
+                }
+            )
+        return out
+
+    @app.get("/api/coach/node")
+    def coach_node(family: str, color: str, path: str = "") -> dict:
+        if color not in ("white", "black"):
+            raise HTTPException(400, "colour is white or black")
+        root, results = opening_tree(family, color)
+        try:
+            return node_json(root, results, [u for u in path.split(",") if u], color)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.get("/api/coach/punish")
+    def coach_punish(family: str, color: str) -> list[dict]:
+        """The opponent mistakes you meet in this opening, each with its punishment."""
+        root, _ = opening_tree(family, color)
+        out = []
+        for path, edge in optree.mistakes(root):
+            board = chess.Board(edge.facts[0].fen_before)
+            f = edge.child.best
+            out.append(
+                {
+                    "path": path,
+                    "number": _number(board),
+                    "san": edge.san,
+                    "games": len(edge.facts),
+                    "verdict": edge.verdict,
+                    "punish": {"uci": f.best_move, "san": f.best_san, "score": score_of(f, 1)},
+                    "answers": [
+                        {"san": e.san, "games": len(e.facts), "right": e.uci == f.best_move}
+                        for e in sorted(edge.child.edges.values(), key=lambda e: -len(e.facts))
+                    ],
+                }
+            )
+        return out
+
+    @app.post("/api/coach/check")
+    def coach_check(c: CoachMove) -> dict:
+        """Is this move good enough here? Within COACH_MARGIN_CP of the engine's best counts."""
+        try:
+            board = chess.Board(c.fen)
+            move = review.legal(board, c.uci)
+            stored = review.legal(board, c.best) if c.best else None
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        after = board.copy(stack=False)
+        after.push(move)
+        ev, reply = analyst(board.fen()), analyst(after.fen())
+        loss = score = None
+        if ev is not None and ev.move is not None and reply is not None:
+            best = ev.move
+            loss = max(0, ev.cp + reply.cp)  # the reply is scored for the other side
+            ok = move == best or loss <= COACH_MARGIN_CP
+            score = review.Score(-reply.cp, None if reply.mate is None else -reply.mate).text
+        else:
+            best = stored
+            ok = best is None or move == best
+        reasons = explain(c.fen, move.uci(), best.uci()) if best and not ok else Reasons()
+        return {
+            "ok": ok,
+            "uci": move.uci(),
+            "san": board.san(move),
+            "best": {"uci": best.uci(), "san": board.san(best)} if best else None,
+            "loss": None if loss is None else round(loss / 100, 1),
+            "score": score,
+            "faults": reasons.faults,
+            "ideas": reasons.ideas,
+        }
 
     @app.get("/api/drill/tags")
     def drill_tags() -> list[dict]:

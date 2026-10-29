@@ -253,7 +253,11 @@ class Store:
             self.conn.execute("UPDATE games SET analyzed_depth = ? WHERE id = ?", (depth, game_id))
 
     def iter_moves(
-        self, game_id: str | None = None, *, user_only: bool = False
+        self,
+        game_id: str | None = None,
+        *,
+        user_only: bool = False,
+        max_ply: int | None = None,
     ) -> Iterator[MoveFact]:
         clauses: list[str] = []
         params: list[object] = []
@@ -262,6 +266,9 @@ class Store:
             params.append(game_id)
         if user_only:
             clauses.append("is_user = 1")
+        if max_ply is not None:
+            clauses.append("ply <= ?")
+            params.append(max_ply)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self.conn.execute(f"SELECT * FROM moves {where} ORDER BY game_id, ply", params)
         for row in rows:
