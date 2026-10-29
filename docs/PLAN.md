@@ -77,9 +77,24 @@ mined as slices: they are only set on errors, so their error rate is trivially h
 - v1's optional narrative: `coach/narrate.py`, OpenAI-compatible chat (presets ollama, openrouter);
   sentences citing moves outside the evidence are dropped. No paid key by default.
 
+## v4 — the web coach (done 2026-10-29, branch `v4-web-coach`)
+
+- `coach/habits.py`: piece and move-kind features (`piece`, `kind` in the move table), missed
+  captures/checks (share of errors whose best move was one, vs how often it is the best move at
+  all; ≥ 1.3×), motifs, mined situations, each with a lesson chosen by the most specific feature.
+- `coach/repertoire.py`: favourite families per colour, usual line (longest prefix most games
+  share), book line, and fixes: same position + same move in 2+ games, average loss ≥ 50 cp, never
+  a named book move (`is_book`); deduplicated by move. `puzzles/make.py: make_opening_fixes` drills
+  them at depth 18, multipv 4, accepting moves within 30 cp (`puzzles.accept`).
+- Short-on-time rule (`features.rushed`): under 15 s in bullet or under 10% of the clock; left out
+  of move tables, progress and puzzle candidates unless the motif repeats (15 moves, 8 games;
+  `mining.repeated_under_pressure`), which gets its own section. `time_trouble` is not listed among
+  the main motifs. `puzzles prune` removes untried rushed puzzles.
+- `web/app.py` (FastAPI) + `web/static/` (plain JS, no libraries): boards are python-chess SVGs
+  with arrows; click-to-move maps clicks through the SVG viewBox (margin 15, square 45).
+
 ## Next
 
-- A small web page for the digest and drills (the owner's live-demo rule: no paid model key).
 - Rating trend against practice (Lichess rating history API), Chess.com ply links.
 
 ## Conventions that matter here

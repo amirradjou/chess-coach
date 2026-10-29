@@ -68,12 +68,21 @@ table for opening names. Planned: a small web UI for digests and puzzle drills.
   model-written summary checked against the evidence.
 - **v2 (done)** — puzzle generation and spaced repetition drills.
 - **v3 (done)** — weekly digests, opening study suggestions, progress tracking.
-- **Later** — a small web page for the digest and the drills; rating trend against practice.
+- **v4 (done)** — the coach in the browser: your recurring mistakes on boards (your move in red,
+  the better one in green) with what to learn, click-to-move practice, and your favourite
+  openings with the habitual moves to fix and drills for them.
+- **Later** — rating trend against practice.
 
 ## Status
 
-**v0–v3 done.** The whole loop runs from the command line: import, analyse, find your patterns,
-turn your own mistakes into puzzles, drill them on a schedule, and watch the numbers move.
+**v0–v4 done.** Import, analyse, find your patterns, turn your own mistakes into puzzles, drill
+them on a schedule, fix your openings, and watch the numbers move, in the terminal or in the
+browser (`chess-coach serve`).
+
+**Short on time doesn't count.** In a 1-minute game the last seconds are reflexes, so a move
+played with under 15 s left in bullet (or under a tenth of the clock in any game) is left out of
+the patterns, mistake rates, progress and new puzzles. Those mistakes only show up, in their own
+section, when the same one keeps happening: 15+ times across 8+ games.
 [docs/PLAN.md](docs/PLAN.md) has the build plan and how to pick the work up.
 
 - `import lichess|chesscom|pgn` stores games in SQLite with your colour, the speed (Lichess's
@@ -106,6 +115,19 @@ turn your own mistakes into puzzles, drill them on a schedule, and watch the num
   loss over time, and your puzzle solve rate overall and per tag.
 - `openings` lists the openings you score worst in (by your colour), the book line for the one
   you play most, and the opening mistakes you have repeated in more than one game.
+- `serve` opens the coach on http://127.0.0.1:8765 (localhost only, no account or key):
+  - **What you get wrong**: the mistakes you repeat (which piece and kind of move, captures or
+    checks you keep missing, motifs) and the situations where your mistake rate jumps, each with
+    a *what to learn* note and your own positions on boards: red arrow your move, green the
+    engine's. "Practise these positions" opens the matching drills.
+  - **Practice**: due puzzles on a board you click (piece, then square), filtered by theme.
+  - **Your openings**: your most-played openings with each colour, score, your usual line, the
+    book line, and the fixes: positions you reached in several games where your habitual move
+    loses ground (named book moves are never flagged), with "Drill these fixes".
+  - **Progress**: month by month, and your puzzle solve rate per theme.
+- `puzzles make --openings` turns those opening fixes into drills; any move within 30 cp of the
+  best counts, since openings often have several good moves. `puzzles prune` drops untried
+  puzzles from moves made short on time.
 
 Motif tags are computed in code from the board and the engine's facts, never by a model:
 
@@ -162,6 +184,8 @@ uv run chess-coach puzzles make --limit 50                       # your mistakes
 uv run chess-coach drill                                         # practise what is due
 uv run chess-coach progress --by week
 uv run chess-coach openings
+uv run chess-coach puzzles make --openings                      # drills for your opening fixes
+uv run chess-coach serve --open                                  # the coach in your browser
 ```
 
 `analyze --newest` starts with your latest games, so a big import is useful early.
