@@ -15,6 +15,14 @@ plain language, and trains you on exactly those spots.
   repetition so the ones you keep failing come back.
 - Weekly digest: what changed, what to work on next, one opening line to study.
 
+`chess-coach serve` on the author's own Lichess games: the mistakes you repeat, on your own
+positions (red arrow: what you played; green: what to play), and your openings with the habitual
+moves worth fixing.
+
+![What you get wrong](docs/screenshots/mistakes.png)
+
+![Your openings](docs/screenshots/openings.png)
+
 ## Why build it
 
 Because generic chess trainers don't know you, and a coach that says "here's the
@@ -205,3 +213,9 @@ uv run chess-coach serve --open                                  # the coach in 
 uv run pytest                                   # tests (engine tests skip without Stockfish)
 uv run ruff check . && uv run ruff format .     # lint + format
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE). Stockfish is GPL-3.0 and is downloaded separately by
+`scripts/get-stockfish.sh`, not distributed here. The opening names come from
+[lichess-org/chess-openings](https://github.com/lichess-org/chess-openings) (CC0).

@@ -119,6 +119,16 @@ def test_favorites_and_usual_line():
     assert usual_line(games[:1]) == "1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5"
 
 
+def test_opening_moves_are_read_from_lichess_style_pgn():
+    from chess_coach.coach.repertoire import _san_moves
+
+    pgn = (
+        '[Event "Rated bullet game"]\n\n1. e4 { [%clk 0:01:00] } 1... c5 { [%clk 0:01:00] } '
+        "2.d4 cxd4 3. c3!? dxc3 (3... d3) 4. Nxc3 Nc6 1-0"
+    )
+    assert _san_moves(pgn, 10) == ["e4", "c5", "d4", "cxd4", "c3", "dxc3", "Nxc3", "Nc6"]
+
+
 def test_an_opening_fix_accepts_every_good_move():
     games = italian_games()
     fix = fixes(games, [kf1(g.id) for g in games[:3]])[0]
