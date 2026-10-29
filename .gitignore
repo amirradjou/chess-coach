@@ -3,7 +3,8 @@
 .env.*
 !.env.example
 .envrc
-.claude/settings.local.json
+.claude/
+CLAUDE.md
 
 # dependencies / build
 node_modules/
