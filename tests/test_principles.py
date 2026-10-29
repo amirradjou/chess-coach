@@ -1,0 +1,96 @@
+import chess
+
+from chess_coach.coach.principles import doubled, explain, isolated, opening_idea, passed
+
+AFTER_NF3_NC6 = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3"
+ITALIAN = "r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4"
+AFTER_E5 = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2"
+NF6_BLUNDER = "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4"
+CASTLED = "r1bq1rk1/pppp1ppp/2n2n2/2b1p3/2B1P3/2NP1N2/PPP2PPP/R1BQ1RK1 w - - 0 7"
+
+
+def test_a_piece_left_hanging():
+    r = explain(AFTER_NF3_NC6, "f3g5", "f1b5")  # 3.Ng5? Qxg5
+    assert r.faults[0] == "It leaves your knight on g5 hanging (attacked and not defended)."
+    # the queen on h5 was already attacked; any move but taking on f7 leaves it there
+    assert explain(NF6_BLUNDER, "b1c3", "h5f7").faults == [
+        "It leaves your queen on h5 hanging (attacked and not defended)."
+    ]
+
+
+def test_an_even_trade_is_not_hanging():
+    # Scotch, 4.Nxd4 Nc6 on the board: Nxc6 can be taken back, but it took a knight
+    scotch = "r1bqkbnr/pppp1ppp/2n5/8/3NP3/8/PPP2PPP/RNBQKB1R w KQkq - 1 5"
+    assert not any("c6" in f for f in explain(scotch, "d4c6", "c1e3").faults)
+
+
+def test_king_safety():
+    r = explain(ITALIAN, "e1f1", "e1g1")
+    assert r.faults == [
+        "It gives up your right to castle, so your king may be stuck in the centre."
+    ]
+    assert r.ideas == ["The better move castles: get your king safe before anything else."]
+    shelter = explain(CASTLED, "g2g4", "c1g5")
+    assert "It pushes the g-pawn in front of your castled king, loosening its cover." in (
+        shelter.faults
+    )
+
+
+def test_development_and_the_queen():
+    r = explain(AFTER_E5, "d1h5", "g1f3")
+    assert r.faults[0].startswith("It brings your queen out while 4 of your minor pieces")
+    assert r.ideas == ["The better move develops a piece: get the knights and bishops out early."]
+    wing = explain(AFTER_E5, "h2h3", "g1f3")
+    assert wing.faults[0].startswith("It spends a move on a wing pawn")
+
+
+def test_pawn_structure_and_the_centre():
+    r = explain("rnbqkbnr/pp1ppppp/8/2p5/3P4/8/PPP1PPPP/RNBQKBNR w KQkq c6 0 2", "d4c5", "d4d5")
+    assert r.faults == [
+        "It takes a pawn off the d- and e-files: centre pawns control the squares that matter "
+        "most.",
+        "It doubles your pawns on the c-file.",
+    ]
+    lonely = explain("4k3/1pp5/2N5/8/8/8/8/4K3 b - - 0 1", "b7c6", "e8d7")
+    assert lonely.faults == [
+        "It doubles your pawns on the c-file.",
+        "It leaves your c-pawn isolated: no pawn beside it can defend it.",
+    ]
+
+
+def test_forcing_moves_and_endgames():
+    assert explain(NF6_BLUNDER, "b1c3", "h5f7").ideas[0].startswith("The better move is checkmate")
+    smith_morra = "r2qkbnr/pp2pppp/2np4/8/2B1P1b1/2N2N2/PP3PPP/R1BQK2R w KQkq - 2 7"
+    assert (
+        explain(smith_morra, "e1g1", "c4f7")
+        .ideas[0]
+        .startswith("The better move is a check and a capture")
+    )
+    danish = "rnbqkb1r/pppp1ppp/5n2/8/4P3/2N5/PP3PPP/R1BQKBNR w KQkq - 1 5"
+    assert explain(danish, "g1f3", "e4e5").ideas == [
+        "The better move attacks their knight on f6, so they have to spend a move on it."
+    ]
+    king = explain("8/5p2/8/8/8/8/2P5/K7 w - - 0 1", "c2c3", "a1b2")
+    assert king.ideas == [
+        "In the endgame the king is a strong piece: the better move brings it toward the centre."
+    ]
+    push = explain("8/5p2/8/8/8/8/2P5/K7 w - - 0 1", "a1b1", "c2c4")
+    assert push.ideas == ["The better move pushes your passed pawn: in endgames, passed pawns run."]
+
+
+def test_pawn_helpers():
+    board = chess.Board("4k3/p1p5/2p5/8/8/8/5P2/4K3 w - - 0 1")
+    assert doubled(board, chess.BLACK) == {2}
+    assert isolated(board, chess.BLACK) == {0, 2} and isolated(board, chess.WHITE) == {5}
+    assert passed(board, chess.WHITE) == {chess.F2}
+
+
+def test_nothing_to_say_about_an_illegal_move():
+    assert explain(AFTER_E5, "e1e3", "g1f3").all() == []
+
+
+def test_opening_ideas():
+    assert opening_idea("Danish Gambit Accepted").startswith("White gives one or two pawns")
+    assert opening_idea("Blackmar-Diemer Gambit Accepted").startswith("White gives a pawn")
+    assert opening_idea("Sicilian Defense").startswith("Black trades the c-pawn")
+    assert opening_idea("Bongcloud Attack") is None and opening_idea(None) is None

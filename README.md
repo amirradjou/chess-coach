@@ -74,7 +74,7 @@ has no login, so keep it there.
 
 Python 3.12 (uv), a Typer + Rich command line, python-chess, Stockfish 19 over UCI, SQLite for
 games and per-move facts, and the CC0 [lichess-org/chess-openings](https://github.com/lichess-org/chess-openings)
-table for opening names. Planned: a small web UI for digests and puzzle drills.
+table for opening names. The web coach is FastAPI with plain JavaScript and python-chess boards.
 
 ## Milestones
 
@@ -135,7 +135,18 @@ section, when the same one keeps happening: 15+ times across 8+ games.
     checks you keep missing, motifs) and the situations where your mistake rate jumps, each with
     a *what to learn* note and your own positions on boards: red arrow your move, green the
     engine's. "Practise these positions" opens the matching drills.
-  - **Practice**: due puzzles on a board you click (piece, then square), filtered by theme.
+  - **Practice**: due puzzles on a board you click (piece, then square), filtered by theme. A
+    wrong move shows their best reply, what it costs in material and score, and lets you try
+    again (only the first answer counts for the schedule). Once it's solved or shown you get the
+    best line, each of your tries and your game move as lines to step through (◀ ▶ or the arrow
+    keys), and any move you play on the board is answered by Stockfish (depth 16, if installed).
+  - Every wrong move, example and opening fix also gets reasons in chess terms, worked out from
+    the board by `coach/principles.py` (no model): a piece left hanging, castling given up, the
+    pawns in front of your castled king pushed, the queen out early, development skipped, a
+    centre pawn given away, pawns doubled or isolated, a passed pawn allowed; and what the better
+    move does instead (mates, checks or captures, attacks a piece, castles, develops, takes the
+    centre, activates the king or pushes a passed pawn in the endgame). Openings you play get a
+    short note on what they are about.
   - **Your openings**: your most-played openings with each colour, score, your usual line, the
     book line, and the fixes: positions you reached in several games where your habitual move
     loses ground (named book moves are never flagged), with "Drill these fixes".

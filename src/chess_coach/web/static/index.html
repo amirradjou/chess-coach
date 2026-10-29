@@ -25,16 +25,29 @@
         <span id="due" class="muted"></span>
       </div>
       <div class="drill">
-        <div id="board" class="board big"></div>
+        <div class="boardcol">
+          <div id="board" class="board big"></div>
+          <div id="steps" class="steps" hidden>
+            <button data-step="first" title="Start (Home)" aria-label="Start">⏮</button>
+            <button data-step="prev" title="Back (←)" aria-label="Back">◀</button>
+            <button data-step="next" title="Forward (→)" aria-label="Forward">▶</button>
+            <button data-step="last" title="End (End)" aria-label="End">⏭</button>
+            <span id="where" class="muted small"></span>
+          </div>
+        </div>
         <div class="side">
           <p id="prompt"></p>
           <p id="feedback"></p>
           <div class="buttons">
+            <button id="retry" hidden>Try again</button>
             <button id="giveup">Show the answer</button>
-            <button id="next" hidden>Next puzzle</button>
+            <button id="next" class="primary" hidden>Next puzzle</button>
           </div>
-          <p class="muted small">Click the piece, then the square. The red arrow in the other tabs
-            is what you played; green is what to play instead.</p>
+          <div id="lines"></div>
+          <p class="muted small">Click a piece, then its square. A wrong move shows their best reply and what
+            it costs; try again from the start, or show the answer. Then step through the lines with ◀ ▶ (or the
+            arrow keys) and play any move on the board to see what the engine answers. Scores are for you:
+            +1.0 is a pawn up, #3 is mate in 3, #-3 is mate against you; grey moves are the engine's.</p>
         </div>
       </div>
     </section>
