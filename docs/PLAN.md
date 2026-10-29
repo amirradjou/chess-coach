@@ -93,9 +93,48 @@ mined as slices: they are only set on errors, so their error rate is trivially h
 - `web/app.py` (FastAPI) + `web/static/` (plain JS, no libraries): boards are python-chess SVGs
   with arrows; click-to-move maps clicks through the SVG viewBox (margin 15, square 45).
 
-## Next
+## v5 — learn from mistakes and openings (done 2026-10-29, PRs #6 and #7)
 
-- Rating trend against practice (Lichess rating history API), Chess.com ply links.
+- `puzzles/review.py`: a wrong answer shows their best reply (engine, depth 16) and what it costs
+  (material over the line, score against the best's, the best move not named) and allows retries;
+  only the first answer is recorded (`Answer.record`). After solving or revealing: the best line
+  (stored PV), each try and the game move as lines; `POST /api/explore` answers any move.
+- `web/app.py: Analyst`: one Stockfish per app, started on first use, answers cached by FEN;
+  without Stockfish the lines stop after the chosen moves. Boards come from `GET /api/board`.
+- `coach/principles.py`: chess reasons from the board alone (hanging piece, castling given up,
+  king cover, early queen, development, centre pawns, doubled/isolated/passed pawns; and what the
+  better move does: mate, check/capture, attacks a piece, castles, develops, centre, endgame king
+  and passed pawn) and `OPENING_IDEAS`, a hand-written note per opening family. Owner's rule:
+  explanations come in chess terms from code, not only from a model.
+- `coach/tree.py` + the "Learn openings" tab: a tree per (opening family, colour) from the stored
+  facts, first 16 plies; opponent moves losing 10+ points of win probability carry the punishment
+  (the engine's answer, only when it leaves you +0.5) and how you answered. Modes: Explore, Train
+  your moves (your usual sound move counts, else within 30 cp at depth 16; the engine takes over
+  where your games stop), Punish their mistakes (cards for mistakes met 2+ times).
+
+## Remaining (in order)
+
+1. **Fresh puzzles from the full analysis.** All 2,091 of the owner's games are analysed but only
+   63 puzzles exist (made mid-analysis). `uv run chess-coach --db data/amirradjou.db puzzles make
+   --limit 150 --threads 8 --openings` (started 2026-10-29; check `puzzles list`), then rerun it
+   until it finds few new ones.
+2. **Remember opening training.** The coach keeps no record: punish cards and trained lines
+   aren't scheduled. Store each coach attempt (position, move, right or not) and schedule cards
+   with SM-2 like puzzles (`puzzles/srs.py`); show "found 3 of 5 punishments" per opening and
+   put due cards first.
+3. **Rating trend against practice** (the brief's metric): Lichess rating history API
+   (`/api/user/{name}/rating-history`) per speed, next to puzzle attempts and coach practice
+   per week in the Progress tab, so you can see whether practice moves the rating.
+4. **New screenshots** for the README (puzzle review lines, Learn openings) from the owner's
+   games; the current two predate v5.
+5. Smaller:
+   - Reasons for the opponent's mistakes in the opening tree ("their 4...Nf6 lets e5 hit the
+     knight"): `principles.explain` speaks to the mover ("your"); add a "their" voice.
+   - Chess.com ply links (`mining._ply_url`, `repertoire._url` only anchor Lichess URLs).
+   - Check the pages at phone width (the board column and line cards), add a favicon (404 now).
+   - Tests: `fastapi.testclient` warns that httpx support is going away; follow Starlette's
+     replacement when it lands.
+   - A hand-graded accuracy set for the model-written digest (the brief's other metric).
 
 ## Conventions that matter here
 

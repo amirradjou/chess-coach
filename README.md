@@ -86,13 +86,18 @@ table for opening names. The web coach is FastAPI with plain JavaScript and pyth
 - **v4 (done)** — the coach in the browser: your recurring mistakes on boards (your move in red,
   the better one in green) with what to learn, click-to-move practice, and your favourite
   openings with the habitual moves to fix and drills for them.
-- **Later** — rating trend against practice.
+- **v5 (done)** — learn from it: wrong puzzle answers you can explore (their reply, what it costs,
+  try again, step through the lines, play any move against the engine), reasons in chess terms
+  from the board, and Learn openings: your openings as a tree from your games, with the
+  punishment for each opponent mistake and training modes.
+- **Next** — remember opening training (spaced repetition for the punish cards), rating trend
+  against practice.
 
 ## Status
 
-**v0–v4 done.** Import, analyse, find your patterns, turn your own mistakes into puzzles, drill
-them on a schedule, fix your openings, and watch the numbers move, in the terminal or in the
-browser (`chess-coach serve`).
+**v0–v5 done.** Import, analyse, find your patterns, turn your own mistakes into puzzles, drill
+them on a schedule, learn and fix your openings, and watch the numbers move, in the terminal or in
+the browser (`chess-coach serve`).
 
 **Short on time doesn't count.** In a 1-minute game the last seconds are reflexes, so a move
 played with under 15 s left in bullet (or under a tenth of the clock in any game) is left out of
