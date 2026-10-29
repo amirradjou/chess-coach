@@ -26,19 +26,19 @@ was right.
 ## How it works (planned)
 
 ```
-Lichess / Chess.com APIs ──► game store (PGN + metadata)
+Lichess / Chess.com APIs, PGN files ──► game store (PGN + metadata)          v0, built
         │
         ▼
-Stockfish analysis (eval swings, best lines, motifs) ──► per-move facts
+Stockfish analysis (eval swings, best lines, motifs) ──► per-move facts     v0, built
         │
         ▼
-pattern mining (openings, phases, time controls, motif tags, eval-drop clusters)
+pattern mining (openings, phases, time controls, motif tags, eval-drop clusters)   v1
         │
         ▼
-Claude: explain patterns in plain language, citing specific games/moves  ──► digest
+language model: explain patterns in plain language, citing games/moves ──► digest  v1
         │
         ▼
-puzzle generator (your positions, engine-verified solutions) + spaced repetition
+puzzle generator (your positions, engine-verified solutions) + spaced repetition   v2
 ```
 
 - **The engine is the source of truth.** The model never judges a move; it explains
@@ -55,18 +55,89 @@ puzzle generator (your positions, engine-verified solutions) + spaced repetition
 - Explanation quality: a small hand-graded set of digests, scored for accuracy against
   engine facts.
 
-## Planned stack
+## Stack
 
-Go (or Python) service; Stockfish via UCI; SQLite for games, facts and puzzles; a small
-web UI for digests and puzzle drills; Lichess/Chess.com API clients.
+Python 3.12 (uv), a Typer + Rich command line, python-chess, Stockfish 19 over UCI, SQLite for
+games and per-move facts, and the CC0 [lichess-org/chess-openings](https://github.com/lichess-org/chess-openings)
+table for opening names. Planned: a small web UI for digests and puzzle drills.
 
 ## Milestones
 
-- **v0** — import games, run engine analysis, store per-move facts.
+- **v0 (done)** — import games, run engine analysis, store per-move facts with motif tags.
 - **v1** — pattern mining + first plain-language digest citing games.
 - **v2** — puzzle generation and spaced repetition drills.
 - **v3** — weekly digests, opening study suggestions, progress tracking.
 
 ## Status
 
-Idea stage — nothing runs yet.
+**v0 done.** Next is v1, pattern mining and the digest; [docs/PLAN.md](docs/PLAN.md) has the
+build plan and how to pick the work up.
+
+- `import lichess|chesscom|pgn` stores games in SQLite with your colour, the speed (Lichess's
+  rule) and the opening: Lichess's own header when it has one, otherwise the longest matching
+  line in the lichess-org opening table. Re-imports never duplicate a game.
+- `analyze` asks Stockfish about every position once and stores, per move: the evaluation
+  before and after from the mover's side, the best move and line, centipawn and win-probability
+  loss, a Lichess-style judgement (inaccuracy, mistake, blunder), the game phase, the clock, and
+  motif tags. It resumes where it stopped and re-runs only at a greater depth (or `--force`).
+- `stats` prints a per-game accuracy table and how often each motif shows up in your moves.
+
+Motif tags are computed in code from the board and the engine's facts, never by a model:
+
+| Tag | When |
+|---|---|
+| `hanging_piece`, `hanging_pawn` | the best reply captures something of yours that was undefended, or worth more than the piece taking it |
+| `allowed_fork`, `missed_fork` | the best reply attacks two of your pieces (the king, pieces worth more than the attacker, or undefended ones), or your best move would have done that to the opponent |
+| `allowed_mate`, `missed_mate` | your move let a forced mate in, or skipped one (up to mate in 6) |
+| `back_rank` | that mate is a rook or queen mate on the king's back rank |
+| `missed_tactic` | the opponent's previous move lost 20 points of win probability or more, and you didn't punish it |
+| `pawn_grab` | an error that captured a pawn |
+| `time_trouble` | under 20 s, or under 10% of the starting time, after the move |
+| `endgame_conversion` | a winning endgame (+2 or better) let slip below +1 |
+| `queen_trade_behind` | before the endgame you traded queens, or allowed the trade, while two or more steps behind in development (minor pieces off their home squares, king moved) |
+
+All tags except `queen_trade_behind` are only set on inaccuracies or worse.
+
+On 84 rated blitz games of a ~1500 Lichess player, analyzed at depth 12, `stats` ends with:
+
+```
+      Motifs on your 2626 moves
+┏━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━┓
+┃ motif              ┃ moves ┃ games ┃
+┡━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━┩
+│ missed_tactic      │    37 │    26 │
+│ time_trouble       │    30 │    13 │
+│ hanging_piece      │    29 │    23 │
+│ pawn_grab          │    26 │    23 │
+│ endgame_conversion │    17 │    12 │
+│ hanging_pawn       │    12 │    12 │
+│ allowed_mate       │    10 │     8 │
+│ missed_fork        │     6 │     6 │
+│ allowed_fork       │     4 │     4 │
+│ missed_mate        │     2 │     2 │
+│ back_rank          │     2 │     2 │
+└────────────────────┴───────┴───────┘
+```
+
+## Getting started
+
+```sh
+uv sync                     # install
+scripts/get-stockfish.sh    # fetch a Stockfish binary into ./.stockfish (no sudo needed)
+
+uv run chess-coach import lichess <username> --max 100 --rated   # LICHESS_TOKEN raises the rate limit
+uv run chess-coach import chesscom <username> --since 3m
+uv run chess-coach import pgn games.pgn --user "<your name in the PGN>"
+uv run chess-coach games                                         # what is stored
+uv run chess-coach analyze --depth 12 --threads 4
+uv run chess-coach stats
+```
+
+`--db <file>` picks another database (default `data/chess-coach.db`).
+
+## Development
+
+```sh
+uv run pytest                                   # tests (engine tests skip without Stockfish)
+uv run ruff check . && uv run ruff format .     # lint + format
+```

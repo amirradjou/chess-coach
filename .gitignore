@@ -1,0 +1,40 @@
+# secrets / local config
+.env
+.env.*
+!.env.example
+.envrc
+.claude/
+CLAUDE.md
+
+# dependencies / build
+node_modules/
+.venv/
+venv/
+dist/
+build/
+target/
+*.egg-info/
+__pycache__/
+*.pyc
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.coverage
+coverage/
+htmlcov/
+
+# editors / OS
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.DS_Store
+*.swp
+
+# chess-coach
+.stockfish/
+# local databases only; tests/data and src/chess_coach/data are committed
+/data/
+*.db
+*.db-wal
+*.db-shm

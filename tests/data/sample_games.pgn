@@ -1,0 +1,60 @@
+[Event "Rated Blitz game"]
+[Site "https://lichess.org/AbCdEfGh"]
+[Date "2026.09.01"]
+[White "coachme"]
+[Black "opponent1"]
+[Result "1-0"]
+[UTCDate "2026.09.01"]
+[UTCTime "18:04:11"]
+[WhiteElo "1512"]
+[BlackElo "1498"]
+[Variant "Standard"]
+[TimeControl "300+0"]
+[ECO "C58"]
+[Opening "Italian Game: Two Knights Defense, Fried Liver Attack"]
+[Termination "Normal"]
+
+1. e4 { [%clk 0:05:00] } 1... e5 { [%clk 0:05:00] } 2. Nf3 { [%clk 0:04:59] } 2... Nc6 { [%clk 0:04:58] } 3. Bc4 { [%clk 0:04:57] } 3... Nf6 { [%clk 0:04:56] } 4. Ng5 { [%clk 0:04:55] } 4... d5 { [%clk 0:04:52] } 5. exd5 { [%clk 0:04:54] } 5... Nxd5 { [%clk 0:04:49] } 6. Nxf7 { [%clk 0:04:50] } 6... Kxf7 { [%clk 0:04:45] } 7. Qf3+ { [%clk 0:04:48] } 7... Ke6 { [%clk 0:04:30] } 8. Nc3 { [%clk 0:04:44] } 8... Ncb4 { [%clk 0:04:12] } 9. a3 { [%clk 0:04:36] } 9... Nxc2+ { [%clk 0:04:01] } 10. Kd1 { [%clk 0:04:30] } 10... Nxa1 { [%clk 0:03:58] } 11. Nxd5 { [%clk 0:04:21] } 11... Kd6 { [%clk 0:03:30] } 12. d4 { [%clk 0:04:10] } 12... b5 { [%clk 0:03:02] } 13. Bxb5 { [%clk 0:04:02] } 13... Bb7 { [%clk 0:02:40] } 14. dxe5+ { [%clk 0:03:50] } 14... Kc5 { [%clk 0:02:12] } 15. Qd3 { [%clk 0:03:41] } 15... Qxd5 { [%clk 0:01:55] } 16. Be3+ { [%clk 0:03:33] } 16... Qd4 { [%clk 0:01:40] } 17. Bxd4+ { [%clk 0:03:20] } 17... Kd5 { [%clk 0:01:21] } 18. Qc4+ { [%clk 0:03:11] } 18... Ke4 { [%clk 0:01:02] } 19. f3+ { [%clk 0:03:04] } 19... Kf5 { [%clk 0:00:44] } 20. Qf7+ { [%clk 0:02:55] } 20... Kg5 { [%clk 0:00:31] } 21. h4+ { [%clk 0:02:50] } 21... Kh6 { [%clk 0:00:22] } 22. Qf4+ { [%clk 0:02:41] } 22... g5 { [%clk 0:00:15] } 23. Qf6+ { [%clk 0:02:36] } 1-0
+
+[Event "Live Chess"]
+[Site "Chess.com"]
+[Date "2026.09.02"]
+[Round "-"]
+[White "SomeRival"]
+[Black "CoachMe"]
+[Result "1-0"]
+[CurrentPosition "2rr3k/pp4pp/2Q5/4P3/8/2R5/PP3PPP/6K1 b - -"]
+[Timezone "UTC"]
+[ECO "D53"]
+[ECOUrl "https://www.chess.com/openings/Queens-Gambit-Declined-Modern-Variation"]
+[UTCDate "2026.09.02"]
+[UTCTime "20:15:33"]
+[WhiteElo "1530"]
+[BlackElo "1505"]
+[TimeControl "600"]
+[Termination "SomeRival won by resignation"]
+[StartTime "20:15:33"]
+[EndDate "2026.09.02"]
+[EndTime "20:31:02"]
+[Link "https://www.chess.com/game/live/123456789"]
+
+1. d4 {[%clk 0:09:59.8]} 1... d5 {[%clk 0:09:58.1]} 2. c4 {[%clk 0:09:58.9]} 2... e6 {[%clk 0:09:55.7]} 3. Nc3 {[%clk 0:09:57.2]} 3... Nf6 {[%clk 0:09:53.0]} 4. Bg5 {[%clk 0:09:55.1]} 4... Be7 {[%clk 0:09:49.9]} 5. e3 {[%clk 0:09:53.4]} 5... O-O {[%clk 0:09:46.3]} 6. Nf3 {[%clk 0:09:51.0]} 6... Nbd7 {[%clk 0:09:40.2]} 7. Rc1 {[%clk 0:09:48.8]} 7... c6 {[%clk 0:09:31.5]} 8. Bd3 {[%clk 0:09:45.2]} 8... dxc4 {[%clk 0:09:20.4]} 9. Bxc4 {[%clk 0:09:44.0]} 9... Nd5 {[%clk 0:09:05.1]} 10. Bxe7 {[%clk 0:09:40.7]} 10... Qxe7 {[%clk 0:09:03.9]} 11. O-O {[%clk 0:09:38.2]} 11... Nxc3 {[%clk 0:08:50.0]} 12. Rxc3 {[%clk 0:09:36.6]} 12... e5 {[%clk 0:08:30.2]} 13. Qc2 {[%clk 0:09:20.1]} 13... exd4 {[%clk 0:08:10.7]} 14. exd4 {[%clk 0:09:18.3]} 14... Nb6 {[%clk 0:07:45.9]} 15. Re1 {[%clk 0:09:01.4]} 15... Qd6 {[%clk 0:07:02.3]} 16. Bb3 {[%clk 0:08:40.0]} 16... Be6 {[%clk 0:06:30.8]} 17. Bxe6 {[%clk 0:08:35.5]} 17... Qxe6 {[%clk 0:05:58.2]} 18. Rxe6 {[%clk 0:08:33.0]} 18... fxe6 {[%clk 0:05:55.1]} 19. Ne5 {[%clk 0:08:20.4]} 19... Rf5 {[%clk 0:05:10.0]} 20. Qb3 {[%clk 0:08:05.2]} 20... Rd8 {[%clk 0:04:20.6]} 21. Qxe6+ {[%clk 0:08:01.0]} 21... Kh8 {[%clk 0:04:02.4]} 22. Qxc6 {[%clk 0:07:50.3]} 22... Rxe5 {[%clk 0:03:15.0]} 23. dxe5 {[%clk 0:07:48.9]} 1-0
+
+[Event "Club evening"]
+[Site "?"]
+[Date "2026.09.03"]
+[Round "?"]
+[White "coachme"]
+[Black "Local Player"]
+[Result "1/2-1/2"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Bxc6 dxc6 5. O-O f6 6. d4 exd4 7. Nxd4 c5 8. Nb3 Qxd1 9. Rxd1 Bg4 10. f3 Be6 11. Nc3 Bd6 12. Be3 b6 13. a4 Kf7 14. a5 Ne7 15. Nd2 Rhd8 16. Nc4 Bxc4 1/2-1/2
+
+[Event "Not my game"]
+[Site "?"]
+[Date "????.??.??"]
+[White "someone"]
+[Black "other"]
+[Result "*"]
+
+1. e4 c5 2. Nf3 d6 *
