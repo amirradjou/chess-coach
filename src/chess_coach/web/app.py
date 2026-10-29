@@ -4,13 +4,18 @@ key."""
 
 from __future__ import annotations
 
+import threading
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from importlib import resources
 from pathlib import Path
+from typing import Annotated
 
 import chess
+import chess.engine
 import chess.svg
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
@@ -22,27 +27,90 @@ from chess_coach.coach.habits import (
     from_pressure,
     missed_kinds,
 )
+from chess_coach.coach.principles import explain, opening_idea
 from chess_coach.coach.progress import periods, solve_rates
 from chess_coach.coach.repertoire import Favorite, Fix, favorites
 from chess_coach.db import Store
+from chess_coach.engine.stockfish import Engine, EngineNotFoundError, LineEval
+from chess_coach.models import Puzzle
 from chess_coach.patterns.features import move_rows
 from chess_coach.patterns.mining import Evidence
+from chess_coach.puzzles import review
 from chess_coach.puzzles.srs import schedule
 
 PLAYED = "#d1495b"  # your move
 BETTER = "#2a9d8f"  # the engine's move
 TRIED = "#3d5a80"  # your answer in practice
+ARROWS = {"best": BETTER, "played": PLAYED, "tried": TRIED}
+OPENING_NOTE_MOVES = 15  # puzzles this early get a note on what their opening is about
+EXPLORE_DEPTH = 16  # quick enough to answer while you click through a line
+CACHE_POSITIONS = 10_000
 
 
-def board_svg(fen: str, arrows: list[tuple[str, str]] = (), size: int = 320) -> str:
-    """The position from the side to move, with (uci, colour) arrows."""
+def board_svg(
+    fen: str,
+    arrows: list[tuple[str, str]] = (),
+    size: int = 320,
+    *,
+    orientation: chess.Color | None = None,
+    lastmove: str | None = None,
+) -> str:
+    """The position (from the side to move unless told), with (uci, colour) arrows."""
     board = chess.Board(fen)
     drawn = []
     for uci, color in arrows:
         if uci and len(uci) >= 4:
             move = chess.Move.from_uci(uci)
             drawn.append(chess.svg.Arrow(move.from_square, move.to_square, color=color))
-    return chess.svg.board(board, orientation=board.turn, arrows=drawn, size=size)
+    return chess.svg.board(
+        board,
+        orientation=board.turn if orientation is None else orientation,
+        arrows=drawn,
+        lastmove=chess.Move.from_uci(lastmove) if lastmove else None,
+        size=size,
+    )
+
+
+class Analyst:
+    """One engine for the app, started on first use, with its answers cached by FEN. Without
+    Stockfish it answers None and the pages show lines without the engine."""
+
+    def __init__(self, start: Callable[[], Engine]) -> None:
+        self._start = start
+        self._engine: Engine | None = None
+        self._missing = False
+        self._lock = threading.Lock()
+        self._cache: dict[str, LineEval] = {}
+
+    def __call__(self, fen: str) -> LineEval | None:
+        if fen in self._cache:
+            return self._cache[fen]
+        with self._lock:
+            if self._engine is None and not self._missing:
+                try:
+                    self._engine = self._start()
+                except EngineNotFoundError:
+                    self._missing = True
+            if self._engine is None:
+                return None
+            try:
+                ev = self._engine.evaluate(chess.Board(fen), depth=EXPLORE_DEPTH)[0]
+            except (chess.engine.EngineError, chess.engine.EngineTerminatedError):
+                self._close()  # started again on the next call
+                return None
+        if len(self._cache) >= CACHE_POSITIONS:
+            self._cache.clear()
+        self._cache[fen] = ev
+        return ev
+
+    def _close(self) -> None:
+        engine, self._engine = self._engine, None
+        if engine is not None and hasattr(engine, "close"):
+            engine.close()
+
+    def close(self) -> None:
+        with self._lock:
+            self._close()
 
 
 def _example(e: Evidence) -> dict:
@@ -52,6 +120,7 @@ def _example(e: Evidence) -> dict:
         "best": e.best_san,
         "loss": round(e.wp_loss),
         "url": e.url,
+        "reasons": explain(e.fen, e.uci, e.best_uci).all()[:3] if e.fen and e.uci else [],
     }
 
 
@@ -75,6 +144,7 @@ def _fix(f: Fix) -> dict:
         "times": f.times,
         "loss_cp": round(f.avg_cp_loss),
         "urls": [url for _, _, url in f.games if url],
+        "reasons": explain(f.fen, f.played_uci, f.best_uci).all()[:3],
     }
 
 
@@ -90,19 +160,55 @@ def _favorite(f: Favorite) -> dict:
         "names": [{"name": n, "games": c} for n, c in f.names],
         "line": f.line,
         "book": f.book,
+        "idea": opening_idea(f.family),
         "opening_error_rate": round(f.opening_error_rate * 100, 1),
         "fixes": [_fix(x) for x in f.fixes],
+    }
+
+
+def _line(line: review.Line) -> dict:
+    return {
+        "kind": line.kind,
+        "label": line.label,
+        "start": line.start,
+        "plies": [
+            {"san": p.san, "uci": p.uci, "fen": p.fen, "number": p.number, "engine": p.engine}
+            for p in line.plies
+        ],
+        "score": line.score.text if line.score else None,
+        "why": line.why,
+        "faults": line.faults,
+        "ideas": line.ideas,
     }
 
 
 class Answer(BaseModel):
     id: str
     uci: str  # "?" gives up
+    record: bool = True  # only the first answer to a puzzle counts; tries after it pass False
 
 
-def create_app(db_path: Path) -> FastAPI:
-    app = FastAPI(title="chess-coach", docs_url=None, redoc_url=None)
+class Explore(BaseModel):
+    fen: str
+    moves: list[str]
+
+
+def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
+    analyst = Analyst(engine)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        yield
+        analyst.close()
+
+    app = FastAPI(title="chess-coach", docs_url=None, redoc_url=None, lifespan=lifespan)
     cache: dict[str, tuple[tuple[int, int], dict]] = {}
+
+    def puzzle_or_404(store: Store, puzzle_id: str) -> Puzzle:
+        puzzle = next((p for p in store.puzzles() if p.id == puzzle_id), None)
+        if puzzle is None:
+            raise HTTPException(404, "no such puzzle")
+        return puzzle
 
     def data(store: Store):
         games = list(store.iter_games())
@@ -179,6 +285,8 @@ def create_app(db_path: Path) -> FastAPI:
             p = due[0]
             game = store.get_game(p.game_id)
         board = chess.Board(p.fen)
+        family = p.tags[1] if "opening-fix" in p.tags else (game.opening_family if game else None)
+        early = board.fullmove_number <= OPENING_NOTE_MOVES
         return {
             "done": False,
             "id": p.id,
@@ -189,6 +297,8 @@ def create_app(db_path: Path) -> FastAPI:
             "tags": p.tags,
             "due": total_due,
             "opening_fix": "opening-fix" in p.tags,
+            "opening": family,
+            "opening_idea": opening_idea(family) if early else None,
             "game": (game.url + f"#{p.ply}")
             if game and game.url and "lichess" in game.url
             else (game.url if game else None),
@@ -198,45 +308,77 @@ def create_app(db_path: Path) -> FastAPI:
     def drill_answer(a: Answer) -> dict:
         now = datetime.now(UTC)
         with Store(db_path) as store:
-            puzzle = next((p for p in store.puzzles() if p.id == a.id), None)
-            review = store.review(a.id)
-            if puzzle is None or review is None:
+            puzzle = puzzle_or_404(store, a.id)
+            schedule_now = store.review(a.id)
+            if schedule_now is None:
                 raise HTTPException(404, "no such puzzle")
             board = chess.Board(puzzle.fen)
             tried = None
             if a.uci != "?":
                 try:
-                    tried = chess.Move.from_uci(a.uci)
+                    tried = review.legal(board, a.uci)
                 except ValueError as exc:
-                    raise HTTPException(400, "not a move") from exc
-                if tried not in board.legal_moves:
-                    promo = chess.Move(tried.from_square, tried.to_square, chess.QUEEN)
-                    if promo not in board.legal_moves:
-                        raise HTTPException(400, "not a legal move here")
-                    tried = promo
+                    raise HTTPException(400, str(exc)) from exc
             correct = tried is not None and puzzle.is_right(tried.uci())
-            after = schedule(review, correct, now.date())
-            store.save_attempt(after, a.uci, correct, now)
-        arrows = [(puzzle.solution, BETTER)]
-        if tried is not None and not correct:
-            arrows.append((tried.uci(), TRIED))
-        line, b = [], board.copy()
-        for uci in [puzzle.solution, *puzzle.line.split()]:
-            move = chess.Move.from_uci(uci)
-            if move not in b.legal_moves:
-                break
-            line.append(b.san(move))
-            b.push(move)
-        also = [board.san(chess.Move.from_uci(u)) for u in puzzle.accept]
-        return {
+            due = schedule_now.due
+            if a.record:
+                after = schedule(schedule_now, correct, now.date())
+                store.save_attempt(after, a.uci, correct, now)
+                due = after.due
+        out = {
             "correct": correct,
             "answer": board.san(tried) if tried is not None else None,
+            "uci": tried.uci() if tried is not None else None,
             "solution": puzzle.solution_san,
-            "also": also,
-            "line": " ".join(line),
-            "svg": board_svg(puzzle.fen, arrows, size=400),
-            "next_due": after.due,
+            "also": [board.san(chess.Move.from_uci(u)) for u in puzzle.accept],
+            "recorded": a.record,
+            "next_due": due,
         }
+        if tried is not None and not correct:
+            # Why it fails, without naming the answer, so the puzzle can be tried again.
+            out["tried"] = _line(review.attempt(puzzle, tried.uci(), analyst, reveal=False))
+        return out
+
+    @app.get("/api/drill/review")
+    def drill_review(id: str, tried: Annotated[list[str] | None, Query()] = None) -> dict:
+        with Store(db_path) as store:
+            puzzle = puzzle_or_404(store, id)
+        try:
+            lines = review.review(puzzle, tried or [], analyst)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"lines": [_line(x) for x in lines]}
+
+    @app.post("/api/explore")
+    def explore(e: Explore) -> dict:
+        if len(e.moves) > 200:
+            raise HTTPException(400, "too many moves")
+        try:
+            return _line(review.analysis(e.fen, e.moves, analyst))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.get("/api/board")
+    def board_image(
+        fen: str,
+        orientation: str = "white",
+        last: str | None = None,
+        arrow: str | None = None,
+        color: str = "best",
+    ) -> Response:
+        if color not in ARROWS or orientation not in ("white", "black"):
+            raise HTTPException(400, "unknown colour or orientation")
+        try:
+            svg = board_svg(
+                fen,
+                [(arrow, ARROWS[color])] if arrow else [],
+                size=400,
+                orientation=chess.WHITE if orientation == "white" else chess.BLACK,
+                lastmove=last,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return Response(svg, media_type="image/svg+xml")
 
     @app.get("/api/drill/tags")
     def drill_tags() -> list[dict]:

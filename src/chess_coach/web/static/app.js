@@ -23,6 +23,11 @@ function fill(node, ...children) {
     .map((c) => (c instanceof Node ? c : document.createTextNode(String(c)))));
 }
 
+function reasons(list) {
+  // Chess reasons worked out from the board (coach/principles.py), not by a model.
+  return list?.length ? el("ul", { class: "reasons" }, list.map((r) => el("li", {}, r))) : null;
+}
+
 function boardNode(svg, cls = "board") {
   const div = el("div", { class: cls });
   div.innerHTML = svg; // drawn by the server from a FEN, never from user text
@@ -53,6 +58,7 @@ function example(e) {
     el("div", {}, "You played ", el("span", { class: "played" }, e.move),
       " · better ", el("span", { class: "better" }, e.best),
       el("span", { class: "muted small" }, ` · win chance −${e.loss}%`)),
+    reasons(e.reasons),
     e.url ? el("a", { href: e.url, target: "_blank", rel: "noopener" }, "open the game") : null,
   );
 }
@@ -94,8 +100,18 @@ async function loadMistakes() {
 }
 
 // -- practice ------------------------------------------------------------------------------
-let current = null;
-let from = null;
+// While solving, a move from the puzzle position is an answer. A wrong one shows their best reply
+// and what it costs, and you can try again (only the first answer counts for the schedule). Once
+// it's solved or shown, the lines can be stepped through and any move you play on the board is
+// answered by the engine.
+const COLOR = { best: "best", tried: "played", game: "played", analysis: "tried" };
+const boards = new Map(); // board URL -> SVG text, for this puzzle
+let drill = null;
+let drawn = 0;
+
+function fresh(puzzle) {
+  return { puzzle, solving: true, tries: [], result: null, lines: [], line: 0, ply: 0, from: null };
+}
 
 function squareAt(svg, evt, side) {
   const pt = svg.createSVGPoint();
@@ -140,71 +156,220 @@ async function openPractice(tag) {
 }
 $("#tag").addEventListener("change", nextPuzzle);
 
+function buttons({ retry = false, giveup = false, next = false }) {
+  $("#retry").hidden = !retry;
+  $("#giveup").hidden = !giveup;
+  $("#next").hidden = !next;
+}
+
 async function nextPuzzle() {
-  from = null;
-  $("#feedback").textContent = "";
-  $("#next").hidden = true;
-  $("#giveup").hidden = false;
+  boards.clear();
+  drill = null;
+  fill($("#feedback"));
+  fill($("#lines"));
+  $("#steps").hidden = true;
+  buttons({});
   const tag = $("#tag").value;
   const p = await api("/api/drill/next" + (tag ? `?tag=${encodeURIComponent(tag)}` : ""));
-  current = p.done ? null : p;
   if (p.done) {
     fill($("#board"));
     $("#prompt").textContent = p.puzzles
       ? "Nothing due here today. Solved puzzles come back later; missed ones tomorrow."
       : "No puzzles yet. Run `chess-coach puzzles make` (and `--openings`).";
     $("#due").textContent = "";
-    $("#giveup").hidden = true;
     return;
   }
+  drill = fresh(p);
   $("#due").textContent = `${p.due} due`;
-  fill($("#board"), boardNode(p.svg, "board"));
   fill($("#prompt"),
     p.opening_fix
       ? el("span", {}, `Your opening (${p.tags[1] || ""}): here you usually play `, el("span", { class: "played" }, p.played), ". Find a better move.")
       : el("span", {}, "In the game you played ", el("span", { class: "played" }, p.played), ". Find the best move."),
     el("br"), el("span", { class: "muted small" }, `${p.side === "white" ? "White" : "Black"} to move · ${p.tags.join(", ").replaceAll("_", " ")}`),
+    p.opening_idea ? el("span", { class: "idea" }, el("b", {}, `${p.opening}: `), p.opening_idea) : null,
   );
-  const svg = $("#board svg");
-  svg.addEventListener("click", (evt) => {
-    if (!current) return;
-    const sq = squareAt(svg, evt, current.side);
-    if (!sq) return;
-    if (!from) { from = sq; mark(svg, sq, current.side); return; }
-    if (sq.name === from.name) { from = null; mark(svg, null); return; }
-    answer(from.name + sq.name);
-  });
+  buttons({ giveup: true });
+  await draw();
+}
+
+// The position on show: the puzzle itself (ply 0) or the position after `ply` moves of a line,
+// with the line's next move as an arrow.
+function shown() {
+  const line = drill.lines[drill.line];
+  const before = drill.ply > 0 ? line.plies[drill.ply - 1] : null;
+  return {
+    fen: before ? before.fen : drill.puzzle.fen,
+    last: before?.uci,
+    next: line?.plies[drill.ply]?.uci,
+    color: COLOR[line?.kind] || "best",
+  };
+}
+
+async function boardSvg({ fen, last, next, color }) {
+  const q = new URLSearchParams({ fen, orientation: drill.puzzle.side, color });
+  if (last) q.set("last", last);
+  if (next) q.set("arrow", next);
+  const url = `/api/board?${q}`;
+  if (!boards.has(url)) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(r.statusText);
+    boards.set(url, await r.text());
+  }
+  return boards.get(url);
+}
+
+async function draw() {
+  const token = ++drawn;
+  const svg = await boardSvg(shown());
+  if (token !== drawn || !drill) return; // a later step or puzzle took over
+  drill.from = null;
+  fill($("#board"), boardNode(svg, "board"));
+  $("#board svg").addEventListener("click", onBoard);
+  drawLines();
+  drawSteps();
+}
+
+function drawSteps() {
+  const line = drill.lines[drill.line];
+  $("#steps").hidden = !drill.lines.length;
+  if (!line) return;
+  const ply = drill.ply > 0 ? line.plies[drill.ply - 1] : null;
+  $("#where").textContent = ply ? `${ply.number}${ply.san}${ply.engine ? " (engine)" : ""}` : "start";
+}
+
+function step(to) {
+  const n = drill?.lines[drill.line]?.plies.length;
+  if (n === undefined) return;
+  drill.ply = { first: 0, prev: Math.max(0, drill.ply - 1), next: Math.min(n, drill.ply + 1), last: n }[to];
+  draw();
+}
+for (const b of document.querySelectorAll("#steps button")) b.addEventListener("click", () => step(b.dataset.step));
+document.addEventListener("keydown", (e) => {
+  const keys = { ArrowLeft: "prev", ArrowRight: "next", Home: "first", End: "last" };
+  if ($("#practice").hidden || !drill?.lines.length || !keys[e.key] || e.target.closest("select, input, textarea")) return;
+  e.preventDefault();
+  step(keys[e.key]);
+});
+
+function drawLines() {
+  fill($("#lines"), drill.lines.map((line, li) => el(
+    "div", { class: `line ${line.kind}${li === drill.line ? " on" : ""}` },
+    el("div", { class: "line-head" },
+      el("button", { class: `link ${line.kind === "best" ? "better" : line.kind === "analysis" ? "" : "played"}`, onclick: () => { drill.line = li; drill.ply = 0; draw(); } }, line.label),
+      line.score ? el("span", { class: "eval" }, line.score) : null),
+    el("div", { class: "moves" }, line.plies.map((p, i) => el(
+      "button",
+      { class: `chip${p.engine ? " engine" : ""}${li === drill.line && i + 1 === drill.ply ? " on" : ""}`, onclick: () => { drill.line = li; drill.ply = i + 1; draw(); } },
+      i === 0 || !p.number.endsWith("...") ? `${p.number}${p.san}` : p.san))),
+    line.why && li === drill.line ? el("div", { class: "why" }, line.why) : null,
+    li === drill.line ? reasons([...(line.faults || []), ...(line.ideas || [])]) : null,
+  )));
+}
+
+async function onBoard(evt) {
+  const svg = evt.currentTarget;
+  const sq = squareAt(svg, evt, drill.puzzle.side);
+  if (!sq) return;
+  if (!drill.from) { drill.from = sq; mark(svg, sq, drill.puzzle.side); return; }
+  const uci = drill.from.name + sq.name;
+  drill.from = null;
+  mark(svg, null);
+  if (uci.slice(0, 2) === uci.slice(2)) return;
+  if (!drill.solving) return explore(uci);
+  if (drill.ply !== 0) {
+    // While solving, answers are moves from the puzzle position.
+    drill.ply = 0;
+    await draw();
+    $("#where").textContent = "start: try your move here";
+    return;
+  }
+  answer(uci);
 }
 
 async function answer(uci) {
-  if (!current) return;
+  const first = drill.tries.length === 0 && !drill.result;
   let r;
   try {
     r = await api("/api/drill/answer", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: current.id, uci }),
+      body: JSON.stringify({ id: drill.puzzle.id, uci, record: first }),
     });
   } catch (err) {
-    from = null;
-    mark($("#board svg"), null);
-    $("#feedback").textContent = "That isn't a legal move here. Try again.";
+    fill($("#feedback"), "That isn't a legal move here. Try again.");
     return;
   }
-  const game = current.game;
-  current = null;
-  fill($("#board"), boardNode(r.svg, "board"));
+  if (first) drill.due = r.next_due;
+  drill.result = r;
+  if (r.correct) return reveal(r.uci);
+  if (r.answer === null) return reveal(null); // gave up
+  drill.tries.push(r.uci);
+  const at = drill.lines.findIndex((l) => l.plies[0]?.uci === r.uci);
+  if (at >= 0) drill.lines[at] = r.tried;
+  else drill.lines.push(r.tried);
+  drill.line = at >= 0 ? at : drill.lines.length - 1;
+  drill.ply = r.tried.plies.length > 1 ? 1 : 0; // after your move, with their reply as the arrow
   fill($("#feedback"),
-    r.correct ? el("b", { class: "better" }, "Correct. ") : el("b", { class: "played" }, uci === "?" ? "" : `${r.answer} isn't it. `),
-    "The move: ", el("span", { class: "better" }, r.solution),
-    r.also.length ? ` (also good: ${r.also.join(", ")})` : "",
-    el("br"), el("span", { class: "muted small" }, `Line: ${r.line} · next time ${r.next_due}`),
-    game ? el("span", {}, " · ", el("a", { href: game, target: "_blank", rel: "noopener" }, "the game")) : null,
-  );
-  $("#giveup").hidden = true;
-  $("#next").hidden = false;
+    el("b", { class: "played" }, `${r.answer} isn't it.`), " Their answer and what it costs are below.",
+    el("br"), el("span", { class: "muted small" },
+      `Try again from the start, or show the answer. This counts as a miss (back on ${drill.due}).`));
+  buttons({ retry: true, giveup: true });
+  await draw();
 }
-$("#giveup").addEventListener("click", () => answer("?"));
+
+async function reveal(found) {
+  drill.solving = false;
+  buttons({});
+  const tried = found ? [...drill.tries, found] : drill.tries;
+  const q = new URLSearchParams({ id: drill.puzzle.id });
+  for (const t of tried) q.append("tried", t);
+  fill($("#feedback"), el("span", { class: "muted" }, "Working out the lines…"));
+  const { lines } = await api(`/api/drill/review?${q}`);
+  if (!drill) return;
+  drill.lines = lines;
+  drill.line = 0;
+  drill.ply = 0;
+  const r = drill.result;
+  const game = drill.puzzle.game;
+  fill($("#feedback"),
+    found
+      ? el("b", { class: "better" }, drill.tries.length ? `Found it on try ${drill.tries.length + 1}. ` : "Correct. ")
+      : el("span", {}, "The answer: ", el("b", { class: "better" }, r.solution), ". "),
+    found && r.answer !== r.solution ? ["The engine's first choice: ", el("b", { class: "better" }, r.solution), ". "] : null,
+    r.also.length ? `Also good: ${r.also.join(", ")}. ` : null,
+    el("br"),
+    el("span", { class: "muted small" },
+      `Next time: ${drill.due}. Play any move on the board to see the engine's answer.`),
+    game ? el("span", { class: "small" }, " ", el("a", { href: game, target: "_blank", rel: "noopener" }, "Open the game")) : null,
+  );
+  buttons({ next: true });
+  await draw();
+}
+
+async function explore(uci) {
+  const line = drill.lines[drill.line];
+  const before = line ? line.plies.slice(0, drill.ply).map((p) => p.uci) : [];
+  let a;
+  try {
+    a = await api("/api/explore", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fen: drill.puzzle.fen, moves: [...before, uci] }),
+    });
+  } catch (err) {
+    $("#where").textContent = "that isn't a legal move here";
+    return;
+  }
+  const at = drill.lines.findIndex((l) => l.kind === "analysis");
+  if (at >= 0) drill.lines[at] = a;
+  else drill.lines.push(a);
+  drill.line = at >= 0 ? at : drill.lines.length - 1;
+  drill.ply = before.length + 1;
+  await draw();
+}
+
+$("#retry").addEventListener("click", () => { drill.ply = 0; draw(); });
+$("#giveup").addEventListener("click", () => (drill.result ? reveal(null) : answer("?")));
 $("#next").addEventListener("click", nextPuzzle);
 
 // -- openings ------------------------------------------------------------------------------
@@ -216,6 +381,7 @@ function favoriteCard(f) {
     el("div", { class: "muted" }, `${f.games} games · scored ${f.score}% (${f.wins} won, ${f.draws} drawn, ${f.losses} lost) · mistakes on ${f.opening_error_rate}% of your opening moves`),
     el("div", { class: "score" }, el("div", { class: "w", style: `width:${pct(f.wins)}` }),
       el("div", { class: "d", style: `width:${pct(f.draws)}` }), el("div", { class: "l", style: `width:${pct(f.losses)}` })),
+    f.idea ? el("p", { class: "idea" }, el("b", {}, "What it's about: "), f.idea) : null,
     f.line ? el("p", {}, "Your usual line: ", el("code", {}, f.line)) : null,
     f.book ? el("p", { class: "muted small" }, `Book (${f.names[0]?.name}): `, el("code", {}, f.book)) : null,
     f.fixes.length
@@ -225,6 +391,7 @@ function favoriteCard(f) {
           boardNode(x.svg),
           el("div", {}, "You play ", el("span", { class: "played" }, x.move), ` (${x.times} games, −${x.loss_cp} cp on average) · better `,
             el("span", { class: "better" }, x.best)),
+          reasons(x.reasons),
           x.urls[0] ? el("a", { href: x.urls[0], target: "_blank", rel: "noopener" }, "an example") : null))),
         el("p", {}, el("button", { class: "primary", onclick: () => show("practice", f.family) }, "Drill these fixes")))
       : el("p", { class: "muted small" }, "No repeated weak move here: your play in this opening holds up."),

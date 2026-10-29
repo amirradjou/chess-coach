@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from chess_coach.coach.habits import lesson_for, missed_kinds
 from chess_coach.coach.repertoire import favorites, fixes, is_book, usual_line
 from chess_coach.db import Store
-from chess_coach.engine.stockfish import LineEval
+from chess_coach.engine.stockfish import EngineNotFoundError, LineEval
 from chess_coach.models import Color, Judgement, MoveFact, Phase
 from chess_coach.patterns.features import kind_of, move_rows, piece_of
 from chess_coach.puzzles.make import make, verify_fix
@@ -144,7 +144,27 @@ def test_an_opening_fix_accepts_every_good_move():
 # -- web ------------------------------------------------------------------------------------
 
 
-def _app(tmp_path: Path) -> TestClient:
+class FirstMoves:
+    """Answers every position with its first two legal moves in UCI order, White a little better."""
+
+    started = 0
+
+    def __init__(self):
+        FirstMoves.started += 1
+
+    def evaluate(self, board, *, depth, multipv=1):
+        scratch, pv = board.copy(), []
+        for _ in range(2):
+            moves = sorted(scratch.legal_moves, key=lambda m: m.uci())
+            if not moves:
+                break
+            pv.append(moves[0])
+            scratch.push(moves[0])
+        cp = 30 if board.turn == chess.WHITE else -30
+        return [LineEval(cp, None, pv[0] if pv else None, pv)]
+
+
+def _app(tmp_path: Path, engine=FirstMoves) -> TestClient:
     db = tmp_path / "coach.db"
     games, moves = planted()
     with Store(db) as store:
@@ -158,7 +178,7 @@ def _app(tmp_path: Path) -> TestClient:
         store.conn.execute("UPDATE moves SET fen_before = ?, uci = 'a2a3'", (chess.STARTING_FEN,))
         store.conn.commit()
         make(store, FakeEngine([LineEval(300, None, e2e4), LineEval(0, None, d2d4)]), limit=2)
-    return TestClient(create_app(db))
+    return TestClient(create_app(db, engine))
 
 
 def test_pages_and_static_files(tmp_path):
@@ -199,3 +219,72 @@ def test_drill_round_trip(tmp_path):
     prog = client.get("/api/progress").json()
     assert prog["puzzles"] == {"attempts": 2, "solved": 1}
     assert client.post("/api/drill/answer", json={"id": "nope", "uci": "?"}).status_code == 404
+
+
+def test_a_wrong_answer_shows_why_and_can_be_tried_again(tmp_path):
+    FirstMoves.started = 0
+    client = _app(tmp_path)
+    p = client.get("/api/drill/next").json()
+    miss = client.post("/api/drill/answer", json={"id": p["id"], "uci": "a2a3"}).json()
+    assert (miss["correct"], miss["answer"], miss["recorded"]) == (False, "a3", True)
+    tried = miss["tried"]
+    assert [(x["san"], x["engine"]) for x in tried["plies"]] == [
+        ("a3", False),
+        ("a5", True),
+        ("Ra2", True),
+    ]
+    assert tried["why"].startswith("They answer 1...a5.") and "e4" not in tried["why"]
+    assert tried["faults"][0].startswith("It spends a move on a wing pawn")
+    assert tried["ideas"] == []  # what the better move does would give it away
+    # a second try doesn't count: the miss stands
+    hit = client.post(
+        "/api/drill/answer", json={"id": p["id"], "uci": "e2e4", "record": False}
+    ).json()
+    assert hit["correct"] and not hit["recorded"] and hit["next_due"] == miss["next_due"]
+    assert client.get("/api/progress").json()["puzzles"] == {"attempts": 1, "solved": 0}
+    lines = client.get(
+        "/api/drill/review", params={"id": p["id"], "tried": ["a2a3", "e2e4"]}
+    ).json()["lines"]
+    assert [(x["kind"], x["label"], x["score"]) for x in lines] == [
+        ("best", "Best: e4", "+0.3"),
+        ("tried", "Your try: a3", "+0.3"),
+    ]
+    assert FirstMoves.started == 1  # one engine for the app
+
+
+def test_any_move_can_be_explored(tmp_path):
+    client = _app(tmp_path)
+    fen = chess.STARTING_FEN
+    a = client.post("/api/explore", json={"fen": fen, "moves": ["e2e4", "e7e5"]}).json()
+    assert a["kind"] == "analysis" and a["score"] == "+0.3"
+    assert [x["engine"] for x in a["plies"]] == [False, False, True, True]
+    assert a["why"] == "After 1...e5: +0.3 for you. The engine's move: 2.a3."
+    assert client.post("/api/explore", json={"fen": fen, "moves": ["e2e5"]}).status_code == 400
+    assert client.post("/api/explore", json={"fen": "nope", "moves": []}).status_code == 400
+    assert client.get("/api/drill/review", params={"id": "nope"}).status_code == 404
+
+
+def test_board_images(tmp_path):
+    client = _app(tmp_path)
+    start = chess.STARTING_FEN
+    r = client.get(
+        "/api/board",
+        params={"fen": start, "orientation": "black", "last": "e2e4", "arrow": "e7e5"},
+    )
+    assert r.headers["content-type"].startswith("image/svg+xml") and r.text.startswith("<svg")
+    assert client.get("/api/board", params={"fen": start, "color": "red"}).status_code == 400
+    assert client.get("/api/board", params={"fen": "nope"}).status_code == 400
+    assert client.get("/api/board", params={"fen": start, "arrow": "zzzz"}).status_code == 400
+
+
+def test_lines_without_stockfish(tmp_path):
+    def missing():
+        raise EngineNotFoundError("no engine")
+
+    client = _app(tmp_path, engine=missing)
+    p = client.get("/api/drill/next").json()
+    miss = client.post("/api/drill/answer", json={"id": p["id"], "uci": "a2a3"}).json()
+    assert [x["san"] for x in miss["tried"]["plies"]] == ["a3"]
+    assert "Stockfish isn't available" in miss["tried"]["why"]
+    lines = client.get("/api/drill/review", params={"id": p["id"]}).json()["lines"]
+    assert [(x["label"], x["score"]) for x in lines] == [("Best: e4", None)]

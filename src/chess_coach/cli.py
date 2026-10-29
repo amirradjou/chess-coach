@@ -572,6 +572,7 @@ def serve(
 
     import uvicorn
 
+    from chess_coach.engine.stockfish import Engine
     from chess_coach.web.app import create_app
 
     settings: Settings = ctx.obj
@@ -584,7 +585,15 @@ def serve(
     console.print(f"Chess coach on [bold]{url}[/bold] ({settings.db_path}). Ctrl+C to stop.")
     if open_browser:
         webbrowser.open(url)
-    uvicorn.run(create_app(settings.db_path), host=host, port=port, log_level="warning")
+
+    def engine() -> Engine:
+        return Engine(
+            settings.stockfish_path,
+            threads=settings.engine_threads,
+            hash_mb=settings.engine_hash_mb,
+        )
+
+    uvicorn.run(create_app(settings.db_path, engine), host=host, port=port, log_level="warning")
 
 
 if __name__ == "__main__":
