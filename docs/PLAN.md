@@ -2,19 +2,20 @@
 
 Working notes for whoever picks this up next (human or Claude session). Keep it current.
 
-## Where things stand (2026-09-17)
+## Where things stand (2026-10-29)
 
-Branch `v0-import-and-analysis` (PR open against `main`; merge with a merge commit, not squash,
-to keep the step-by-step history). Everything below is committed and green (`uv run pytest`,
-ruff, pre-commit, CI).
+v0 is done: branch `v0-import-and-analysis`, PR #1, merged with a merge commit (not squash) to
+keep the step-by-step history. Everything below is green (`uv run pytest`, ruff, pre-commit, CI).
 
 Done in v0:
 - `import lichess|chesscom|pgn` → SQLite (`data/chess-coach.db`), ids stable across re-imports,
-  user's colour recorded per game, speed classified with Lichess's rule.
+  user's colour recorded per game, speed classified with Lichess's rule, opening from Lichess's
+  header or the longest prefix in the vendored lichess-org table (`openings.py`, `family_of`).
 - `analyze` → one Stockfish call per position, per-move facts (eval before/after from the
   mover's side, best move, cp loss, win-probability loss, Lichess-style judgement, phase,
-  clock, PV). Resumable per game and per depth.
-- `stats` → per-game ACPL / inaccuracy / mistake / blunder table.
+  clock, PV, motif tags from `engine/motifs.py`). Resumable per game and per depth.
+- `stats` → per-game ACPL / inaccuracy / mistake / blunder table, then motif counts (moves and
+  games) over the user's moves.
 
 Local-only state (gitignored, may be missing on another machine):
 - `.stockfish/stockfish` — Stockfish 19, from `scripts/get-stockfish.sh`.
@@ -23,30 +24,12 @@ Local-only state (gitignored, may be missing on another machine):
   `uv run chess-coach --db data/demo.db import lichess pipinpo --max 80 --rated && uv run chess-coach --db data/demo.db analyze --depth 12 --threads 4`
 - `data/chess-coach.db` — the three fixture games, analyzed at depth 12.
 
-## Remaining v0 work (finish before merging the PR)
-
-1. **Motif tagging** (`src/chess_coach/engine/motifs.py`, fill `MoveFact.motifs`), all computed
-   in code from the board + the engine facts, never by the model:
-   - `hanging_piece` — the move left a piece the best reply captures for free (attacked,
-     undefended or higher value than its cheapest attacker).
-   - `missed_mate` / `allowed_mate` — `mate_before > 0` but move isn't mating; `mate_after < 0`.
-   - `back_rank` — the mate in the line lands on the mover's back rank with pawns blocking.
-   - `fork` — best move (missed) or best reply attacks two undefended/higher-value pieces.
-   - `missed_tactic` — opponent's previous move was a blunder (their `wp_loss` ≥ 20) and the
-     user didn't cash in (`cp_loss` ≥ 100 on this move).
-   - `time_trouble` — `clock_after` < 10% of the initial time or < 30s.
-   - `endgame_conversion` — endgame, `eval_before` ≥ +200, `eval_after` ≤ +50.
-   - `queen_trade_behind` — captured/allowed a queen trade while behind in development
-     (fewer developed minor pieces than the opponent) — this one is game-level, compute from
-     the board at the ply.
-   Test each with a hand-written FEN in `tests/engine/test_motifs.py`; the fixture game
-   `chesscom:123456789` ends with the user resigning in a mate-in-one position (23...Rd1#), which
-   is a ready-made `missed_mate` case.
-2. **Opening classification** for plain PGN / Chess.com games: vendor the CC0
-   lichess-org/chess-openings TSVs (a.tsv…e.tsv, ~300 KB) into `src/chess_coach/data/openings.tsv`
-   and classify by longest matching move prefix; keep Lichess's own header when present.
-   Add `opening_family` (name before the colon) for aggregation.
-3. Update `README.md` status + CLAUDE.md gotchas; mark PR ready.
+Motif tags as built (thresholds at the top of `engine/motifs.py`; README has the plain-language
+table): `hanging_piece`/`hanging_pawn`, `allowed_fork`/`missed_fork`, `allowed_mate`/`missed_mate`
+(up to mate in 6), `back_rank`, `missed_tactic` (opponent's previous `wp_loss` ≥ 20), `pawn_grab`,
+`time_trouble` (< 20 s or < 10% of the initial time), `endgame_conversion` (≥ +200 to < +100),
+all only on inaccuracies or worse; `queen_trade_behind` (development deficit ≥ 2) on any move.
+On `data/demo.db` 243 of 5,258 moves carry a tag.
 
 ## v1 — pattern mining + digest (next branch: `v1-patterns-and-digest`)
 
@@ -59,7 +42,9 @@ Local-only state (gitignored, may be missing on another machine):
   Output `Pattern(kind, template_text, stats, evidence=[(game_id, ply, san, cp_loss)…])`.
   Deterministic text first — the digest must work with `LLM_PROVIDER=none`.
 - `coach/llm.py`: providers `claude` (anthropic SDK; load the `claude-api` skill before writing
-  it), `ollama` (local HTTP, `qwen2.5:3b` is pulled), `none`.
+  it), `ollama` (local HTTP, `qwen2.5:3b` is pulled), `none`. The owner's rule for anything
+  live: never the owner's paid key — a visitor's own key (used for the session, never stored or
+  logged) or a free-tier model, and `none` must still give a useful digest.
 - `coach/digest.py`: facts → prompt → narrative; verify every cited game id / move number exists
   in the evidence; drop or flag anything unverifiable. `digest` CLI command writes markdown.
 
