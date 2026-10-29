@@ -179,7 +179,8 @@ def test_render():
     assert "**In the endgame**: 20 mistakes or blunders in 40 moves across 10 games, 50%" in text
     assert "(https://lichess.org/g" in text
     assert "No kind of game stands out yet" in text
-    assert "| going wrong with little time left | 20 | 10 |" in text
+    assert "| leaving a piece where it can be taken | 10 | 10 |" in text
+    assert "going wrong with little time left" not in text  # discounted: short-on-time rule
     assert render(build([], [])).startswith("# Chess digest\n\nNo analysed games yet")
 
 
