@@ -120,3 +120,32 @@ class MoveFact:
     pv: str = ""
     clock_after: float | None = None
     motifs: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class Puzzle:
+    """A position from the user's own game where one move clearly stood out and they missed it."""
+
+    id: str  # "<game_id>:<ply>"
+    game_id: str
+    ply: int
+    fen: str  # before the user's move; the user is to move
+    solution: str  # UCI of the move to find
+    solution_san: str
+    played_san: str  # what the user played in the game
+    line: str  # the engine's continuation after the solution, UCI, space-separated
+    gap_cp: int  # how much better the solution is than the second-best move
+    depth: int
+    tags: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class Review:
+    """SM-2 schedule for one puzzle."""
+
+    puzzle_id: str
+    due: str  # ISO date
+    interval: int = 0  # days
+    ease: float = 2.5
+    reps: int = 0
+    lapses: int = 0
