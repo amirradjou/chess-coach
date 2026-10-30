@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from chess_coach.models import Game, MoveFact, Puzzle
-from chess_coach.patterns.features import ERRORS, rushed
+from chess_coach.patterns.features import ERRORS, counted, result_of, rushed
 
 
 @dataclass(slots=True)
@@ -19,6 +19,7 @@ class Period:
     errors: int
     cp_loss: int
     points: float  # 1 per win, 0.5 per draw
+    decided: int = 0  # games whose result counts (not bullet: see features.result_of)
 
     @property
     def error_rate(self) -> float:
@@ -29,8 +30,8 @@ class Period:
         return self.cp_loss / self.moves if self.moves else 0.0
 
     @property
-    def score(self) -> float:
-        return self.points / self.games if self.games else 0.0
+    def score(self) -> float | None:
+        return self.points / self.decided if self.decided else None
 
 
 def _label(when: datetime, by: str) -> str:
@@ -53,10 +54,12 @@ def periods(
     for g in chosen.values():
         p = rows.setdefault(_label(g.played_at, by), Period(_label(g.played_at, by), 0, 0, 0, 0, 0))
         p.games += 1
-        p.points += {"win": 1.0, "draw": 0.5}.get(g.user_result, 0.0)
+        if (result := result_of(g)) != "unknown":
+            p.decided += 1
+            p.points += {"win": 1.0, "draw": 0.5}.get(result, 0.0)
     for m in moves:
         g = chosen.get(m.game_id)
-        if g is None or not m.is_user or rushed(m, g):  # short on time: see features.rushed
+        if g is None or not m.is_user or not counted(m, g) or rushed(m, g):
             continue
         p = rows[_label(g.played_at, by)]
         p.moves += 1

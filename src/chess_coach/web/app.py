@@ -35,7 +35,7 @@ from chess_coach.db import Store
 from chess_coach.engine.stockfish import Engine, EngineNotFoundError, LineEval
 from chess_coach.models import Puzzle
 from chess_coach.openings import opening_table
-from chess_coach.patterns.features import move_rows
+from chess_coach.patterns.features import move_rows, result_of
 from chess_coach.patterns.mining import Evidence
 from chess_coach.puzzles import review
 from chess_coach.puzzles.srs import schedule
@@ -159,7 +159,7 @@ def _favorite(f: Favorite) -> dict:
         "wins": f.wins,
         "draws": f.draws,
         "losses": f.losses,
-        "score": round(f.score * 100),
+        "score": _pct(f.score),
         "names": [{"name": n, "games": c} for n, c in f.names],
         "line": f.line,
         "book": f.book,
@@ -273,6 +273,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
                 "acpl": round(d.acpl),
                 "losses": d.losses,
                 "decided": d.decided,
+                "bullet_games": d.bullet_games,
                 "habits": [_habit(h) for h in missed_kinds(rows) + from_motifs(d.motifs)],
                 "situations": [_habit(h) for h in from_patterns(d.move_patterns)],
                 "pressure": [_habit(h) for h in from_pressure(d.pressure)],
@@ -410,7 +411,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
                 return cache[name][1]  # type: ignore[return-value]
             ids = {g.id for g in games}
             moves = [m for m in store.iter_moves(max_ply=optree.TREE_PLIES) if m.game_id in ids]
-        value = (optree.build(games, moves), {g.id: g.user_result for g in games})
+        value = (optree.build(games, moves), {g.id: result_of(g) for g in games})
         cache[name] = (key, value)
         return value
 
@@ -450,6 +451,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
                 "by": "you" if edge.by_user else "them",
                 "games": len(edge.facts),
                 "score": _pct(optree.score(edge.child.games, results)),
+                "scored": optree.scored(edge.child.games, results),
                 "verdict": edge.verdict,
                 "loss": round(edge.cp_loss),
             }
@@ -475,6 +477,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             "name": opening.name if opening else None,
             "games": len(node.games) if node else 0,
             "score": _pct(optree.score(node.games, results)) if node else None,
+            "scored": optree.scored(node.games, results) if node else 0,
             "best": best,
             "moves": moves,
         }
@@ -490,6 +493,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
                     "family": o.family,
                     "games": o.games,
                     "score": _pct(o.score),
+                    "scored": o.scored,
                     "idea": opening_idea(o.family),
                 }
             )
@@ -589,7 +593,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
                 {
                     "label": p.label,
                     "games": p.games,
-                    "score": round(p.score * 100),
+                    "score": _pct(p.score),
                     "error_rate": round(p.error_rate * 100, 1),
                     "acpl": round(p.acpl),
                 }

@@ -18,6 +18,9 @@ from chess_coach.sources.pgn import parse_time_control
 
 ERRORS = (Judgement.MISTAKE, Judgement.BLUNDER)
 CASTLED_BY = 10  # "castled by move 10"
+# Bullet is not taken seriously (the owner's rule): only its first moves are coached, and its
+# results never count, because after the opening the clock decides the game.
+BULLET_MOVES = 10
 # Short on time: moves played this fast are reflexes, so their mistakes only count when the same
 # thing keeps happening (see REPEAT_MOVES / REPEAT_GAMES).
 RUSHED_BULLET_SECONDS = 15.0  # bullet: the last quarter of a 1-minute game
@@ -26,11 +29,25 @@ REPEAT_MOVES = 15  # a rushed mistake counts once it happens this often...
 REPEAT_GAMES = 8  # ...across this many games
 
 
+def is_bullet(game: Game) -> bool:
+    return game.speed in (Speed.BULLET, Speed.ULTRABULLET)
+
+
+def counted(m: MoveFact, game: Game) -> bool:
+    """Whether a move is coached at all: in bullet only the first 10 moves are."""
+    return not is_bullet(game) or m.move_number <= BULLET_MOVES
+
+
+def result_of(game: Game) -> str:
+    """The user's result as it counts here: "unknown" for bullet, where the clock decides."""
+    return "unknown" if is_bullet(game) else game.user_result
+
+
 def rushed(m: MoveFact, game: Game) -> bool:
     """Played short on time: under 15 s left in bullet, or under 10% of the starting time."""
     if m.clock_after is None:
         return False
-    if game.speed in (Speed.BULLET, Speed.ULTRABULLET) and m.clock_after < RUSHED_BULLET_SECONDS:
+    if is_bullet(game) and m.clock_after < RUSHED_BULLET_SECONDS:
         return True
     tc = parse_time_control(game.time_control)
     return tc is not None and m.clock_after < RUSHED_FRACTION * tc[0]
@@ -137,12 +154,13 @@ def castling(game: Game, moves: Iterable[MoveFact] | None = None) -> str:
 def move_rows(
     games: Iterable[Game], moves: Iterable[MoveFact], *, include_rushed: bool = False
 ) -> list[MoveRow]:
-    """The user's moves in analysed games, sliced by phase, colour, speed, opening, move, clock."""
+    """The user's counted moves in analysed games, sliced by phase, colour, speed, opening, move
+    and clock."""
     by_id = {g.id: g for g in games}
     rows = []
     for m in moves:
         game = by_id.get(m.game_id)
-        if game is None or not m.is_user:
+        if game is None or not m.is_user or not counted(m, game):
             continue
         hurried = rushed(m, game)
         if hurried and not include_rushed:
@@ -169,14 +187,15 @@ def rushed_rows(games: Iterable[Game], moves: Iterable[MoveFact]) -> list[MoveRo
 
 
 def game_rows(games: Iterable[Game], moves: Iterable[MoveFact]) -> list[GameRow]:
-    """Analysed games with a known result, with colour, speed, opening and castling slices."""
+    """Analysed games whose result counts (not bullet), with colour, speed, opening and castling
+    slices."""
     by_game: dict[str, list[MoveFact]] = {}
     for m in moves:
         if m.is_user:
             by_game.setdefault(m.game_id, []).append(m)
     rows = []
     for g in games:
-        if g.user_result == "unknown" or g.id not in by_game:
+        if result_of(g) == "unknown" or g.id not in by_game:
             continue
         feats = {
             "colour": g.user_color.value,

@@ -11,7 +11,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from chess_coach.models import Game, MoveFact
-from chess_coach.patterns.features import game_rows, move_rows, rushed_rows
+from chess_coach.patterns.features import (
+    BULLET_MOVES,
+    game_rows,
+    is_bullet,
+    move_rows,
+    rushed_rows,
+)
 from chess_coach.patterns.mining import (
     Evidence,
     MotifCount,
@@ -145,6 +151,8 @@ class Digest:
     since: str | None = None
     before_error_rate: float | None = None
     before_acpl: float | None = None
+    # In bullet only the first moves count and results never do (features.counted, result_of).
+    bullet_games: int = 0
     # Moves played short on time are left out above; these are their mistakes that keep repeating.
     rushed_moves: int = 0
     pressure: list[MotifCount] = field(default_factory=list)
@@ -191,6 +199,7 @@ def build(
         since=since.strftime("%Y-%m-%d") if since else None,
         before_error_rate=baseline(brows) if brows else None,
         before_acpl=sum(r.fact.cp_loss for r in brows) / len(brows) if brows else None,
+        bullet_games=sum(is_bullet(g) for g in analysed),
         rushed_moves=len(rrows),
         pressure=repeated_under_pressure(rrows),
     )
@@ -221,8 +230,16 @@ def render(d: Digest, top: int = 5) -> str:
         f"**{d.error_rate:.1%}** of your {d.moves} moves (average centipawn loss {d.acpl:.0f})"
     )
     if d.decided:
-        summary += f", and lost {d.losses} of {d.decided} games ({d.losses / d.decided:.0%})"
+        outside = " outside bullet" if d.bullet_games else ""
+        summary += (
+            f", and lost {d.losses} of {d.decided} games{outside} ({d.losses / d.decided:.0%})"
+        )
     summary += "."
+    if d.bullet_games:
+        summary += (
+            f" In your {d.bullet_games} bullet games only the first {BULLET_MOVES} moves count: "
+            "after that the clock decides, so later moves and results are left out."
+        )
     if d.before_error_rate is not None and d.before_acpl is not None:
         trend = "better than" if d.error_rate < d.before_error_rate else "worse than"
         if abs(d.error_rate - d.before_error_rate) < 0.002:

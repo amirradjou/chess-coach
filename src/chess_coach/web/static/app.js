@@ -82,8 +82,9 @@ async function loadMistakes() {
   const tags = new Set(tagList.map((t) => t.tag));
   $("#summary").textContent =
     `${o.games} analysed games (${o.first} to ${o.last}). You make a mistake or blunder on ` +
-    `${o.error_rate}% of your moves (average centipawn loss ${o.acpl}); you lost ${o.losses} of ${o.decided}.` +
-    (o.rushed_moves ? ` ${o.rushed_moves} moves played short on time (under 15 s in bullet) are left out, unless the same mistake keeps repeating.` : "");
+    `${o.error_rate}% of your moves (average centipawn loss ${o.acpl}); you lost ${o.losses} of ${o.decided}${o.bullet_games ? " outside bullet" : ""}.` +
+    (o.bullet_games ? ` In your ${o.bullet_games} bullet games only the first 10 moves count: after that the clock decides, so later moves and results are left out.` : "") +
+    (o.rushed_moves ? ` ${o.rushed_moves} moves played short on time (under a tenth of the clock) are left out, unless the same mistake keeps repeating.` : "");
   const root = $("#mistakes");
   fill(root,
     el("h2", {}, "Mistakes you repeat"),
@@ -381,13 +382,16 @@ const LINE_END = 20; // plies of training before a line counts as done
 let coach = null;
 
 const games = (n) => `${n} game${n === 1 ? "" : "s"}`;
+// Bullet results don't count, so a score may come from fewer games than reached it, or none.
+const scored = (x, sep = " · ", words = "you scored") => (x.score === null ? ""
+  : `${sep}${words} ${x.score}%${x.scored < x.games ? ` in the ${games(x.scored)} outside bullet` : ""}`);
 const a = (word) => `${/^[aeiou]/.test(word) ? "an" : "a"} ${word}`;
 
 async function openCoach() {
   if (coach) return;
   const o = await api("/api/coach/openings");
   fill($("#coach-opening"), [["white", "With White"], ["black", "With Black"]].map(([color, label]) => (o[color].length
-    ? el("optgroup", { label }, o[color].map((x) => el("option", { value: `${color}|${x.family}` }, `${x.family} (${x.games} games, you score ${x.score}%)`)))
+    ? el("optgroup", { label }, o[color].map((x) => el("option", { value: `${color}|${x.family}` }, `${x.family} (${games(x.games)}${scored(x, ", ", "you score")})`)))
     : null)));
   coach = { openings: o, color: null, family: null, mode: "explore", path: [], node: null, from: null, check: null, reveal: false, deck: null, card: 0, pending: null };
   await pickOpening();
@@ -457,7 +461,7 @@ async function coachDraw() {
   fill($("#coach-title"),
     el("b", {}, n.name || coach.family), el("br"),
     el("span", { class: "muted small" }, n.games
-      ? `${who} · reached in ${n.games} of your games · you scored ${n.score}% from here`
+      ? `${who} · reached in ${n.games} of your games${scored(n, " · ", "from here you scored")}`
       : `${who} · none of your games reached this position`),
     coach.mode === "explore" && n.best ? el("div", {}, n.turn === "you" ? "Engine's move: " : "Their best: ", el("b", { class: "better" }, n.best.san), ` (${n.best.score} for you)`) : null);
   fill($("#coach-moves"), coach.mode === "explore" ? coachMoves(n) : null);
@@ -483,7 +487,7 @@ function coachMoves(n) {
       el("div", { class: "line-head" },
         el("span", {},
           el("button", { class: "link", onclick: () => coachGo([...coach.path, m.uci]) }, `${m.number}${m.san}`),
-          el("span", { class: "muted small" }, ` · ${games(m.games)} · you scored ${m.score}%`)),
+          el("span", { class: "muted small" }, ` · ${games(m.games)}${scored(m)}`)),
         el("span", { class: `verdict ${m.verdict}` }, m.verdict)),
       m.punish ? el("div", { class: "small" }, "Punish it with ", el("b", { class: "better" }, m.punish.san),
         ` (${m.punish.score} for you). ${answered(m)}`) : null,
@@ -547,7 +551,7 @@ async function onCoachBoard(evt) {
   const usual = coach.mode === "play" && coach.node.moves.find((m) => m.uci === uci && (m.verdict === "best" || m.verdict === "good"));
   if (usual) {
     return coachGo([...coach.path, uci], [el("b", { class: "better" }, `${usual.san}: good.`),
-      ` Your usual move here (${games(usual.games)}, you scored ${usual.score}%), and a sound one.`]);
+      ` Your usual move here (${games(usual.games)}${scored(usual, ", ")}), and a sound one.`]);
   }
   let r;
   try {
@@ -595,13 +599,17 @@ $("#coach-restart").addEventListener("click", coachStart);
 
 // -- openings ------------------------------------------------------------------------------
 function favoriteCard(f) {
-  const pct = (n) => `${(100 * n) / f.games}%`;
+  const decided = f.wins + f.draws + f.losses;
+  const pct = (n) => `${(100 * n) / decided}%`;
+  const result = f.score === null
+    ? "only bullet, whose results don't count"
+    : `scored ${f.score}% (${f.wins} won, ${f.draws} drawn, ${f.losses} lost${decided < f.games ? " outside bullet" : ""})`;
   return el(
     "div", { class: "card" },
     el("h3", {}, f.family),
-    el("div", { class: "muted" }, `${f.games} games · scored ${f.score}% (${f.wins} won, ${f.draws} drawn, ${f.losses} lost) · mistakes on ${f.opening_error_rate}% of your opening moves`),
-    el("div", { class: "score" }, el("div", { class: "w", style: `width:${pct(f.wins)}` }),
-      el("div", { class: "d", style: `width:${pct(f.draws)}` }), el("div", { class: "l", style: `width:${pct(f.losses)}` })),
+    el("div", { class: "muted" }, `${f.games} games · ${result} · mistakes on ${f.opening_error_rate}% of your opening moves`),
+    decided ? el("div", { class: "score" }, el("div", { class: "w", style: `width:${pct(f.wins)}` }),
+      el("div", { class: "d", style: `width:${pct(f.draws)}` }), el("div", { class: "l", style: `width:${pct(f.losses)}` })) : null,
     f.idea ? el("p", { class: "idea" }, el("b", {}, "What it's about: "), f.idea) : null,
     f.line ? el("p", {}, "Your usual line: ", el("code", {}, f.line)) : null,
     f.book ? el("p", { class: "muted small" }, `Book (${f.names[0]?.name}): `, el("code", {}, f.book)) : null,
@@ -632,10 +640,11 @@ async function loadOpenings() {
 // -- progress ------------------------------------------------------------------------------
 async function loadProgress() {
   const p = await api("/api/progress");
-  const rows = p.periods.map((r) => el("tr", {}, el("td", {}, r.label), el("td", {}, r.games), el("td", {}, `${r.score}%`),
+  const rows = p.periods.map((r) => el("tr", {}, el("td", {}, r.label), el("td", {}, r.games), el("td", {}, r.score === null ? "–" : `${r.score}%`),
     el("td", {}, `${r.error_rate}%`), el("td", {}, r.acpl)));
   fill($("#progress"),
     el("h2", {}, "Your games by month"),
+    el("p", { class: "muted" }, "In bullet only your first 10 moves count, and the score leaves bullet out: the clock decides those games."),
     el("table", {}, el("tr", {}, ["month", "games", "score", "mistakes + blunders", "average cp loss"].map((h) => el("th", {}, h))), rows),
     el("h2", {}, "Puzzles"),
     p.puzzles.attempts
