@@ -56,8 +56,8 @@ pattern mining ──► the situations, moves and openings where you go wrong m
 
 ## What gets measured
 
-- Your mistake rate, centipawn loss and score by month or week (`progress`), with moves made
-  short on time left out.
+- Your mistake rate, centipawn loss and score by month or week (`progress`), with bullet after
+  move 10, bullet results and moves made short on time left out.
 - Puzzle solve rate per theme, from every attempt.
 - Not yet: rating trend against practice, and a hand-graded check of the model summaries
   beyond the automatic move check.
@@ -99,10 +99,15 @@ table for opening names. The web coach is FastAPI with plain JavaScript and pyth
 them on a schedule, learn and fix your openings, and watch the numbers move, in the terminal or in
 the browser (`chess-coach serve`).
 
-**Short on time doesn't count.** In a 1-minute game the last seconds are reflexes, so a move
-played with under 15 s left in bullet (or under a tenth of the clock in any game) is left out of
-the patterns, mistake rates, progress and new puzzles. Those mistakes only show up, in their own
-section, when the same one keeps happening: 15+ times across 8+ games.
+**Bullet is not taken seriously.** In a 1-minute game only your first 10 moves count: after
+that the clock decides the game, so later moves are left out of everything (patterns, mistake
+rates, openings, progress, puzzles), and bullet results never count towards a score or a loss
+rate. Problems in those first 10 moves are found like any others.
+
+**Short on time doesn't count either.** In other games a move played with under a tenth of the
+clock left is a reflex, so it's left out of the patterns, mistake rates, progress and new puzzles.
+Those mistakes only show up, in their own section, when the same one keeps happening: 15+ times
+across 8+ games.
 [docs/PLAN.md](docs/PLAN.md) has the build plan and how to pick the work up.
 
 - `import lichess|chesscom|pgn` stores games in SQLite with your colour, the speed (Lichess's
@@ -167,7 +172,7 @@ section, when the same one keeps happening: 15+ times across 8+ games.
   - **Progress**: month by month, and your puzzle solve rate per theme.
 - `puzzles make --openings` turns those opening fixes into drills; any move within 30 cp of the
   best counts, since openings often have several good moves. `puzzles prune` drops untried
-  puzzles from moves made short on time.
+  puzzles that no longer count (bullet after move 10, moves made short on time).
 
 Motif tags are computed in code from the board and the engine's facts, never by a model:
 
