@@ -220,11 +220,18 @@ def analyze(
 
 @app.command()
 def stats(ctx: typer.Context) -> None:
-    """Per-game accuracy summary for the coached user: cp loss and mistake counts by phase."""
+    """Per-game accuracy summary for the coached user: cp loss and mistake counts by phase.
+    In bullet only the first 10 moves count."""
+    from chess_coach.patterns.features import counted
+
     settings: Settings = ctx.obj
     with Store(settings.db_path) as store:
         games_by_id = {g.id: g for g in store.iter_games() if g.analyzed_depth}
-        moves = list(store.iter_moves(user_only=True))
+        moves = [
+            m
+            for m in store.iter_moves(user_only=True)
+            if m.game_id in games_by_id and counted(m, games_by_id[m.game_id])
+        ]
     if not games_by_id:
         console.print("No analyzed games yet. Run `chess-coach analyze` first.")
         return
@@ -367,15 +374,15 @@ def puzzles_make(
 
 @puzzles_app.command("prune")
 def puzzles_prune(ctx: typer.Context) -> None:
-    """Drop puzzles you haven't tried that came from moves made short on time (unless that
-    mistake keeps repeating)."""
-    from chess_coach.puzzles.make import prune_rushed
+    """Drop puzzles you haven't tried that no longer count: from bullet after move 10, or from
+    moves made short on time (unless that mistake keeps repeating)."""
+    from chess_coach.puzzles.make import prune
 
     settings: Settings = ctx.obj
     with Store(settings.db_path) as store:
-        removed = prune_rushed(store)
+        removed = prune(store)
         left = len(store.puzzles())
-    console.print(f"Removed {len(removed)} rushed puzzles; {left} left.")
+    console.print(f"Removed {len(removed)} puzzles that no longer count; {left} left.")
 
 
 @puzzles_app.command("list")
@@ -509,13 +516,15 @@ def progress(
     if not rows:
         console.print("No analysed games yet. Run `chess-coach analyze` first.")
         return
-    table = Table(title=f"Your games by {by}" + (f" ({speed})" if speed else ""))
+    table = Table(
+        title=f"Your games by {by}" + (f" ({speed})" if speed else ""),
+        caption="In bullet only your first 10 moves count, and the score leaves bullet out.",
+    )
     for column in (by, "games", "score", "mistakes+blunders", "acpl"):
         table.add_column(column, justify="left" if column == by else "right")
     for r in rows:
-        table.add_row(
-            r.label, str(r.games), f"{r.score:.0%}", f"{r.error_rate:.1%}", f"{r.acpl:.0f}"
-        )
+        score = "-" if r.score is None else f"{r.score:.0%}"
+        table.add_row(r.label, str(r.games), score, f"{r.error_rate:.1%}", f"{r.acpl:.0f}")
     console.print(table)
     if overall.attempts:
         t = Table(
@@ -546,9 +555,13 @@ def openings(
         console.print(f"No opening has {min_games} analysed games yet.")
         return
     for o in stats[:top]:
+        if o.score is None or o.decided < min_games:
+            scored = f"{o.decided} outside bullet, too few to score (bullet results don't count)"
+        else:
+            scored = f"scored {o.score:.0%} ({o.wins} won, {o.draws} drawn, {o.losses} lost"
+            scored += "; bullet results don't count)" if o.decided < o.games else ")"
         console.print(
-            f"\n[bold]{o.family}[/bold] with {o.color.capitalize()}: {o.games} games, "
-            f"scored {o.score:.0%} ({o.wins} won, {o.draws} drawn, {o.losses} lost)"
+            f"\n[bold]{o.family}[/bold] with {o.color.capitalize()}: {o.games} games, {scored}"
         )
         if o.book:
             console.print(f"  Book line ({o.name}): {o.book}")

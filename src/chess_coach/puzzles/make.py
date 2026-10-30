@@ -15,7 +15,7 @@ import chess
 from chess_coach.db import Store
 from chess_coach.engine.stockfish import Engine
 from chess_coach.models import Game, MoveFact, Puzzle
-from chess_coach.patterns.features import rushed, rushed_rows
+from chess_coach.patterns.features import counted, rushed, rushed_rows
 from chess_coach.patterns.mining import repeated_under_pressure
 
 MIN_WP_LOSS = 20.0
@@ -51,7 +51,10 @@ def candidates(
 
 
 def keep(m: MoveFact, game: Game, repeated: frozenset[str]) -> bool:
-    """A mistake made short on time is only worth a puzzle when it's one you keep repeating."""
+    """Never a bullet move after move 10; a mistake made short on time only when it's one you
+    keep repeating."""
+    if not counted(m, game):
+        return False
     return not rushed(m, game) or any(tag in repeated for tag in m.motifs)
 
 
@@ -175,9 +178,10 @@ def make_opening_fixes(store: Store, engine: Engine, *, depth: int = VERIFY_DEPT
     return result
 
 
-def prune_rushed(store: Store) -> list[str]:
-    """Remove puzzles never attempted that came from a move made short on time and not repeated
-    often enough to count. Returns the removed ids."""
+def prune(store: Store) -> list[str]:
+    """Remove puzzles never attempted that `keep` would no longer make: from bullet after move
+    10, or from a move made short on time and not repeated often enough. Returns the removed
+    ids."""
     games = {g.id: g for g in store.iter_games()}
     moves = {(m.game_id, m.ply): m for m in store.iter_moves(user_only=True)}
     repeated = repeated_tags(games.values(), moves.values())

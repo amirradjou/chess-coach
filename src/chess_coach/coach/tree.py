@@ -16,6 +16,7 @@ import chess
 
 from chess_coach.engine.evaluation import BLUNDER_WP_LOSS, INACCURACY_WP_LOSS, MISTAKE_WP_LOSS
 from chess_coach.models import Color, Game, MoveFact
+from chess_coach.patterns.features import result_of
 
 TREE_PLIES = 16  # eight moves each
 MIN_GAMES = 5  # an opening needs this many games to be worth a tree
@@ -129,12 +130,18 @@ def score(game_ids: Iterable[str], results: dict[str, str]) -> float | None:
     return sum(points) / len(points) if points else None
 
 
+def scored(game_ids: Iterable[str], results: dict[str, str]) -> int:
+    """How many of these games have a result that counts (bullet results don't)."""
+    return sum(results.get(g) in _POINTS for g in game_ids)
+
+
 @dataclass(slots=True)
 class Opening:
     family: str
     color: str
     games: int
-    score: float
+    score: float | None  # None when no result counts (only bullet games)
+    scored: int  # the games the score is over
 
 
 def openings(games: Sequence[Game], min_games: int = MIN_GAMES, top: int = 8) -> list[Opening]:
@@ -148,8 +155,12 @@ def openings(games: Sequence[Game], min_games: int = MIN_GAMES, top: int = 8) ->
         mine = [(family, gs) for (family, c), gs in groups.items() if c is color]
         mine = [x for x in mine if len(x[1]) >= min_games]
         for family, gs in sorted(mine, key=lambda x: (-len(x[1]), x[0]))[:top]:
-            results = {g.id: g.user_result for g in gs}
-            out.append(Opening(family, color.value, len(gs), score(results, results) or 0.0))
+            results = {g.id: result_of(g) for g in gs}
+            out.append(
+                Opening(
+                    family, color.value, len(gs), score(results, results), scored(results, results)
+                )
+            )
     return out
 
 

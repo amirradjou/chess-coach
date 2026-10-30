@@ -16,7 +16,7 @@ import chess
 
 from chess_coach.models import Game, MoveFact
 from chess_coach.openings import book_line, opening_table
-from chess_coach.patterns.features import ERRORS
+from chess_coach.patterns.features import ERRORS, counted, result_of
 
 OPENING_MOVES = 15  # look for fixes up to this move number
 MIN_CP_LOSS = 50  # an average loss this big makes a habitual move worth fixing
@@ -55,8 +55,10 @@ class Favorite:
     fixes: list[Fix] = field(default_factory=list)
 
     @property
-    def score(self) -> float:
-        return (self.wins + self.draws / 2) / self.games if self.games else 0.0
+    def score(self) -> float | None:
+        """Over the games whose result counts; None when there are none (only bullet)."""
+        decided = self.wins + self.draws + self.losses
+        return (self.wins + self.draws / 2) / decided if decided else None
 
 
 _COMMENT = re.compile(r"\{[^}]*\}|\([^)]*\)|;[^\n]*")
@@ -108,7 +110,8 @@ def fixes(games: Sequence[Game], moves: Sequence[MoveFact], top: int = 5) -> lis
     by_id = {g.id: g for g in games}
     groups: dict[tuple[str, str], list[MoveFact]] = defaultdict(list)
     for m in moves:
-        if m.is_user and m.game_id in by_id and m.move_number <= OPENING_MOVES:
+        g = by_id.get(m.game_id)
+        if g is not None and m.is_user and m.move_number <= OPENING_MOVES and counted(m, g):
             groups[(m.fen_before, m.uci)].append(m)
     out: dict[tuple[str, str], Fix] = {}
     for (fen, uci), ms in groups.items():
@@ -158,15 +161,16 @@ def favorites(
     by_key: dict[tuple[str, str], list[Game]] = defaultdict(list)
     for g in analysed:
         by_key[(g.opening_family, g.user_color.value)].append(g)
+    by_id = {g.id: g for g in analysed}
     moves_by_game: dict[str, list[MoveFact]] = defaultdict(list)
     for m in moves:
-        if m.is_user:
+        if m.is_user and m.game_id in by_id and counted(m, by_id[m.game_id]):
             moves_by_game[m.game_id].append(m)
     out: dict[str, list[Favorite]] = {"white": [], "black": []}
     for (family, color), gs in by_key.items():
         if len(gs) < min_games:
             continue
-        results = Counter(g.user_result for g in gs)
+        results = Counter(result_of(g) for g in gs)
         names = Counter(g.opening for g in gs if g.opening).most_common(3)
         opening_moves = [m for g in gs for m in moves_by_game[g.id] if m.phase.value == "opening"]
         errors = sum(m.judgement in ERRORS for m in opening_moves)

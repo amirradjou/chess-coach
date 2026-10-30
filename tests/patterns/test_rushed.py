@@ -6,7 +6,7 @@ from chess_coach.db import Store
 from chess_coach.models import Speed
 from chess_coach.patterns.features import move_rows, rushed, rushed_rows
 from chess_coach.patterns.mining import repeated_under_pressure
-from chess_coach.puzzles.make import candidates, prune_rushed
+from chess_coach.puzzles.make import candidates, prune
 
 from .test_patterns import game, move
 
@@ -14,6 +14,12 @@ from .test_patterns import game, move
 def bullet(i: int):
     g = game(i, speed=Speed.BULLET)
     g.time_control = "60+0"
+    return g
+
+
+def blitz(i: int):
+    g = game(i)
+    g.time_control = "300+0"
     return g
 
 
@@ -29,8 +35,8 @@ def test_short_on_time():
 
 
 def test_rushed_moves_are_left_out_unless_asked_for():
-    b = bullet(1)
-    moves = [move(b.id, 1, clock=50.0), move(b.id, 41, error=True, clock=5.0)]
+    b = blitz(1)
+    moves = [move(b.id, 1, clock=290.0), move(b.id, 41, error=True, clock=5.0)]
     assert [r.fact.ply for r in move_rows([b], moves)] == [1]
     assert [(r.fact.ply, r.rushed) for r in rushed_rows([b], moves)] == [(41, True)]
 
@@ -38,7 +44,7 @@ def test_rushed_moves_are_left_out_unless_asked_for():
 def _rushed_blunders(games: int, per_game: int, tag: str = "hanging_piece"):
     gs, ms = [], []
     for i in range(games):
-        g = bullet(i)
+        g = blitz(i)
         gs.append(g)
         for k in range(per_game):
             ms.append(move(g.id, 41 + 2 * k, error=True, clock=5.0, motifs=(tag, "time_trouble")))
@@ -95,5 +101,5 @@ def test_prune_removes_untried_rushed_puzzles(tmp_path: Path):
             )
         tried = store.review(f"{ms[0].game_id}:{ms[0].ply}")
         store.save_attempt(tried, "?", False, datetime.now(UTC))
-        assert prune_rushed(store) == [f"{ms[1].game_id}:{ms[1].ply}"]
+        assert prune(store) == [f"{ms[1].game_id}:{ms[1].ply}"]
         assert [p.id for p in store.puzzles()] == [f"{ms[0].game_id}:{ms[0].ply}"]

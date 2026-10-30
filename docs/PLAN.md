@@ -89,7 +89,8 @@ mined as slices: they are only set on errors, so their error rate is trivially h
 - Short-on-time rule (`features.rushed`): under 15 s in bullet or under 10% of the clock; left out
   of move tables, progress and puzzle candidates unless the motif repeats (15 moves, 8 games;
   `mining.repeated_under_pressure`), which gets its own section. `time_trouble` is not listed among
-  the main motifs. `puzzles prune` removes untried rushed puzzles.
+  the main motifs. `puzzles prune` removes untried rushed puzzles. Superseded for bullet by the
+  bullet rule below.
 - `web/app.py` (FastAPI) + `web/static/` (plain JS, no libraries): boards are python-chess SVGs
   with arrows; click-to-move maps clicks through the SVG viewBox (margin 15, square 45).
 
@@ -112,12 +113,29 @@ mined as slices: they are only set on errors, so their error rate is trivially h
   your moves (your usual sound move counts, else within 30 cp at depth 16; the engine takes over
   where your games stop), Punish their mistakes (cards for mistakes met 2+ times).
 
+## Bullet is not taken seriously (2026-10-29, branch `feat/bullet-first-ten-moves`)
+
+Owner's rule: in bullet (Lichess's category: 1+0, 2+1, ...) only the user's first 10 moves count,
+and bullet results never do; after the opening the clock decides those games.
+`features.counted(m, game)` and `features.result_of(game)` are the rule; every reader goes
+through them: `move_rows` (patterns, habits, digest), `game_rows` (loss rates), `progress`
+(error rate; the score is over games whose result counts, `None` when there are none),
+`study.openings` (only families with `min_games` counted results are ranked by score),
+`repertoire` (score, opening error rate, fixes), the opening tree's scores (with `scored`, the
+number of games a score is over) and puzzle candidates (`make.keep`). `puzzles prune` drops
+untried puzzles that no longer count. The short-on-time rule still applies to everything else.
+
+On the owner's games: 1,723 of 2,091 are bullet; puzzle candidates fall from 4,186 to 1,264, and
+`puzzles prune` would remove 83 of the 128 puzzles made so far (untried ones from bullet after
+move 10).
+
 ## Remaining (in order)
 
-1. **Fresh puzzles from the full analysis.** All 2,091 of the owner's games are analysed but only
-   63 puzzles exist (made mid-analysis). `uv run chess-coach --db data/amirradjou.db puzzles make
-   --limit 150 --threads 8 --openings` (started 2026-10-29; check `puzzles list`), then rerun it
-   until it finds few new ones.
+1. **Fresh puzzles from the full analysis.** All 2,091 of the owner's games are analysed; a first
+   `puzzles make --limit 150 --openings` run made 128 puzzles. After the bullet rule and
+   `puzzles prune`, 1,218 candidates are left unchecked (588 bullet openings, 545 blitz, 85
+   rapid), about half of which become puzzles. Run
+   `uv run chess-coach --db data/amirradjou.db puzzles make --limit 150 --threads 8` in batches.
 2. **Remember opening training.** The coach keeps no record: punish cards and trained lines
    aren't scheduled. Store each coach attempt (position, move, right or not) and schedule cards
    with SM-2 like puzzles (`puzzles/srs.py`); show "found 3 of 5 punishments" per opening and
