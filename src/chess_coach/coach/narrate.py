@@ -79,14 +79,23 @@ def _norm(move: str) -> str:
     return move.replace(" ", "").rstrip(".!?+#")
 
 
+def sentences(paragraph: str) -> list[str]:
+    return re.split(r"(?<=[.!?])\s+", paragraph.strip())
+
+
+def cites_evidence(sentence: str, allowed: set[str]) -> bool:
+    """Whether every move the sentence cites is one of the evidence moves."""
+    return all(_norm(m) in allowed for m in MOVE.findall(sentence))
+
+
 def check(text: str, allowed: set[str]) -> tuple[str, int]:
     """Drop every sentence that cites a move outside the evidence. Returns the text and the count
     of dropped sentences."""
     kept, dropped = [], 0
     for paragraph in text.split("\n\n"):
-        sentences = re.split(r"(?<=[.!?])\s+", paragraph.strip())
-        good = [s for s in sentences if all(_norm(m) in allowed for m in MOVE.findall(s))]
-        dropped += len(sentences) - len(good)
+        found = sentences(paragraph)
+        good = [s for s in found if cites_evidence(s, allowed)]
+        dropped += len(found) - len(good)
         if good:
             kept.append(" ".join(good))
     return "\n\n".join(kept), dropped

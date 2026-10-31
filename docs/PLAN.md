@@ -160,11 +160,11 @@ move 10).
 
 ## Remaining (in order)
 
-1. **Fresh puzzles from the full analysis.** All 2,091 of the owner's games are analysed; a first
-   `puzzles make --limit 150 --openings` run made 128 puzzles. After the bullet rule and
-   `puzzles prune`, 1,218 candidates are left unchecked (588 bullet openings, 545 blitz, 85
-   rapid), about half of which become puzzles. Run
-   `uv run chess-coach --db data/amirradjou.db puzzles make --limit 150 --threads 8` in batches.
+1. ~~Fresh puzzles from the full analysis~~: done 2026-10-31. `puzzles prune` removed 83
+   (backup: `data/amirradjou-2026-10-31-before-prune.db`), then `puzzles make --limit 1300
+   --threads 8 --openings` checked every remaining candidate: all 1,264 under the bullet rule are
+   checked, 542 puzzles in all (48 opening-fix drills). New games only need
+   `puzzles make` after `analyze`.
 2. ~~Remember opening training~~: done in v6.
 3. ~~Rating trend against practice~~: done in v7 (from the games, not the API: see above).
 4. ~~New screenshots~~: five new ones in #13 (`docs/screenshots`: mistakes, practice with the
@@ -180,8 +180,10 @@ move 10).
      screen (now capped); every tab checked at 375 px; inline SVG favicon.
    - ~~httpx deprecation in the tests~~: done, `httpx2` (pydantic/httpx2) as a dev dependency.
    - ~~Tests comparing UTC due dates with the local date~~: fixed (they failed 20:00-24:00 EDT).
-   - A hand-graded accuracy set for the model-written digest (the brief's other metric): needs
-     the owner to grade sentences; not started.
+   - ~~A hand-graded accuracy set for the model-written digest~~: the harness is done
+     (`coach/evaluate.py`, `eval narrate` / `eval score`, branch `feat/digest-accuracy`); the
+     grading itself is the owner's: a sheet from the local qwen2.5:7b is in `data/narrate-eval/`
+     (local only), and the accuracy goes into the README once graded.
 
 ## Conventions that matter here
 

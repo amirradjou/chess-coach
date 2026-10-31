@@ -81,7 +81,10 @@ pattern mining ──► the situations, moves and openings where you go wrong m
   the Progress page), read from your own games (each stores the rating before the game; bullet
   is left out). Once there are four weeks with practice and four without, it compares how the
   rating moved in each: a comparison, not proof.
-- Not yet: a hand-graded check of the model summaries beyond the automatic move check.
+- How accurate the model's summaries are, graded by hand: `eval narrate` has the model
+  summarise five digests (all games, then the last year, 6, 3 and 1 month) and writes every
+  sentence to a sheet next to the facts it was given; you grade the sentences the automatic check
+  kept (y: the facts support it, n: they don't, ?: can't tell); `eval score` reports y / (y + n).
 
 ## Privacy
 
