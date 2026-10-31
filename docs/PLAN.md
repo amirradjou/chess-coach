@@ -129,6 +129,20 @@ On the owner's games: 1,723 of 2,091 are bullet; puzzle candidates fall from 4,1
 `puzzles prune` would remove 83 of the 128 puzzles made so far (untried ones from bullet after
 move 10).
 
+## v6 — remember opening training (2026-10-31, branch `feat/remember-opening-training`)
+
+- Tables `coach_cards` (id `"<colour>|<family>|<uci path>"`, kind `punish`/`line`, SM-2 fields)
+  and `coach_attempts`. `coach/training.py`: `answer` (new card on the first answer, then
+  `puzzles/srs.schedule`, now generic over anything with an SM-2 schedule), `deck` (due, then
+  new, then later), `summary` (found X of Y punishments, due, line positions practised, due
+  paths). A card is `punish` when the move before it is a punishable opponent edge in the tree.
+- `POST /api/coach/answer`: the page judges the move (usual sound move, or `/api/coach/check`)
+  and sends only the first answer at a position; the server counts one answer per card per UTC
+  day, so going back over a line doesn't push a card away. `GET /api/coach/cards`; the punish
+  deck and `/api/coach/openings` carry the practice state and the due count.
+- Train mode steers their replies towards due positions (`towardDue` in `app.js`); the punish
+  deck is refetched after each full pass, so due cards lead again.
+
 ## Remaining (in order)
 
 1. **Fresh puzzles from the full analysis.** All 2,091 of the owner's games are analysed; a first
@@ -136,10 +150,7 @@ move 10).
    `puzzles prune`, 1,218 candidates are left unchecked (588 bullet openings, 545 blitz, 85
    rapid), about half of which become puzzles. Run
    `uv run chess-coach --db data/amirradjou.db puzzles make --limit 150 --threads 8` in batches.
-2. **Remember opening training.** The coach keeps no record: punish cards and trained lines
-   aren't scheduled. Store each coach attempt (position, move, right or not) and schedule cards
-   with SM-2 like puzzles (`puzzles/srs.py`); show "found 3 of 5 punishments" per opening and
-   put due cards first.
+2. ~~Remember opening training~~: done in v6.
 3. **Rating trend against practice** (the brief's metric): Lichess rating history API
    (`/api/user/{name}/rating-history`) per speed, next to puzzle attempts and coach practice
    per week in the Progress tab, so you can see whether practice moves the rating.
