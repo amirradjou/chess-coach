@@ -180,8 +180,10 @@ move 10).
      screen (now capped); every tab checked at 375 px; inline SVG favicon.
    - ~~httpx deprecation in the tests~~: done, `httpx2` (pydantic/httpx2) as a dev dependency.
    - ~~Tests comparing UTC due dates with the local date~~: fixed (they failed 20:00-24:00 EDT).
-   - A hand-graded accuracy set for the model-written digest (the brief's other metric): needs
-     the owner to grade sentences; not started.
+   - ~~A hand-graded accuracy set for the model-written digest~~: the harness is done
+     (`coach/evaluate.py`, `eval narrate` / `eval score`, branch `feat/digest-accuracy`); the
+     grading itself is the owner's: a sheet from the local qwen2.5:7b is in `data/narrate-eval/`
+     (local only), and the accuracy goes into the README once graded.
 
 ## Conventions that matter here
 
