@@ -167,8 +167,8 @@ move 10).
    `uv run chess-coach --db data/amirradjou.db puzzles make --limit 150 --threads 8` in batches.
 2. ~~Remember opening training~~: done in v6.
 3. ~~Rating trend against practice~~: done in v7 (from the games, not the API: see above).
-4. **New screenshots** for the README (puzzle review lines, Learn openings) from the owner's
-   games; the current two predate v5.
+4. ~~New screenshots~~: five new ones in #13 (`docs/screenshots`: mistakes, practice with the
+   lines, your openings, Learn openings, the weekly trend), taken from #10-#12 merged locally.
 5. Smaller (branch `chore/polish`, 2026-10-31):
    - ~~Reasons for the opponent's mistakes in the opening tree~~: done. `principles.allows`
      says what the punishment does to them ("It lets e5 hit their knight on f6": check, mate,
