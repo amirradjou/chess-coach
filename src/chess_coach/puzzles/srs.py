@@ -1,18 +1,27 @@
-"""SM-2 spaced repetition: a puzzle you solve comes back later and later; one you miss comes back
-tomorrow."""
+"""SM-2 spaced repetition: a puzzle (or opening card) you solve comes back later and later; one you
+miss comes back tomorrow."""
 
 from __future__ import annotations
 
 from dataclasses import replace
 from datetime import date, timedelta
-
-from chess_coach.models import Review
+from typing import Protocol
 
 GOOD = 4  # solved
 FAIL = 1  # missed
 
 
-def schedule(review: Review, correct: bool, today: date) -> Review:
+class Scheduled(Protocol):
+    """Anything with an SM-2 schedule: a puzzle's Review or an opening CoachCard."""
+
+    due: str
+    interval: int
+    ease: float
+    reps: int
+    lapses: int
+
+
+def schedule[S: Scheduled](review: S, correct: bool, today: date) -> S:
     """The review after one attempt (SM-2 with quality 4 for a solve and 1 for a miss)."""
     q = GOOD if correct else FAIL
     ease = max(1.3, review.ease + 0.1 - (5 - q) * (0.08 + (5 - q) * 0.02))
