@@ -6,9 +6,10 @@ import chess
 
 from chess_coach.db import Store
 from chess_coach.engine.stockfish import LineEval
+from chess_coach.models import Puzzle
 from chess_coach.puzzles.make import make_opening_fixes
 
-from .test_coach_web import italian_games, kf1
+from .test_coach_web import AFTER_ITALIAN, italian_games, kf1
 
 O_O, D3 = chess.Move.from_uci("e1g1"), chess.Move.from_uci("d2d3")
 
@@ -41,4 +42,35 @@ def test_a_fix_shared_by_two_openings_is_checked_and_stored_once(tmp_path: Path)
     with Store(db) as store:
         result = make_opening_fixes(store, engine)
         assert (result.checked, result.made, engine.calls) == (1, 1, 1)
-        assert len(store.puzzles()) == 1
+        (p,) = store.puzzles()
+        # one drill, practised from either opening
+        assert p.tags == ["opening-fix", "Italian Game", "Two Knights Defense"]
+        assert make_opening_fixes(store, engine).checked == 0
+
+
+def test_a_fix_that_is_already_a_puzzle_only_adds_its_opening(tmp_path: Path):
+    db = tmp_path / "c.db"
+    two_openings_one_fix(db)
+    engine = CountingEngine([LineEval(40, None, O_O), LineEval(-10, None, D3)])
+    with Store(db) as store:
+        own = Puzzle(
+            id="lichess:g9:7",
+            game_id="lichess:g9",
+            ply=7,
+            fen=AFTER_ITALIAN,
+            solution="e1g1",
+            solution_san="O-O",
+            played_san="Kf1",
+            line="",
+            gap_cp=200,
+            depth=18,
+            tags=["hanging_piece", "opening"],
+        )
+        store.add_puzzle(own)
+        assert make_opening_fixes(store, engine).made == 0
+        (p,) = store.puzzles()
+        # "opening-fix" would change its prompt and the moves that count: only the opening joins
+        assert (p.id, p.tags) == (
+            own.id,
+            ["hanging_piece", "opening", "Italian Game", "Two Knights Defense"],
+        )

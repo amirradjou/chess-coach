@@ -408,6 +408,12 @@ class Store:
                 (p.id, datetime.now(UTC).date().isoformat()),
             )
 
+    def set_puzzle_tags(self, puzzle_id: str, tags: list[str]) -> None:
+        with self.conn:
+            self.conn.execute(
+                "UPDATE puzzles SET tags = ? WHERE id = ?", (json.dumps(tags), puzzle_id)
+            )
+
     def delete_puzzle(self, puzzle_id: str) -> None:
         with self.conn:
             self.conn.execute("DELETE FROM puzzles WHERE id = ?", (puzzle_id,))
