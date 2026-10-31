@@ -174,6 +174,8 @@ def make_opening_fixes(store: Store, engine: Engine, *, depth: int = VERIFY_DEPT
                     store.add_puzzle(puzzle)
                     result.made += 1
                 store.record_check(key, puzzle is not None)
+                # Two openings can share a fix (Modern and Pirc 3...Bg7): check it once.
+                done.add(key)
                 result.checked += 1
     return result
 
