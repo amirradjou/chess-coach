@@ -24,6 +24,8 @@ import_app = typer.Typer(no_args_is_help=True, help="Pull games into the local d
 app.add_typer(import_app, name="import")
 puzzles_app = typer.Typer(no_args_is_help=True, help="Puzzles from your own mistakes.")
 app.add_typer(puzzles_app, name="puzzles")
+eval_app = typer.Typer(no_args_is_help=True, help="Measure the coach: are the summaries right?")
+app.add_typer(eval_app, name="eval")
 console = Console()
 
 SinceOption = Annotated[
@@ -607,6 +609,77 @@ def serve(
         )
 
     uvicorn.run(create_app(settings.db_path, engine), host=host, port=port, log_level="warning")
+
+
+@eval_app.command("narrate")
+def eval_narrate(
+    ctx: typer.Context,
+    provider: Annotated[
+        str, typer.Option(help="Who writes the summaries: ollama (local) or openrouter.")
+    ] = "ollama",
+    model: Annotated[str | None, typer.Option(help="The model (ollama: qwen2.5:7b).")] = None,
+    out: Annotated[Path, typer.Option(help="Folder for the sheet and the facts.")] = Path(
+        "data/narrate-eval"
+    ),
+) -> None:
+    """Have the model summarise several digests (all games, then the last year, 6, 3 and 1
+    month) and write every sentence to a sheet to grade by hand, next to the facts it was given."""
+    from datetime import UTC, datetime
+
+    from chess_coach.coach.evaluate import build_sheet, write_facts, write_sheet
+    from chess_coach.coach.narrate import complete, model_for
+
+    settings: Settings = ctx.obj
+    with Store(settings.db_path) as store:
+        games = list(store.iter_games())
+        moves = list(store.iter_moves(user_only=True))
+    now = datetime.now(UTC)
+    try:
+        m = model_for(provider, model)
+        with console.status(f"Asking {m.model} for five summaries..."):
+            rows, given = build_sheet(games, moves, lambda prompt: complete(m, prompt), now=now)
+    except (ValueError, RuntimeError, httpx.HTTPError) as exc:
+        console.print(f"[red]No summaries: {exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    if not rows:
+        console.print("No digest has anything to explain yet. Run `chess-coach analyze` first.")
+        return
+    out.mkdir(parents=True, exist_ok=True)
+    name = f"{now:%Y-%m-%d-%H%M}-{m.model.replace(':', '-').replace('/', '-')}"
+    sheet, facts_md = out / f"{name}.csv", out / f"{name}-facts.md"  # "qwen2.5" has a dot
+    write_sheet(sheet, rows)
+    write_facts(facts_md, given)
+    kept = sum(r.check == "kept" for r in rows)
+    console.print(
+        f"{len(rows)} sentences from {len(given)} summaries, {kept} kept by the automatic check.\n"
+        f"Sheet: [dim]{sheet}[/dim]\nFacts: [dim]{facts_md}[/dim]\n"
+        "In the grade column of each kept sentence put y (the facts support it), n (they don't) "
+        f"or ? (can't tell), then run `chess-coach eval score {sheet}`."
+    )
+
+
+@eval_app.command("score")
+def eval_score(
+    sheet: Annotated[Path, typer.Argument(help="A graded sheet from `eval narrate`.")],
+) -> None:
+    """How accurate the summaries are: of the sentences the automatic check kept, the share the
+    facts support."""
+    from chess_coach.coach.evaluate import read_sheet, score
+
+    overall, samples = score(read_sheet(sheet))
+    table = Table(title=f"Summary accuracy ({sheet.name})")
+    for column in ("digest", "right", "wrong", "unsure", "ungraded", "dropped", "accuracy"):
+        table.add_column(column, justify="left" if column == "digest" else "right")
+    for s in [*samples, overall]:
+        accuracy = "-" if s.accuracy is None else f"{s.accuracy:.0%}"
+        table.add_row(
+            s.sample,
+            *(str(n) for n in (s.right, s.wrong, s.unsure, s.ungraded, s.dropped)),
+            accuracy,
+        )
+    console.print(table)
+    if overall.ungraded:
+        console.print(f"[yellow]{overall.ungraded} kept sentences have no grade yet.[/yellow]")
 
 
 if __name__ == "__main__":
