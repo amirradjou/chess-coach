@@ -133,6 +133,7 @@ def test_coach_pages(tmp_path):
     )
     assert nf6["punish"]["san"] == "e5" and nf6["punish"]["score"] == "+1.0"
     assert nf6["answers"] == [{"san": "Nf3", "games": 3, "right": False}]
+    assert nf6["reasons"][0] == "It lets e5 hit their knight on f6."  # what their mistake allows
     after = client.get("/api/coach/node", params={**q, "path": ",".join([*NXC3, "g8f6"])}).json()
     assert after["turn"] == "you" and after["target"]["san"] == "e5"  # Nf3 isn't sound here
     assert after["moves"][0]["reasons"]  # why Nf3 falls short, in chess terms

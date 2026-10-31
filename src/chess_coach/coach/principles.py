@@ -276,8 +276,11 @@ def _shelter_files(king: chess.Square) -> tuple[int, ...] | None:
     return None
 
 
-def explain(fen: str, played: str, best: str | None) -> Reasons:
-    """Why `played` (UCI) falls short of `best` in the position `fen`, in chess terms."""
+def explain(fen: str, played: str, best: str | None, *, theirs: bool = False) -> Reasons:
+    """Why `played` (UCI) falls short of `best` in the position `fen`, in chess terms. With
+    `theirs` it is the opponent's move: the faults speak of their pieces, and there are no ideas
+    (their better move is not yours to learn)."""
+    my, you, them = ("their", "they", "you") if theirs else ("your", "you", "them")
     board = chess.Board(fen)
     me = board.turn
     move = chess.Move.from_uci(played)
@@ -304,7 +307,7 @@ def explain(fen: str, played: str, best: str | None) -> Reasons:
         if square == move.to_square and taken and PIECE_VALUES[taken] >= PIECE_VALUES[kind]:
             continue  # a trade: it took something worth as much
         faults.append(
-            f"It leaves your {chess.piece_name(kind)} on {chess.square_name(square)} {how}."
+            f"It leaves {my} {chess.piece_name(kind)} on {chess.square_name(square)} {how}."
         )
         break
 
@@ -316,7 +319,7 @@ def explain(fen: str, played: str, best: str | None) -> Reasons:
         and not board.is_castling(move)
         and (other is None or other.has_castling_rights(me) or castles)
     ):
-        faults.append("It gives up your right to castle, so your king may be stuck in the centre.")
+        faults.append(f"It gives up {my} right to castle, so {my} king may be stuck in the centre.")
     king = board.king(me)
     shelter = _shelter_files(king) if king is not None else None
     home_rank = 0 if me == chess.WHITE else 7
@@ -334,7 +337,7 @@ def explain(fen: str, played: str, best: str | None) -> Reasons:
         )
     ):
         faults.append(
-            f"It pushes the {_file(chess.square_file(move.from_square))}-pawn in front of your "
+            f"It pushes the {_file(chess.square_file(move.from_square))}-pawn in front of {my} "
             "castled king, loosening its cover."
         )
 
@@ -344,18 +347,18 @@ def explain(fen: str, played: str, best: str | None) -> Reasons:
         best_piece = board.piece_type_at(better.from_square) if better is not None else None
         if piece == chess.QUEEN and best_piece != chess.QUEEN:
             faults.append(
-                f"It brings your queen out while {at_home} of your minor pieces are still at "
-                "home: the queen gets chased and you lose time."
+                f"It brings {my} queen out while {at_home} of {my} minor pieces are still at "
+                f"home: the queen gets chased and {you} lose time."
             )
         elif piece == chess.PAWN and chess.square_file(move.from_square) in _WING_FILES:
             faults.append(
-                f"It spends a move on a wing pawn while {at_home} of your minor pieces are still "
+                f"It spends a move on a wing pawn while {at_home} of {my} minor pieces are still "
                 "at home."
             )
         elif minors_at_home(mine, me) >= at_home and not board.is_castling(move):
             if other is not None and minors_at_home(other, me) < at_home:
                 faults.append(
-                    f"It doesn't develop a piece, and {at_home} of your minor pieces are still "
+                    f"It doesn't develop a piece, and {at_home} of {my} minor pieces are still "
                     "at home."
                 )
 
@@ -371,20 +374,20 @@ def explain(fen: str, played: str, best: str | None) -> Reasons:
         new_doubled = doubled(mine, me) - doubled(other, me) - doubled(board, me)
         new_isolated = isolated(mine, me) - isolated(other, me) - isolated(board, me)
         if new_doubled:
-            faults.append(f"It doubles your pawns on the {_file(min(new_doubled))}-file.")
+            faults.append(f"It doubles {my} pawns on the {_file(min(new_doubled))}-file.")
         if new_isolated:
             faults.append(
-                f"It leaves your {_file(min(new_isolated))}-pawn isolated: no pawn beside it "
+                f"It leaves {my} {_file(min(new_isolated))}-pawn isolated: no pawn beside it "
                 "can defend it."
             )
         their_passed = passed(mine, not me) - passed(board, not me) - passed(other, not me)
         if their_passed:
             square = chess.square_name(min(their_passed))
-            faults.append(f"It gives them a passed pawn on {square}.")
+            faults.append(f"It gives {them} a passed pawn on {square}.")
     del faults[MAX_FAULTS:]
 
     # -- what the better move does -------------------------------------------------------------
-    if better is None or other is None:
+    if theirs or better is None or other is None:
         return reasons
     ideas = reasons.ideas
     if castles and not board.is_castling(move):
@@ -435,6 +438,28 @@ def explain(fen: str, played: str, best: str | None) -> Reasons:
             ideas.append("The better move pushes your passed pawn: in endgames, passed pawns run.")
     del ideas[MAX_IDEAS:]
     return reasons
+
+
+def allows(fen: str, punish: str) -> list[str]:
+    """What the opponent's mistake lets you do, in chess terms: `fen` is the position after it
+    (you to move) and `punish` the engine's answer (UCI). Empty when there's nothing to name."""
+    board = chess.Board(fen)
+    move = chess.Move.from_uci(punish)
+    if move not in board.legal_moves:
+        return []
+    me, san = board.turn, board.san(move)
+    after = _after(board, move)
+    if after.is_checkmate():
+        return [f"It allows {san}, checkmate."]
+    if after.is_check():
+        return [f"It lets {san} come with check."]
+    hit = sorted(threatened(after, me) - threatened(board, me), key=lambda ks: -PIECE_VALUES[ks[0]])
+    if not hit:
+        return []
+    names = [f"{chess.piece_name(kind)} on {chess.square_name(square)}" for kind, square in hit]
+    if len(names) > 1:
+        return [f"It lets {san} hit their {names[0]} and {names[1]} at once."]
+    return [f"It lets {san} hit their {names[0]}."]
 
 
 def _null(board: chess.Board) -> chess.Board:
