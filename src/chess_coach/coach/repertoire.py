@@ -99,12 +99,6 @@ def usual_line(games: Sequence[Game]) -> str:
     return _numbered(best)
 
 
-def _url(game: Game, ply: int) -> str | None:
-    if game.url and "lichess.org" in game.url:
-        return f"{game.url}#{ply}"
-    return game.url
-
-
 def fixes(games: Sequence[Game], moves: Sequence[MoveFact], top: int = 5) -> list[Fix]:
     """Habitual opening moves (same position, same move, in 2+ games) that lose ground."""
     by_id = {g.id: g for g in games}
@@ -133,7 +127,7 @@ def fixes(games: Sequence[Game], moves: Sequence[MoveFact], top: int = 5) -> lis
             best_uci=best_uci,
             times=len(ms),
             avg_cp_loss=avg,
-            games=[(m.game_id, m.ply, _url(by_id[m.game_id], m.ply)) for m in ms][:5],
+            games=[(m.game_id, m.ply, by_id[m.game_id].move_url(m.ply)) for m in ms][:5],
         )
         # The same move from slightly different positions reads as one habit: keep the bigger.
         key = (fix.move, fix.best_san)

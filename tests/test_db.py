@@ -109,3 +109,38 @@ def test_iter_games_filters_by_since_and_source() -> None:
             "lichess:new"
         ]
         assert [g.id for g in store.iter_games(source="pgn")] == ["pgn:old"]
+
+
+def test_lichess_games_stored_under_a_hash_get_their_lichess_id_back(tmp_path) -> None:
+    from chess_coach.models import Puzzle
+
+    db = tmp_path / "coach.db"
+    old, new = "lichess:1de7c128dd0d", "lichess:co5iFldS"
+    pgn = '[Site "https://lichess.org/game/co5iFldS"]\n[GameId "co5iFldS"]\n\n1. e4 e5 *'
+    with Store(db) as store:
+        store.upsert_game(
+            make_game(old, source="lichess", url="https://lichess.org/1de7c128dd0d", pgn=pgn)
+        )
+        store.upsert_game(make_game("lichess:AbCdEfGh", source="lichess"))
+        store.replace_moves(old, [make_move(old, 1), make_move(old, 2)], depth=12)
+        puzzle = Puzzle(f"{old}:1", old, 1, "fen", "e2e4", "e4", "d4", "", 200, 18)
+        store.add_puzzle(puzzle)
+        store.record_check(f"{old}:1", True)
+        review = store.review(puzzle.id)
+        assert review is not None
+        store.save_attempt(review, "d2d4", False, datetime(2026, 10, 31, tzinfo=UTC))
+        # As the importer stored them before it knew "lichess.org/game/<id>"
+        store.conn.execute("UPDATE games SET source_id = '1de7c128dd0d' WHERE id = ?", (old,))
+        store.conn.commit()
+
+    with Store(db) as store:  # opening the store fixes them
+        game = store.get_game(new)
+        assert game is not None and store.get_game(old) is None
+        assert (game.source_id, game.url) == ("co5iFldS", "https://lichess.org/co5iFldS")
+        assert store.get_game("lichess:AbCdEfGh") is not None  # already right, untouched
+        assert [m.game_id for m in store.iter_moves()] == [new, new]
+        assert [(p.id, p.game_id) for p in store.puzzles()] == [(f"{new}:1", new)]
+        assert store.review(f"{new}:1") is not None
+        assert store.attempts()[0][0] == f"{new}:1"
+        assert store.checked_moves() == {f"{new}:1"}
+        assert store.conn.execute("PRAGMA foreign_key_check").fetchall() == []

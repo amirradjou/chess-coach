@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import re
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from datetime import UTC, datetime
 
 import chess.pgn
@@ -13,7 +13,8 @@ import chess.pgn
 from chess_coach.models import Color, Game, Speed
 from chess_coach.openings import classify_pgn
 
-_LICHESS_URL = re.compile(r"https?://lichess\.org/([A-Za-z0-9]{8})")
+# Lichess wrote "lichess.org/<id>" and now writes "lichess.org/game/<id>" (seen 2026-10).
+_LICHESS_URL = re.compile(r"https?://lichess\.org/(?:game/)?([A-Za-z0-9]{8})(?![A-Za-z0-9])")
 _CHESSCOM_URL = re.compile(r"https?://(?:www\.)?chess\.com/(?:game/)?(?:live|daily)/(\d+)")
 _EVENT_SPEEDS = {
     "ultrabullet": Speed.ULTRABULLET,
@@ -81,7 +82,7 @@ def parse_elo(value: str | None) -> int | None:
         return None
 
 
-def detect_source(headers: chess.pgn.Headers) -> tuple[str, str] | None:
+def detect_source(headers: Mapping[str, str]) -> tuple[str, str] | None:
     """(source, source_id) from Site/Link headers when the game came from a known server."""
     for key in ("Site", "Link"):
         value = headers.get(key, "")

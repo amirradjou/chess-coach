@@ -333,9 +333,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             "opening_fix": "opening-fix" in p.tags,
             "opening": family,
             "opening_idea": opening_idea(family) if early else None,
-            "game": (game.url + f"#{p.ply}")
-            if game and game.url and "lichess" in game.url
-            else (game.url if game else None),
+            "game": game.move_url(p.ply) if game else None,
         }
 
     @app.post("/api/drill/answer")

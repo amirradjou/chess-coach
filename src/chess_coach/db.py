@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
@@ -136,6 +137,9 @@ CREATE TABLE IF NOT EXISTS coach_attempts (
 """
 
 
+_HEADER = re.compile(r'^\[(\w+) "(.*)"\]\s*$', re.MULTILINE)
+
+
 def _iso(dt: datetime | None) -> str | None:
     return dt.astimezone(UTC).isoformat() if dt else None
 
@@ -157,6 +161,49 @@ class Store:
         columns = {r[1] for r in self.conn.execute("PRAGMA table_info(puzzles)")}
         if "accept" not in columns:  # databases from before opening-fix drills
             self.conn.execute("ALTER TABLE puzzles ADD COLUMN accept TEXT NOT NULL DEFAULT '[]'")
+        self._fix_lichess_ids()
+
+    def _fix_lichess_ids(self) -> None:
+        """Lichess games imported while the importer missed Site "lichess.org/game/<id>" got a
+        hash of the PGN for an id and a dead link. Give them their Lichess id back everywhere."""
+        rows = self.conn.execute(
+            "SELECT id, pgn FROM games WHERE source = 'lichess' AND length(source_id) <> 8"
+        ).fetchall()
+        if not rows:
+            return
+        from chess_coach.sources.pgn import detect_source
+
+        taken = {r[0] for r in self.conn.execute("SELECT id FROM games")}
+        renames = []
+        for old, pgn in rows:
+            detected = detect_source(dict(_HEADER.findall(pgn)))
+            if detected and detected[0] == "lichess" and f"lichess:{detected[1]}" not in taken:
+                renames.append((old, detected[1]))
+        self.conn.commit()
+        with self.conn:
+            # Moves, puzzles and their history point at the game id; check them at commit
+            self.conn.execute("BEGIN")
+            self.conn.execute("PRAGMA defer_foreign_keys = ON")
+            for old, source_id in renames:
+                new = f"lichess:{source_id}"
+                self.conn.execute(
+                    "UPDATE games SET id = ?, source_id = ?, url = ? WHERE id = ?",
+                    (new, source_id, f"https://lichess.org/{source_id}", old),
+                )
+                self.conn.execute("UPDATE moves SET game_id = ? WHERE game_id = ?", (new, old))
+                # Puzzle and candidate ids are "<game id>:<ply>"
+                for table, column in (
+                    ("puzzles", "id"),
+                    ("reviews", "puzzle_id"),
+                    ("attempts", "puzzle_id"),
+                    ("puzzle_checks", "move_id"),
+                ):
+                    self.conn.execute(
+                        f"UPDATE {table} SET {column} = ? || substr({column}, ?) "
+                        f"WHERE substr({column}, 1, ?) = ?",
+                        (new, len(old) + 1, len(old) + 1, f"{old}:"),
+                    )
+                self.conn.execute("UPDATE puzzles SET game_id = ? WHERE game_id = ?", (new, old))
 
     def close(self) -> None:
         self.conn.close()
@@ -235,6 +282,14 @@ class Store:
 
     def count_games(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+
+    def accounts(self) -> list[tuple[str, str, datetime | None]]:
+        """(source, user, when their newest stored game was played) for every account stored."""
+        rows = self.conn.execute(
+            "SELECT source, user, MAX(played_at) FROM games GROUP BY source, user "
+            "ORDER BY source, user"
+        )
+        return [(source, user, _from_iso(newest)) for source, user, newest in rows]
 
     # -- moves -----------------------------------------------------------------
 

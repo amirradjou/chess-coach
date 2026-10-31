@@ -158,6 +158,28 @@ move 10).
 - On the owner's games: blitz moved until 2026-W38, practice starts in W44 and there are no blitz
   or rapid games since, so the comparison needs blitz or rapid games after practice.
 
+## Keeping current: `sync` (2026-10-31, branch `feat/sync`, on top of #14)
+
+- `chess-coach sync`: for each (source, user) in `Store.accounts()` from Lichess or Chess.com,
+  fetch everything since that account's newest stored game (`max_games=None`), store it, analyse
+  every unanalysed game newest first (`_analyze_games`, shared with `analyze`), then
+  `puzzles.make` (`--puzzles`, default 200 candidates) and `make_opening_fixes`; prints the new
+  games by speed (results only outside bullet) and what's due (puzzles and opening cards).
+- Fetches are all or nothing per account: both sites send newest first, so storing part of a
+  failed stream would leave a gap that the next sync (which starts from the newest game) skips.
+  A cap on the fetch would do the same, hence none.
+- Found while testing it on the owner's games: **every Lichess game imported since Lichess
+  changed its Site header to `lichess.org/game/<id>`** (between the 2026-09-17 and 2026-10-29
+  imports) **had a PGN hash for an id and a dead link** (all 2,099 of the owner's). The importer
+  takes both forms now, and `Store._fix_lichess_ids` renames hashed games on open (games, moves,
+  puzzles, reviews, attempts, puzzle_checks; one transaction, foreign keys checked at commit).
+  Checked on a copy of the real database: about a second, every count unchanged, no foreign key
+  problems, and a second sync then found 0 new games (no duplicates). Old links
+  `lichess.org/<id>` redirect to `/game/<id>` and keep `#ply`.
+- Chess.com links now open at the move too (`Game.move_url`, see item 5 below).
+- On a copy of the owner's database (2026-10-31): 8 new bullet games since 10-29, analysed,
+  4 moves checked, 2 new puzzles.
+
 ## Remaining (in order)
 
 1. ~~Fresh puzzles from the full analysis~~: done 2026-10-31. `puzzles prune` removed 83
@@ -173,9 +195,10 @@ move 10).
    - ~~Reasons for the opponent's mistakes in the opening tree~~: done. `principles.allows`
      says what the punishment does to them ("It lets e5 hit their knight on f6": check, mate,
      pieces hit) and `explain(..., theirs=True)` gives the faults in their voice, no ideas.
-   - Chess.com ply links (`mining._ply_url`, `repertoire._url` only anchor Lichess URLs): not
-     done. No documented move parameter for Chess.com game pages could be confirmed, and the
-     owner's games are all Lichess; check a real Chess.com game in a browser before adding one.
+   - ~~Chess.com ply links~~: done 2026-10-31 (`Game.move_url`, one place for all four links).
+     Checked on a real live game (183193101523): `?move=5` selects 3.Na3 and `?move=14` shows
+     7...Nd5, the position after that ply, like Lichess's `#ply`. Daily games (`/game/daily/`)
+     still open at the start: no public daily game was found to check them on.
    - ~~Phone width and favicon~~: done. The Learn openings select grew to 718 px on a 375 px
      screen (now capped); every tab checked at 375 px; inline SVG favicon.
    - ~~httpx deprecation in the tests~~: done, `httpx2` (pydantic/httpx2) as a dev dependency.
