@@ -59,8 +59,11 @@ pattern mining ──► the situations, moves and openings where you go wrong m
 - Your mistake rate, centipawn loss and score by month or week (`progress`), with bullet after
   move 10, bullet results and moves made short on time left out.
 - Puzzle solve rate per theme, from every attempt.
-- Not yet: rating trend against practice, and a hand-graded check of the model summaries
-  beyond the automatic move check.
+- Your rating week by week next to the puzzles and opening training you did (`progress`, and
+  the Progress page), read from your own games (each stores the rating before the game; bullet
+  is left out). Once there are four weeks with practice and four without, it compares how the
+  rating moved in each: a comparison, not proof.
+- Not yet: a hand-graded check of the model summaries beyond the automatic move check.
 
 ## Privacy
 
@@ -93,11 +96,13 @@ table for opening names. The web coach is FastAPI with plain JavaScript and pyth
 - **v6 (done)** — opening training is remembered: every position you answer becomes a card on
   a spaced-repetition schedule, due ones come first, and each opening shows how many
   punishments you've found.
-- **Next** — rating trend against practice.
+- **v7 (done)** — rating trend against practice: your rating week by week next to the puzzles
+  and opening training you did.
+- **Next** — new screenshots, smaller polish.
 
 ## Status
 
-**v0–v6 done.** Import, analyse, find your patterns, turn your own mistakes into puzzles, drill
+**v0–v7 done.** Import, analyse, find your patterns, turn your own mistakes into puzzles, drill
 them on a schedule, learn and fix your openings, and watch the numbers move, in the terminal or in
 the browser (`chess-coach serve`).
 
@@ -174,7 +179,8 @@ across 8+ games.
     puzzle (only your first answer of the day counts; showing the move counts as a miss). Due
     punishments come first in the deck, training steers their replies towards positions that are
     due, and each opening shows "you've found 3 of 7 punishments" and how many are due.
-  - **Progress**: month by month, and your puzzle solve rate per theme.
+  - **Progress**: month by month, your rating and practice week by week (pick the speed), and
+    your puzzle solve rate per theme.
 - `puzzles make --openings` turns those opening fixes into drills; any move within 30 cp of the
   best counts, since openings often have several good moves. `puzzles prune` drops untried
   puzzles that no longer count (bullet after move 10, moves made short on time).

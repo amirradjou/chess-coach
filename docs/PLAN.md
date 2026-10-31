@@ -143,6 +143,21 @@ move 10).
 - Train mode steers their replies towards due positions (`towardDue` in `app.js`); the punish
   deck is refetched after each full pass, so due cards lead again.
 
+## v7 — rating trend against practice (2026-10-31, branch `feat/rating-trend`, on top of #10)
+
+- The plan said Lichess's `/api/user/{name}/rating-history`; on 2026-10-31 it returned `[]` for
+  the owner's account (and for some others; it works for e.g. DrNykterstein), so ratings come
+  from the stored games instead: `Game.user_elo` is the rating before each game, offline and the
+  same for Chess.com and PGN imports.
+- `coach/progress.py`: `trend_speeds` (bullet left out, by the owner's rule), `weekly` (last 12
+  ISO weeks: games and rating at your last game, change against your last game before the week,
+  puzzle attempts and coach answers), `practice_effect` (mean change in weeks with practice vs
+  without, only once each side has 4 weeks with games). `Store.coach_attempts`.
+- `progress` (CLI) prints the weekly table; `/api/progress?speed=` returns `trend`; the Progress
+  tab shows it with a speed selector.
+- On the owner's games: blitz moved until 2026-W38, practice starts in W44 and there are no blitz
+  or rapid games since, so the comparison needs blitz or rapid games after practice.
+
 ## Remaining (in order)
 
 1. **Fresh puzzles from the full analysis.** All 2,091 of the owner's games are analysed; a first
@@ -151,9 +166,7 @@ move 10).
    rapid), about half of which become puzzles. Run
    `uv run chess-coach --db data/amirradjou.db puzzles make --limit 150 --threads 8` in batches.
 2. ~~Remember opening training~~: done in v6.
-3. **Rating trend against practice** (the brief's metric): Lichess rating history API
-   (`/api/user/{name}/rating-history`) per speed, next to puzzle attempts and coach practice
-   per week in the Progress tab, so you can see whether practice moves the rating.
+3. ~~Rating trend against practice~~: done in v7 (from the games, not the API: see above).
 4. **New screenshots** for the README (puzzle review lines, Learn openings) from the owner's
    games; the current two predate v5.
 5. Smaller:
