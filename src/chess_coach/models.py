@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -154,3 +155,27 @@ class Review:
     ease: float = 2.5
     reps: int = 0
     lapses: int = 0
+
+
+def card_id(color: str, family: str, path: Sequence[str]) -> str:
+    return f"{color}|{family}|{','.join(path)}"
+
+
+@dataclass(slots=True)
+class CoachCard:
+    """A position in one of your openings where you're to move, scheduled with SM-2 like a
+    puzzle: right after the opponent's mistake ("punish") or on your own line ("line")."""
+
+    family: str
+    color: str  # yours
+    path: list[str]  # UCI moves from the start
+    kind: str
+    due: str  # ISO date
+    interval: int = 0  # days
+    ease: float = 2.5
+    reps: int = 0
+    lapses: int = 0
+
+    @property
+    def id(self) -> str:
+        return card_id(self.color, self.family, self.path)

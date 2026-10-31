@@ -129,6 +129,35 @@ On the owner's games: 1,723 of 2,091 are bullet; puzzle candidates fall from 4,1
 `puzzles prune` would remove 83 of the 128 puzzles made so far (untried ones from bullet after
 move 10).
 
+## v6 — remember opening training (2026-10-31, branch `feat/remember-opening-training`)
+
+- Tables `coach_cards` (id `"<colour>|<family>|<uci path>"`, kind `punish`/`line`, SM-2 fields)
+  and `coach_attempts`. `coach/training.py`: `answer` (new card on the first answer, then
+  `puzzles/srs.schedule`, now generic over anything with an SM-2 schedule), `deck` (due, then
+  new, then later), `summary` (found X of Y punishments, due, line positions practised, due
+  paths). A card is `punish` when the move before it is a punishable opponent edge in the tree.
+- `POST /api/coach/answer`: the page judges the move (usual sound move, or `/api/coach/check`)
+  and sends only the first answer at a position; the server counts one answer per card per UTC
+  day, so going back over a line doesn't push a card away. `GET /api/coach/cards`; the punish
+  deck and `/api/coach/openings` carry the practice state and the due count.
+- Train mode steers their replies towards due positions (`towardDue` in `app.js`); the punish
+  deck is refetched after each full pass, so due cards lead again.
+
+## v7 — rating trend against practice (2026-10-31, branch `feat/rating-trend`, on top of #10)
+
+- The plan said Lichess's `/api/user/{name}/rating-history`; on 2026-10-31 it returned `[]` for
+  the owner's account (and for some others; it works for e.g. DrNykterstein), so ratings come
+  from the stored games instead: `Game.user_elo` is the rating before each game, offline and the
+  same for Chess.com and PGN imports.
+- `coach/progress.py`: `trend_speeds` (bullet left out, by the owner's rule), `weekly` (last 12
+  ISO weeks: games and rating at your last game, change against your last game before the week,
+  puzzle attempts and coach answers), `practice_effect` (mean change in weeks with practice vs
+  without, only once each side has 4 weeks with games). `Store.coach_attempts`.
+- `progress` (CLI) prints the weekly table; `/api/progress?speed=` returns `trend`; the Progress
+  tab shows it with a speed selector.
+- On the owner's games: blitz moved until 2026-W38, practice starts in W44 and there are no blitz
+  or rapid games since, so the comparison needs blitz or rapid games after practice.
+
 ## Remaining (in order)
 
 1. **Fresh puzzles from the full analysis.** All 2,091 of the owner's games are analysed; a first
@@ -136,23 +165,23 @@ move 10).
    `puzzles prune`, 1,218 candidates are left unchecked (588 bullet openings, 545 blitz, 85
    rapid), about half of which become puzzles. Run
    `uv run chess-coach --db data/amirradjou.db puzzles make --limit 150 --threads 8` in batches.
-2. **Remember opening training.** The coach keeps no record: punish cards and trained lines
-   aren't scheduled. Store each coach attempt (position, move, right or not) and schedule cards
-   with SM-2 like puzzles (`puzzles/srs.py`); show "found 3 of 5 punishments" per opening and
-   put due cards first.
-3. **Rating trend against practice** (the brief's metric): Lichess rating history API
-   (`/api/user/{name}/rating-history`) per speed, next to puzzle attempts and coach practice
-   per week in the Progress tab, so you can see whether practice moves the rating.
-4. **New screenshots** for the README (puzzle review lines, Learn openings) from the owner's
-   games; the current two predate v5.
-5. Smaller:
-   - Reasons for the opponent's mistakes in the opening tree ("their 4...Nf6 lets e5 hit the
-     knight"): `principles.explain` speaks to the mover ("your"); add a "their" voice.
-   - Chess.com ply links (`mining._ply_url`, `repertoire._url` only anchor Lichess URLs).
-   - Check the pages at phone width (the board column and line cards), add a favicon (404 now).
-   - Tests: `fastapi.testclient` warns that httpx support is going away; follow Starlette's
-     replacement when it lands.
-   - A hand-graded accuracy set for the model-written digest (the brief's other metric).
+2. ~~Remember opening training~~: done in v6.
+3. ~~Rating trend against practice~~: done in v7 (from the games, not the API: see above).
+4. ~~New screenshots~~: five new ones in #13 (`docs/screenshots`: mistakes, practice with the
+   lines, your openings, Learn openings, the weekly trend), taken from #10-#12 merged locally.
+5. Smaller (branch `chore/polish`, 2026-10-31):
+   - ~~Reasons for the opponent's mistakes in the opening tree~~: done. `principles.allows`
+     says what the punishment does to them ("It lets e5 hit their knight on f6": check, mate,
+     pieces hit) and `explain(..., theirs=True)` gives the faults in their voice, no ideas.
+   - Chess.com ply links (`mining._ply_url`, `repertoire._url` only anchor Lichess URLs): not
+     done. No documented move parameter for Chess.com game pages could be confirmed, and the
+     owner's games are all Lichess; check a real Chess.com game in a browser before adding one.
+   - ~~Phone width and favicon~~: done. The Learn openings select grew to 718 px on a 375 px
+     screen (now capped); every tab checked at 375 px; inline SVG favicon.
+   - ~~httpx deprecation in the tests~~: done, `httpx2` (pydantic/httpx2) as a dev dependency.
+   - ~~Tests comparing UTC due dates with the local date~~: fixed (they failed 20:00-24:00 EDT).
+   - A hand-graded accuracy set for the model-written digest (the brief's other metric): needs
+     the owner to grade sentences; not started.
 
 ## Conventions that matter here
 

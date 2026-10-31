@@ -386,14 +386,15 @@ const games = (n) => `${n} game${n === 1 ? "" : "s"}`;
 const scored = (x, sep = " · ", words = "you scored") => (x.score === null ? ""
   : `${sep}${words} ${x.score}%${x.scored < x.games ? ` in the ${games(x.scored)} outside bullet` : ""}`);
 const a = (word) => `${/^[aeiou]/.test(word) ? "an" : "a"} ${word}`;
+const optionLabel = (x) => `${x.family} (${games(x.games)}${scored(x, ", ", "you score")}${x.due ? `, ${x.due} due` : ""})`;
 
 async function openCoach() {
   if (coach) return;
   const o = await api("/api/coach/openings");
   fill($("#coach-opening"), [["white", "With White"], ["black", "With Black"]].map(([color, label]) => (o[color].length
-    ? el("optgroup", { label }, o[color].map((x) => el("option", { value: `${color}|${x.family}` }, `${x.family} (${games(x.games)}${scored(x, ", ", "you score")})`)))
+    ? el("optgroup", { label }, o[color].map((x) => el("option", { value: `${color}|${x.family}` }, optionLabel(x))))
     : null)));
-  coach = { openings: o, color: null, family: null, mode: "explore", path: [], node: null, from: null, check: null, reveal: false, deck: null, card: 0, pending: null };
+  coach = { openings: o, color: null, family: null, mode: "explore", path: [], node: null, from: null, check: null, reveal: false, deck: null, card: 0, pending: null, cards: null, answered: false };
   await pickOpening();
 }
 $("#coach-opening").addEventListener("change", pickOpening);
@@ -405,7 +406,55 @@ async function pickOpening() {
   Object.assign(coach, { color, family, deck: null, card: 0 });
   const info = coach.openings[color].find((x) => x.family === family);
   fill($("#coach-idea"), info?.idea ? el("div", { class: "idea" }, el("b", {}, `${family}: `), info.idea) : null);
+  await loadCards();
   await coachStart();
+}
+
+// -- remembering your practice: each position you answer is a card with an SM-2 schedule -----
+async function loadCards() {
+  coach.cards = await api(`/api/coach/cards?${new URLSearchParams({ family: coach.family, color: coach.color })}`);
+  showCards();
+}
+
+function showCards() {
+  const c = coach.cards;
+  const info = coach.openings[coach.color].find((x) => x.family === coach.family);
+  if (info) {
+    info.due = c.due;
+    const option = [...$("#coach-opening").options].find((o) => o.value === `${coach.color}|${coach.family}`);
+    if (option) option.textContent = optionLabel(info);
+  }
+  const parts = [
+    c.total ? `You've found ${c.found} of ${c.total} punishments` : null,
+    c.lines ? `practised ${c.lines} position${c.lines === 1 ? "" : "s"} on your lines` : null,
+  ].filter(Boolean);
+  fill($("#coach-progress"), parts.length || c.due
+    ? `${parts.join(" · ")}${parts.length ? " · " : ""}${c.due ? `${c.due} due today, and they come first` : "nothing due today"}.`
+    : null);
+}
+
+// Only your first answer at a position counts (asking to see the move is a miss), as with puzzles.
+async function record(uci, correct) {
+  if (coach.mode === "explore" || coach.answered) return;
+  coach.answered = true;
+  try {
+    coach.cards = await api("/api/coach/answer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ family: coach.family, color: coach.color, path: coach.path, uci, correct }),
+    });
+    showCards();
+  } catch (err) {
+    fill($("#coach-progress"), `Couldn't save that answer: ${err.message}`);
+  }
+}
+
+// Due positions come first: in training, their replies steer towards one when your games allow.
+function towardDue(moves) {
+  const at = coach.path.length;
+  const due = (coach.cards?.due_paths ?? []).filter((p) => p.length > at && coach.path.every((u, i) => p[i] === u));
+  const ahead = moves.filter((m) => due.some((p) => p[at] === m.uci));
+  return ahead.length ? ahead : moves;
 }
 
 for (const b of document.querySelectorAll("#coach .modes button")) {
@@ -436,6 +485,7 @@ async function coachGo(path, note) {
   coach.node = node;
   coach.reveal = false;
   coach.check = null;
+  coach.answered = false;
   await coachDraw();
   fill($("#coach-feedback"), note ?? null);
   const n = coach.node;
@@ -504,7 +554,7 @@ function theyMove() {
   const n = coach.node;
   if (coach.path.length >= LINE_END) return fill($("#coach-feedback"), "End of the line: well played. ", restartButton());
   if (n.moves.length) {
-    const m = weighted(n.moves);
+    const m = weighted(towardDue(n.moves));
     coach.pending = m.punish ? m : null;
     return coachGo([...coach.path, m.uci], m.punish
       ? [el("b", { class: "played" }, `They play ${m.number}${m.san}`), `, ${a(m.verdict)} (${m.games} of your games). Punish it.`]
@@ -516,6 +566,7 @@ function theyMove() {
 }
 
 async function nextMistake() {
+  if (coach.deck && coach.card >= coach.deck.length) Object.assign(coach, { deck: null, card: 0 }); // a full pass: due ones first again
   if (!coach.deck) coach.deck = await api(`/api/coach/punish?${new URLSearchParams({ family: coach.family, color: coach.color })}`);
   if (!coach.deck.length) {
     fill($("#coach-board"));
@@ -523,10 +574,11 @@ async function nextMistake() {
     fill($("#coach-title"), "No opponent mistakes seen twice in this opening yet.");
     return fill($("#coach-feedback"));
   }
-  const m = coach.deck[coach.card++ % coach.deck.length];
+  const m = coach.deck[coach.card++];
   coach.pending = m;
+  const when = m.state === "due" ? "due today" : m.state === "new" ? "new" : `${m.found ? "found" : "missed"} last time, due ${m.due}`;
   await coachGo(m.path, [el("b", { class: "played" }, `They play ${m.number}${m.san}`),
-    `, ${a(m.verdict)} you've met in ${games(m.games)}. Punish it. (${(coach.card - 1) % coach.deck.length + 1} of ${coach.deck.length})`]);
+    `, ${a(m.verdict)} you've met in ${games(m.games)}. Punish it. (${coach.card} of ${coach.deck.length}: ${when})`]);
 }
 
 function restartButton() {
@@ -550,6 +602,7 @@ async function onCoachBoard(evt) {
   if (coach.node.turn !== "you") return;
   const usual = coach.mode === "play" && coach.node.moves.find((m) => m.uci === uci && (m.verdict === "best" || m.verdict === "good"));
   if (usual) {
+    record(uci, true);
     return coachGo([...coach.path, uci], [el("b", { class: "better" }, `${usual.san}: good.`),
       ` Your usual move here (${games(usual.games)}${scored(usual, ", ")}), and a sound one.`]);
   }
@@ -564,6 +617,7 @@ async function onCoachBoard(evt) {
     return fill($("#coach-feedback"), "That isn't a legal move here.");
   }
   coach.check = r;
+  record(r.uci, r.ok);
   if (!r.ok) {
     return fill($("#coach-feedback"),
       el("b", { class: "played" }, `${r.san} isn't it`),
@@ -580,6 +634,7 @@ async function onCoachBoard(evt) {
 }
 
 $("#coach-show").addEventListener("click", async () => {
+  record("?", false);
   coach.reveal = true;
   await coachDraw();
   const n = coach.node;
@@ -638,14 +693,15 @@ async function loadOpenings() {
 }
 
 // -- progress ------------------------------------------------------------------------------
-async function loadProgress() {
-  const p = await api("/api/progress");
+async function loadProgress(speed) {
+  const p = await api(`/api/progress${speed ? `?${new URLSearchParams({ speed })}` : ""}`);
   const rows = p.periods.map((r) => el("tr", {}, el("td", {}, r.label), el("td", {}, r.games), el("td", {}, r.score === null ? "–" : `${r.score}%`),
     el("td", {}, `${r.error_rate}%`), el("td", {}, r.acpl)));
   fill($("#progress"),
     el("h2", {}, "Your games by month"),
     el("p", { class: "muted" }, "In bullet only your first 10 moves count, and the score leaves bullet out: the clock decides those games."),
     el("table", {}, el("tr", {}, ["month", "games", "score", "mistakes + blunders", "average cp loss"].map((h) => el("th", {}, h))), rows),
+    trendSection(p.trend),
     el("h2", {}, "Puzzles"),
     p.puzzles.attempts
       ? el("div", {},
@@ -654,6 +710,28 @@ async function loadProgress() {
           p.tags.map((t) => el("tr", {}, el("td", {}, t.tag.replaceAll("_", " ")), el("td", {}, t.attempts), el("td", {}, `${t.rate}%`)))))
       : el("p", { class: "muted" }, "No attempts yet: try the Practice tab."),
   );
+}
+
+// Your rating week by week (read from your games; bullet left out) next to the practice you did.
+function trendSection(t) {
+  if (!t.speed) return null;
+  const signed = (n) => `${n > 0 ? "+" : ""}${n}`;
+  const pick = el("select", {}, t.speeds.map((s) => el("option", s === t.speed ? { value: s, selected: "" } : { value: s }, s)));
+  pick.addEventListener("change", () => loadProgress(pick.value));
+  const cell = (v) => el("td", {}, v ?? "");
+  const rows = t.weeks.map((w) => el("tr", {},
+    cell(w.label), cell(w.games || ""), cell(w.rating),
+    el("td", { class: w.change > 0 ? "better" : w.change < 0 ? "played" : "" }, w.change === null ? "" : signed(w.change)),
+    cell(w.puzzles ? `${w.solved} of ${w.puzzles}` : ""), cell(w.answers ? `${w.right} of ${w.answers}` : "")));
+  const e = t.effect;
+  return [
+    el("h2", {}, "Rating and practice by week"),
+    el("p", { class: "muted" }, "Your ", t.speeds.length > 1 ? pick : t.speed,
+      " rating in your last game each week (bullet is left out), next to the puzzles and opening training you did."),
+    el("table", {}, el("tr", {}, ["week", "games", "rating", "change", "puzzles solved", "openings right"].map((h) => el("th", {}, h))), rows),
+    e ? el("p", {}, `Weeks you practised: ${signed(e.practised)} a week on average (${e.practised_weeks} weeks); weeks you didn't: ${signed(e.idle)} (${e.idle_weeks} weeks). A comparison, not proof.`)
+      : el("p", { class: "muted small" }, "Once there are four weeks of games with practice and four without, this compares how your rating moved in each."),
+  ];
 }
 
 show("mistakes");

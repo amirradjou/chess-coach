@@ -1,6 +1,13 @@
 import chess
 
-from chess_coach.coach.principles import doubled, explain, isolated, opening_idea, passed
+from chess_coach.coach.principles import (
+    allows,
+    doubled,
+    explain,
+    isolated,
+    opening_idea,
+    passed,
+)
 
 AFTER_NF3_NC6 = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3"
 ITALIAN = "r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4"
@@ -42,6 +49,29 @@ def test_development_and_the_queen():
     assert r.ideas == ["The better move develops a piece: get the knights and bishops out early."]
     wing = explain(AFTER_E5, "h2h3", "g1f3")
     assert wing.faults[0].startswith("It spends a move on a wing pawn")
+
+
+def test_their_mistakes_are_explained_in_their_voice():
+    after_nf3 = "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2"
+    r = explain(after_nf3, "d8f6", "b8c6", theirs=True)  # 2...Qf6 instead of developing
+    assert r.faults[0] == (
+        "It brings their queen out while 4 of their minor pieces are still at home: the queen "
+        "gets chased and they lose time."
+    )
+    assert r.ideas == []  # what their better move does is not yours to learn
+
+
+def test_what_their_mistake_allows():
+    danish = chess.Board()
+    for san in "e4 e5 d4 exd4 c3 dxc3 Nxc3 Nf6".split():
+        danish.push_san(san)
+    assert allows(danish.fen(), "e4e5") == ["It lets e5 hit their knight on f6."]
+    fork = "r1bqkb1r/pppp1ppp/2n5/4p3/2B1n3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4"  # 3...Nxe4?
+    assert allows(fork, "c4f7") == ["It lets Bxf7+ come with check."]
+    mate = "rnbqkbnr/ppppp2p/5p2/6p1/4P3/8/PPPP1PPP/RNBQKBNR w KQkq g6 0 3"  # 2...g5??
+    assert allows(mate, "d1h5") == ["It allows Qh5#, checkmate."]
+    assert allows(chess.STARTING_FEN, "e2e4") == []  # nothing to name
+    assert allows(chess.STARTING_FEN, "e2e5") == []  # not a legal move
 
 
 def test_pawn_structure_and_the_centre():

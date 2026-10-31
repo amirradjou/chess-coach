@@ -8,7 +8,17 @@ from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
-from chess_coach.models import Color, Game, Judgement, MoveFact, Phase, Puzzle, Review, Speed
+from chess_coach.models import (
+    CoachCard,
+    Color,
+    Game,
+    Judgement,
+    MoveFact,
+    Phase,
+    Puzzle,
+    Review,
+    Speed,
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS games (
@@ -101,6 +111,27 @@ CREATE TABLE IF NOT EXISTS attempts (
     at        TEXT NOT NULL,
     answer    TEXT NOT NULL,
     correct   INTEGER NOT NULL
+);
+
+-- Opening training (Learn openings): each position you answer is a card with an SM-2 schedule.
+CREATE TABLE IF NOT EXISTS coach_cards (
+    id       TEXT PRIMARY KEY,  -- "<colour>|<family>|<path>"
+    family   TEXT NOT NULL,
+    color    TEXT NOT NULL,     -- yours
+    path     TEXT NOT NULL,     -- UCI moves from the start, comma-separated
+    kind     TEXT NOT NULL,     -- "punish" (right after their mistake) or "line"
+    due      TEXT NOT NULL,
+    interval INTEGER NOT NULL,
+    ease     REAL NOT NULL,
+    reps     INTEGER NOT NULL,
+    lapses   INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS coach_attempts (
+    card_id TEXT NOT NULL REFERENCES coach_cards (id) ON DELETE CASCADE,
+    at      TEXT NOT NULL,
+    answer  TEXT NOT NULL,  -- UCI, or "?" when you asked to see the move
+    correct INTEGER NOT NULL
 );
 """
 
@@ -375,6 +406,87 @@ class Store:
         """(puzzle_id, ISO time, correct) for every attempt, oldest first."""
         rows = self.conn.execute("SELECT puzzle_id, at, correct FROM attempts ORDER BY at")
         return [(r[0], r[1], bool(r[2])) for r in rows]
+
+    # -- opening training ------------------------------------------------------
+
+    def coach_cards(self, family: str | None = None, color: str | None = None) -> list[CoachCard]:
+        """Your opening cards, all or one opening's, soonest due first."""
+        rows = self.conn.execute(
+            "SELECT * FROM coach_cards "
+            "WHERE (? IS NULL OR family = ?) AND (? IS NULL OR color = ?) ORDER BY due, id",
+            (family, family, color, color),
+        )
+        return [_row_to_card(r) for r in rows]
+
+    def coach_card(self, id: str) -> CoachCard | None:
+        row = self.conn.execute("SELECT * FROM coach_cards WHERE id = ?", (id,)).fetchone()
+        return _row_to_card(row) if row else None
+
+    def save_coach_attempt(self, card: CoachCard, answer: str, correct: bool, at: datetime) -> None:
+        """Record an answer and the card's new schedule together (the card is created the first
+        time)."""
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO coach_cards "
+                "(id, family, color, path, kind, due, interval, ease, reps, lapses) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (id) DO UPDATE SET kind = excluded.kind, due = excluded.due, "
+                "interval = excluded.interval, ease = excluded.ease, reps = excluded.reps, "
+                "lapses = excluded.lapses",
+                (
+                    card.id,
+                    card.family,
+                    card.color,
+                    ",".join(card.path),
+                    card.kind,
+                    card.due,
+                    card.interval,
+                    card.ease,
+                    card.reps,
+                    card.lapses,
+                ),
+            )
+            self.conn.execute(
+                "INSERT INTO coach_attempts (card_id, at, answer, correct) VALUES (?, ?, ?, ?)",
+                (card.id, at.isoformat(), answer, int(correct)),
+            )
+
+    def coach_attempts(self) -> list[tuple[str, str, bool]]:
+        """(card id, ISO time, correct) for every opening training answer, oldest first."""
+        rows = self.conn.execute("SELECT card_id, at, correct FROM coach_attempts ORDER BY at")
+        return [(r[0], r[1], bool(r[2])) for r in rows]
+
+    def coach_answered(self, card_id: str, day: str) -> bool:
+        """Whether you already answered this card on `day` (an ISO date, UTC like the times)."""
+        row = self.conn.execute(
+            "SELECT 1 FROM coach_attempts WHERE card_id = ? AND substr(at, 1, 10) = ? LIMIT 1",
+            (card_id, day),
+        ).fetchone()
+        return row is not None
+
+    def coach_last_answers(self, family: str, color: str) -> dict[str, bool]:
+        """Card id -> whether your latest answer there was right, for one opening."""
+        rows = self.conn.execute(
+            "SELECT a.card_id, a.correct, MAX(a.at) FROM coach_attempts a "
+            "JOIN coach_cards c ON c.id = a.card_id WHERE c.family = ? AND c.color = ? "
+            "GROUP BY a.card_id",
+            (family, color),
+        )
+        return {r[0]: bool(r[1]) for r in rows}
+
+
+def _row_to_card(row: sqlite3.Row) -> CoachCard:
+    return CoachCard(
+        family=row["family"],
+        color=row["color"],
+        path=[u for u in row["path"].split(",") if u],
+        kind=row["kind"],
+        due=row["due"],
+        interval=row["interval"],
+        ease=row["ease"],
+        reps=row["reps"],
+        lapses=row["lapses"],
+    )
 
 
 def _row_to_game(row: sqlite3.Row) -> Game:

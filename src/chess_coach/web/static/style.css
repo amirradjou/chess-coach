@@ -56,6 +56,9 @@ button, select {
 }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .toolbar { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin: 12px 0; }
+/* A select is as wide as its longest option; on a phone keep it inside the screen. */
+.toolbar label { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+select { min-width: 0; max-width: 100%; text-overflow: ellipsis; }
 .drill { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
 .side { flex: 1; min-width: 240px; }
 .buttons { display: flex; gap: 8px; margin: 12px 0; }
