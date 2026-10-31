@@ -104,3 +104,12 @@ def test_speed_classification_follows_lichess_thresholds() -> None:
     assert classify_speed(None) is Speed.UNKNOWN
     # the Lichess event name wins over arithmetic
     assert classify_speed("300+0", "Rated Bullet game") is Speed.BULLET
+
+
+def test_lichess_game_urls_in_both_forms_give_the_game_id() -> None:
+    from chess_coach.sources.pgn import detect_source
+
+    assert detect_source({"Site": "https://lichess.org/game/co5iFldS"}) == ("lichess", "co5iFldS")
+    assert detect_source({"Site": "https://lichess.org/AbCdEfGh"}) == ("lichess", "AbCdEfGh")
+    # Not a game: the first 8 letters of a longer path are not an id
+    assert detect_source({"Site": "https://lichess.org/broadcast/some-event/round-1"}) is None
