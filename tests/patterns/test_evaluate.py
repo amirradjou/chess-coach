@@ -24,6 +24,14 @@ def test_every_sentence_is_numbered_and_checked():
     ]
 
 
+def test_layout_is_not_a_sentence_to_grade():
+    text = "### Habits to practise:\n\n1. Look at 17.Qh5 again.\n\n- Check captures first."
+    assert [r.text for r in rows_for("all", text, {"17.Qh5"})] == [
+        "Look at 17.Qh5 again.",
+        "- Check captures first.",
+    ]
+
+
 def test_the_model_summarises_each_slice():
     games, moves = planted()
     ev = build(games, moves).move_patterns[0].evidence[0]

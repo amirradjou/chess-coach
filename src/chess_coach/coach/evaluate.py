@@ -10,6 +10,7 @@ it, n: they don't, ?: can't tell), and the score is y / (y + n).
 from __future__ import annotations
 
 import csv
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import astuple, dataclass, fields
 from datetime import datetime
@@ -22,6 +23,9 @@ from chess_coach.util import parse_since
 
 SLICES = ("all", "1y", "6m", "3m", "1m")  # the digests summarised
 RIGHT, WRONG, UNSURE = ("y", "yes"), ("n", "no"), ("?",)
+# List numbers and headings the model writes ("1.", "### Habits to practise:") are layout, not
+# claims: they don't go into the sheet.
+LAYOUT = re.compile(r"\d+\.|#+\s.*|[-*]")
 
 
 @dataclass(slots=True)
@@ -42,7 +46,12 @@ COLUMNS = [f.name for f in fields(Row)]
 
 def rows_for(sample: str, text: str, allowed: set[str]) -> list[Row]:
     """The sentences of one summary, numbered, each marked as the automatic check sees it."""
-    found = [s for paragraph in text.split("\n\n") for s in sentences(paragraph) if s]
+    found = [
+        s
+        for paragraph in text.split("\n\n")
+        for s in sentences(paragraph)
+        if s and not LAYOUT.fullmatch(s.strip())
+    ]
     return [
         Row(
             sample,
