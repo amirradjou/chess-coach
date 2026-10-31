@@ -15,13 +15,31 @@ plain language, and trains you on exactly those spots.
   repetition so the ones you keep failing come back.
 - Weekly digest: what changed, what to work on next, one opening line to study.
 
-`chess-coach serve` on the author's own Lichess games: the mistakes you repeat, on your own
-positions (red arrow: what you played; green: what to play), and your openings with the habitual
-moves worth fixing.
+`chess-coach serve` on the author's own Lichess games (2,091 of them, all analysed).
+
+The mistakes you repeat, on your own positions (red arrow: what you played; green: what to
+play), with what to learn:
 
 ![What you get wrong](docs/screenshots/mistakes.png)
 
+Practice on your own mistakes. After an answer, step through the best line next to the move you
+played in the game (here 8...Nxf2+ forks king and rook; the game went 8...Nxe5):
+
+![Practice: a puzzle from your game, with the lines](docs/screenshots/practice.png)
+
+Your openings, with your score, your usual line and the habitual moves worth fixing:
+
 ![Your openings](docs/screenshots/openings.png)
+
+Learn openings: the tree of your own games. Where the opponent went wrong it shows the
+punishment, how you actually answered (4...Nf6 in the Danish: met 21 times, punished 0 times) and
+why it's a mistake in chess terms:
+
+![Learn openings](docs/screenshots/learn-openings.png)
+
+Your rating week by week next to the practice you did (bullet left out):
+
+![Rating and practice by week](docs/screenshots/progress.png)
 
 ## Why build it
 
