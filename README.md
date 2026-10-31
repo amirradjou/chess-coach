@@ -101,7 +101,7 @@ table for opening names. The web coach is FastAPI with plain JavaScript and pyth
   punishments you've found.
 - **v7 (done)** — rating trend against practice: your rating week by week next to the puzzles
   and opening training you did.
-- **Next** — new screenshots, smaller polish.
+- **Next** — keeping current: `sync` fetches, analyses and makes puzzles in one step.
 
 ## Status
 
@@ -127,6 +127,10 @@ across 8+ games.
   before and after from the mover's side, the best move and line, centipawn and win-probability
   loss, a Lichess-style judgement (inaccuracy, mistake, blunder), the game phase, the clock, and
   motif tags. It resumes where it stopped and re-runs only at a greater depth (or `--force`).
+- `sync` does import, analyse and `puzzles make` for you: it fetches every game since the newest
+  one stored for each Lichess and Chess.com account (all or nothing, so a failed download leaves
+  no gap), analyses whatever isn't analysed yet, newest first, makes puzzles, and says what came
+  in and what's due. Bullet results aren't reported, by the rule above.
 - `stats` prints a per-game accuracy table and how often each motif shows up in your moves.
 - `digest` slices your moves by phase, colour, speed, opening, move number and clock (and
   pairs of them), and your games by colour, speed, opening, castling and queen trades. It keeps a
@@ -234,6 +238,7 @@ scripts/get-stockfish.sh    # fetch a Stockfish binary into ./.stockfish (no sud
 uv run chess-coach import lichess <username> --max 100 --rated   # LICHESS_TOKEN raises the rate limit
 uv run chess-coach import chesscom <username> --since 3m
 uv run chess-coach import pgn games.pgn --user "<your name in the PGN>"
+uv run chess-coach sync                                          # later: fetch, analyse, make puzzles
 uv run chess-coach games                                         # what is stored
 uv run chess-coach analyze --depth 12 --threads 4
 uv run chess-coach stats
@@ -248,6 +253,10 @@ uv run chess-coach serve --open                                  # the coach in 
 ```
 
 `analyze --newest` starts with your latest games, so a big import is useful early.
+
+After the first import, `sync` keeps the coach current in one step: new games from every Lichess
+and Chess.com account already stored, analysis, and puzzles from the new mistakes. Run it daily or
+weekly (`--threads 8` speeds it up).
 
 `--db <file>` picks another database (default `data/chess-coach.db`).
 
