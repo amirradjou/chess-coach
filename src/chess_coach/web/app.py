@@ -31,7 +31,13 @@ from chess_coach.coach.habits import (
     missed_kinds,
 )
 from chess_coach.coach.principles import Reasons, explain, opening_idea
-from chess_coach.coach.progress import periods, solve_rates
+from chess_coach.coach.progress import (
+    periods,
+    practice_effect,
+    solve_rates,
+    trend_speeds,
+    weekly,
+)
 from chess_coach.coach.repertoire import Favorite, Fix, favorites
 from chess_coach.db import Store
 from chess_coach.engine.stockfish import Engine, EngineNotFoundError, LineEval
@@ -667,11 +673,42 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
         ]
 
     @app.get("/api/progress")
-    def progress(by: str = "month") -> dict:
+    def progress(by: str = "month", speed: str | None = None) -> dict:
         with Store(db_path) as store:
             games, moves, _ = data(store)
-            overall, tags = solve_rates(store.puzzles(), store.attempts())
+            attempts, answers = store.attempts(), store.coach_attempts()
+            overall, tags = solve_rates(store.puzzles(), attempts)
+        speeds = trend_speeds(games)
+        chosen = speed if speed in speeds else (speeds[0] if speeds else None)
+        today = datetime.now(UTC).date()
+        weeks = weekly(games, chosen, attempts, answers, today=today) if chosen else []
+        effect = practice_effect(weeks)
         return {
+            "trend": {
+                "speeds": speeds,
+                "speed": chosen,
+                "weeks": [
+                    {
+                        "label": w.label,
+                        "games": w.games,
+                        "rating": w.rating,
+                        "change": w.change,
+                        "puzzles": w.puzzles,
+                        "solved": w.solved,
+                        "answers": w.answers,
+                        "right": w.right,
+                    }
+                    for w in weeks
+                ],
+                "effect": None
+                if effect is None
+                else {
+                    "practised": round(effect[0], 1),
+                    "practised_weeks": effect[1],
+                    "idle": round(effect[2], 1),
+                    "idle_weeks": effect[3],
+                },
+            },
             "periods": [
                 {
                     "label": p.label,

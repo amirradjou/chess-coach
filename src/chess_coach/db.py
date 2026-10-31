@@ -451,6 +451,11 @@ class Store:
                 (card.id, at.isoformat(), answer, int(correct)),
             )
 
+    def coach_attempts(self) -> list[tuple[str, str, bool]]:
+        """(card id, ISO time, correct) for every opening training answer, oldest first."""
+        rows = self.conn.execute("SELECT card_id, at, correct FROM coach_attempts ORDER BY at")
+        return [(r[0], r[1], bool(r[2])) for r in rows]
+
     def coach_answered(self, card_id: str, day: str) -> bool:
         """Whether you already answered this card on `day` (an ISO date, UTC like the times)."""
         row = self.conn.execute(
