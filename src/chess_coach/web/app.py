@@ -5,6 +5,7 @@ key."""
 from __future__ import annotations
 
 import threading
+from collections import Counter
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -19,6 +20,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
+from chess_coach.coach import training
 from chess_coach.coach import tree as optree
 from chess_coach.coach.digest import build
 from chess_coach.coach.habits import (
@@ -33,7 +35,7 @@ from chess_coach.coach.progress import periods, solve_rates
 from chess_coach.coach.repertoire import Favorite, Fix, favorites
 from chess_coach.db import Store
 from chess_coach.engine.stockfish import Engine, EngineNotFoundError, LineEval
-from chess_coach.models import Puzzle
+from chess_coach.models import Puzzle, card_id
 from chess_coach.openings import opening_table
 from chess_coach.patterns.features import move_rows, result_of
 from chess_coach.patterns.mining import Evidence
@@ -200,6 +202,14 @@ class CoachMove(BaseModel):
     fen: str
     uci: str
     best: str | None = None  # the move stored for this position, used when there's no engine
+
+
+class CoachAnswer(BaseModel):
+    family: str
+    color: str
+    path: list[str]  # UCI moves from the start to the position you answered
+    uci: str  # your move, or "?" when you asked to see it
+    correct: bool  # judged by the page: your usual sound move, or /api/coach/check
 
 
 def _pct(value: float | None) -> int | None:
@@ -484,8 +494,10 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
 
     @app.get("/api/coach/openings")
     def coach_openings() -> dict:
+        today = datetime.now(UTC).date().isoformat()
         with Store(db_path) as store:
             games = list(store.iter_games())
+            due = Counter((c.family, c.color) for c in store.coach_cards() if c.due <= today)
         out: dict[str, list[dict]] = {"white": [], "black": []}
         for o in optree.openings(games):
             out[o.color].append(
@@ -495,6 +507,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
                     "score": _pct(o.score),
                     "scored": o.scored,
                     "idea": opening_idea(o.family),
+                    "due": due[(o.family, o.color)],
                 }
             )
         return out
@@ -509,17 +522,41 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
+    def coach_deck(family: str, color: str):
+        """This opening's punish deck in practice order, its cards, and today's date."""
+        root, _ = opening_tree(family, color)
+        today = datetime.now(UTC).date().isoformat()
+        with Store(db_path) as store:
+            cards = store.coach_cards(family, color)
+            last = store.coach_last_answers(family, color)
+        mistakes = optree.mistakes(root)
+        deck = training.deck(mistakes, family, color, {c.id: c for c in cards}, last, today)
+        return deck, cards, today
+
+    def coach_summary(family: str, color: str) -> dict:
+        deck, cards, today = coach_deck(family, color)
+        s = training.summary(deck, cards, today)
+        return {
+            "found": s.found,
+            "total": s.total,
+            "due": s.due,
+            "lines": s.lines,
+            "due_paths": s.due_paths,
+        }
+
     @app.get("/api/coach/punish")
     def coach_punish(family: str, color: str) -> list[dict]:
-        """The opponent mistakes you meet in this opening, each with its punishment."""
-        root, _ = opening_tree(family, color)
+        """The opponent mistakes you meet in this opening, each with its punishment: due ones
+        first, then new ones, then the rest."""
+        deck, _, _ = coach_deck(family, color)
         out = []
-        for path, edge in optree.mistakes(root):
+        for d in deck:
+            edge = d.edge
             board = chess.Board(edge.facts[0].fen_before)
             f = edge.child.best
             out.append(
                 {
-                    "path": path,
+                    "path": d.path,
                     "number": _number(board),
                     "san": edge.san,
                     "games": len(edge.facts),
@@ -529,9 +566,55 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
                         {"san": e.san, "games": len(e.facts), "right": e.uci == f.best_move}
                         for e in sorted(edge.child.edges.values(), key=lambda e: -len(e.facts))
                     ],
+                    "state": d.state,
+                    "due": d.due,
+                    "found": d.found,
                 }
             )
         return out
+
+    @app.get("/api/coach/cards")
+    def coach_cards(family: str, color: str) -> dict:
+        """Your practice in this opening: punishments found, cards due, and where they are."""
+        return coach_summary(family, color)
+
+    @app.post("/api/coach/answer")
+    def coach_answer(a: CoachAnswer) -> dict:
+        """Record your first answer at a position in opening training and schedule it again."""
+        if a.color not in ("white", "black"):
+            raise HTTPException(400, "colour is white or black")
+        board = chess.Board()
+        try:
+            for uci in a.path:
+                board.push(review.legal(board, uci))
+            if a.uci != "?":
+                review.legal(board, a.uci)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if board.turn != (chess.WHITE if a.color == "white" else chess.BLACK):
+            raise HTTPException(400, "it isn't your move there")
+        path = [m.uci() for m in board.move_stack]
+        root, _ = opening_tree(a.family, a.color)
+        parent = optree.walk(root, path[:-1]) if path else None
+        edge = parent.edges.get(path[-1]) if parent else None
+        kind = training.PUNISH if edge is not None and edge.punishable else training.LINE
+        now = datetime.now(UTC)
+        cid = card_id(a.color, a.family, path)
+        with Store(db_path) as store:
+            before = store.coach_card(cid)
+            # One answer a day counts, so going back over a line doesn't push a card away.
+            recorded = not store.coach_answered(cid, now.date().isoformat())
+            if recorded:
+                card = training.answer(before, a.family, a.color, path, kind, a.correct, now.date())
+                store.save_coach_attempt(card, a.uci, a.correct, now)
+            else:
+                card = before
+        return {
+            "recorded": recorded,
+            "kind": kind,
+            "next_due": card.due if card else None,
+            **coach_summary(a.family, a.color),
+        }
 
     @app.post("/api/coach/check")
     def coach_check(c: CoachMove) -> dict:
