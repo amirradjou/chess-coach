@@ -6,11 +6,12 @@ invent a pattern.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from chess_coach.models import Game, MoveFact
+from chess_coach.coach.repeats import Repeat, repeats
+from chess_coach.models import Game, MoveFact, Puzzle
 from chess_coach.patterns.features import (
     BULLET_MOVES,
     game_rows,
@@ -156,6 +157,8 @@ class Digest:
     # Moves played short on time are left out above; these are their mistakes that keep repeating.
     rushed_moves: int = 0
     pressure: list[MotifCount] = field(default_factory=list)
+    # The same mistake from the same position in 3+ games (with --since: played again since).
+    repeats: list[Repeat] = field(default_factory=list)
 
 
 def build(
@@ -167,8 +170,14 @@ def build(
     min_lift: float = 1.5,
     game_lift: float = 1.25,
     since: datetime | None = None,
+    replies: Mapping[tuple[str, int], MoveFact] | None = None,
+    puzzles: Sequence[Puzzle] = (),
 ) -> Digest:
+    """The digest's facts. `replies` (Store.replies_to_errors) and `puzzles` complete the repeated
+    mistakes with their punishment and their puzzle."""
     analysed = [g for g in games if g.analyzed_depth]
+    # Counted over every game: with --since, the ones played again in this digest's games
+    again = repeats(analysed, moves, replies or {}, puzzles)
     before: list = []
     if since is not None:
         before = [g for g in analysed if g.played_at and g.played_at < since]
@@ -202,6 +211,7 @@ def build(
         bullet_games=sum(is_bullet(g) for g in analysed),
         rushed_moves=len(rrows),
         pressure=repeated_under_pressure(rrows),
+        repeats=[r for r in again if since is None or (r.last and r.last >= since)],
     )
 
 
@@ -220,6 +230,22 @@ def _games_line(i: int, p: Pattern) -> str:
         f"{i}. **{describe(p.features)}**: lost {p.hits} of {p.n} ({p.rate:.0%} against your "
         f"usual {p.baseline:.0%}). For example: {games}."
     )
+
+
+def _repeat_line(i: int, r: Repeat) -> str:
+    where = f" ({r.family})" if r.family else ""
+    last = f", last on {r.last:%Y-%m-%d}" if r.last else ""
+    parts = [f"{i}. **{r.move}**{where} in {r.games} games{last}; better {r.better}."]
+    if r.punish:
+        parts.append(
+            f"Their best answer is {r.punish}, and they found it {r.punished} of {r.replies} times."
+        )
+    parts += r.reasons
+    games = ", ".join(f"[{n}]({url})" for n, url in enumerate(r.urls, 1))
+    if games:
+        parts.append(f"Games: {games}.")
+    parts.append("It has a puzzle." if r.puzzle else "No puzzle for it yet.")
+    return " ".join(parts)
 
 
 def render(d: Digest, top: int = 5) -> str:
@@ -287,6 +313,17 @@ def render(d: Digest, top: int = 5) -> str:
             what, tip = MOTIFS.get(m.tag, (m.tag.replace("_", " "), ""))
             example = _move(m.evidence[0]) if m.evidence else ""
             out.append(f"| {what} | {m.moves} | {m.games} | {example} | {tip} |")
+        out.append("")
+
+    if d.repeats:
+        when = f", played again since {d.since}" if d.since else ""
+        out += [
+            "## The same mistake in the same position",
+            "",
+            f"Your mistakes from the very same position in 3 or more games{when}:",
+            "",
+        ]
+        out += [_repeat_line(i, r) for i, r in enumerate(d.repeats[:top], 1)]
         out.append("")
 
     if d.pressure:

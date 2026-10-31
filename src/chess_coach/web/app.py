@@ -38,6 +38,7 @@ from chess_coach.coach.progress import (
     trend_speeds,
     weekly,
 )
+from chess_coach.coach.repeats import Repeat, repeats
 from chess_coach.coach.repertoire import Favorite, Fix, favorites
 from chess_coach.db import Store
 from chess_coach.engine.stockfish import Engine, EngineNotFoundError, LineEval
@@ -159,6 +160,23 @@ def _fix(f: Fix) -> dict:
     }
 
 
+def _repeat(r: Repeat) -> dict:
+    return {
+        "svg": board_svg(r.fen, [(r.uci, PLAYED), (r.best_uci, BETTER)]),
+        "move": r.move,
+        "better": r.better,
+        "family": r.family,
+        "games": r.games,
+        "last": r.last.date().isoformat() if r.last else None,
+        "punish": r.punish,
+        "punished": r.punished,
+        "replies": r.replies,
+        "reasons": r.reasons,
+        "urls": r.urls,
+        "puzzle": r.puzzle is not None,
+    }
+
+
 def _favorite(f: Favorite) -> dict:
     return {
         "family": f.family,
@@ -248,7 +266,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
         moves = list(store.iter_moves(user_only=True))
         return games, moves, (sum(1 for g in games if g.analyzed_depth), len(moves))
 
-    def cached(name: str, key: tuple[int, int], make) -> dict:
+    def cached(name: str, key: tuple[int, ...], make):
         if name in cache and cache[name][0] == key:
             return cache[name][1]
         value = make()
@@ -297,6 +315,20 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             }
 
         return cached("overview", key, make)
+
+    @app.get("/api/repeats")
+    def repeat_offenders() -> list[dict]:
+        """The mistakes you repeat from the same position (coach.repeats), most games first."""
+        with Store(db_path) as store:
+            games, moves, key = data(store)
+            puzzles = store.puzzles()
+            return cached(
+                "repeats",
+                (*key, len(puzzles)),
+                lambda: [
+                    _repeat(r) for r in repeats(games, moves, store.replies_to_errors(), puzzles)
+                ],
+            )
 
     @app.get("/api/openings")
     def openings() -> dict:

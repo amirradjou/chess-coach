@@ -69,7 +69,7 @@ def repeats(
     `Store.replies_to_errors` gives it; without one a repeat has no punishment."""
     groups: dict[tuple[str, str], list[MoveRow]] = {}
     for r in move_rows([g for g in games if g.analyzed_depth], moves):
-        if r.fact.judgement in ERRORS:
+        if r.fact.judgement in ERRORS and r.fact.fen_before:  # no position, nothing to repeat
             groups.setdefault((r.fact.fen_before, r.fact.uci), []).append(r)
     out = [
         _repeat(sorted(rows, key=lambda r: _when(r.game)), replies, puzzles)

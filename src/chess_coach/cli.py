@@ -279,6 +279,7 @@ def sync(
         today = datetime.now(UTC).date().isoformat()
         due = len(store.due(today))
         cards = sum(c.due <= today for c in store.coach_cards())
+        alerts = _repeat_alerts(store, new) if new else []
     console.print(
         f"Analysed {len(pending)} games. Checked {made.checked + fixes.checked} moves, made "
         f"[green]{made.made + fixes.made}[/green] puzzles ({total} in all)."
@@ -287,6 +288,22 @@ def sync(
         f"Due today: {due} puzzles (`chess-coach drill`) and {cards} opening positions "
         "(Learn openings in `chess-coach serve`)."
     )
+    for line in alerts:
+        console.print(f"[yellow]{line}[/yellow]")
+
+
+def _repeat_alerts(store: Store, new: list[Game]) -> list[str]:
+    """'You played 3...Bg7 again (12th time); it has a puzzle.' for each mistake you repeat from
+    the same position (coach.repeats) that the new games played once more."""
+    from chess_coach.coach.repeats import again, alert, repeats
+
+    found = repeats(
+        list(store.iter_games()),
+        list(store.iter_moves(user_only=True)),
+        store.replies_to_errors(),
+        store.puzzles(),
+    )
+    return [alert(r) for r in again(found, {g.id for g in new})]
 
 
 def _new_games_line(games: list[Game]) -> str:
@@ -392,7 +409,16 @@ def digest(
     with Store(settings.db_path) as store:
         games = list(store.iter_games())
         moves = list(store.iter_moves(user_only=True))
-    built = build(games, moves, min_moves=min_moves, min_games=min_games, since=parse_since(since))
+        replies, puzzles = store.replies_to_errors(), store.puzzles()
+    built = build(
+        games,
+        moves,
+        min_moves=min_moves,
+        min_games=min_games,
+        since=parse_since(since),
+        replies=replies,
+        puzzles=puzzles,
+    )
     text = render(built, top=top)
     if narrate:
         from chess_coach.coach.narrate import model_for
@@ -737,6 +763,49 @@ def openings(
                 f"  You played {slip.move} in {slip.games} games; the engine prefers "
                 f"{slip.best}.{where}"
             )
+
+
+@app.command()
+def repeats(
+    ctx: typer.Context,
+    min_games: Annotated[int, typer.Option(help="Smallest number of games it happened in.")] = 3,
+    top: Annotated[int, typer.Option(help="How many to show.")] = 10,
+) -> None:
+    """The same mistake from the same position in several games: what it allows, the better move,
+    and whether a puzzle drills it."""
+    from chess_coach.coach.repeats import repeats as find
+
+    settings: Settings = ctx.obj
+    with Store(settings.db_path) as store:
+        found = find(
+            list(store.iter_games()),
+            list(store.iter_moves(user_only=True)),
+            store.replies_to_errors(),
+            store.puzzles(),
+            min_games,
+        )
+    if not found:
+        console.print(f"No mistake of yours repeats from the same position in {min_games}+ games.")
+        return
+    console.print(
+        f"{len(found)} mistakes you repeat from the same position, in {min_games} or more games "
+        "(inaccuracies or worse; in bullet only your first 10 moves count, and moves made short "
+        "on time don't)."
+    )
+    for r in found[:top]:
+        where = f" ({r.family})" if r.family else ""
+        last = f", last on {r.last:%Y-%m-%d}" if r.last else ""
+        console.print(f"\n[bold]{r.move}[/bold]{where} in {r.games} games{last}.")
+        console.print(f"  Better: {r.better}.")
+        if r.punish:
+            console.print(
+                f"  Their best answer: {r.punish}, found {r.punished} of {r.replies} times."
+            )
+        for reason in r.reasons:
+            console.print(f"  {reason}")
+        console.print(f"  It has a puzzle ({r.puzzle})." if r.puzzle else "  No puzzle for it yet.")
+        for url in r.urls[:3]:
+            console.print(f"  [dim]{url}[/dim]")
 
 
 @app.command()

@@ -77,8 +77,24 @@ function habitCard(h, tags) {
   );
 }
 
+// The same mistake from the very same position in 3+ games, with their best answer to it.
+function repeatCard(r) {
+  return el(
+    "div", { class: "example" },
+    boardNode(r.svg),
+    el("div", {}, "You played ", el("span", { class: "played" }, r.move), ` in ${r.games} games`,
+      r.family ? ` (${r.family})` : "", " · better ", el("span", { class: "better" }, r.better)),
+    r.punish ? el("div", { class: "small" }, "Their best answer: ", el("b", {}, r.punish),
+      ` (they found it ${r.punished} of ${r.replies} times)`) : null,
+    reasons(r.reasons),
+    el("div", { class: "muted small" }, `Last on ${r.last} · `, r.puzzle ? "it has a puzzle" : "no puzzle for it yet"),
+    el("div", { class: "small" }, r.urls.map((url, i) => [i ? " · " : "",
+      el("a", { href: url, target: "_blank", rel: "noopener" }, `game ${i + 1}`)])),
+  );
+}
+
 async function loadMistakes() {
-  const [o, tagList] = await Promise.all([api("/api/overview"), api("/api/drill/tags")]);
+  const [o, tagList, repeated] = await Promise.all([api("/api/overview"), api("/api/drill/tags"), api("/api/repeats")]);
   const tags = new Set(tagList.map((t) => t.tag));
   $("#summary").textContent =
     `${o.games} analysed games (${o.first} to ${o.last}). You make a mistake or blunder on ` +
@@ -90,6 +106,11 @@ async function loadMistakes() {
     el("h2", {}, "Mistakes you repeat"),
     el("p", { class: "muted" }, "Counted from Stockfish's verdict on your own moves. Red is what you played, green what to play."),
     o.habits.length ? o.habits.map((h) => habitCard(h, tags)) : el("p", {}, "Nothing stands out yet."),
+    repeated.length ? [
+      el("h2", {}, "The same mistake in the same position"),
+      el("p", { class: "muted" }, "Your inaccuracies or worse from the very same position in 3 or more games (named book moves left out). Red is what you played, green the better move."),
+      el("div", { class: "card" }, el("div", { class: "examples" }, repeated.map(repeatCard))),
+    ] : null,
     el("h2", {}, "When it happens"),
     el("p", { class: "muted" }, "Situations where your mistake rate is clearly above your own average."),
     o.situations.length ? o.situations.map((h) => habitCard(h, tags)) : el("p", {}, "No situation stands out yet: analyse more games."),

@@ -1,12 +1,21 @@
 """The same mistake in the same position: counted like everything else, with what it allows."""
 
+from contextlib import nullcontext
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+from rich.console import Console
+from typer.testing import CliRunner
+
+from chess_coach import cli
+from chess_coach.coach.digest import build, render
 from chess_coach.coach.repeats import again, alert, ordinal, repeats
 from chess_coach.db import Store
 from chess_coach.models import Puzzle, Speed
+from chess_coach.puzzles.make import MakeResult
+from chess_coach.web.app import create_app
 
-from .test_opening_tree import DANISH, facts
+from .test_opening_tree import DANISH, facts, no_engine
 from .test_patterns import game
 
 # 5.Nf3?! (5.e5 hits the knight) after 1.e4 e5 2.d4 exd4 3.c3 dxc3 4.Nxc3 Nf6; 2.d4, the
@@ -90,3 +99,74 @@ def test_alert_wording(tmp_path: Path):
     assert alert(r) == "You played 5.Nf3 again (4th time); the better move is 5.e5."
     r.puzzle = "lichess:g1:9"
     assert alert(r) == "You played 5.Nf3 again (4th time); it has a puzzle."
+
+
+def test_the_repeats_command(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(cli, "console", Console(width=200))
+    db = tmp_path / "c.db"
+    store_games(db)
+    result = CliRunner().invoke(cli.app, ["--db", str(db), "repeats"])
+    assert result.exit_code == 0, result.output
+    assert "1 mistakes you repeat from the same position, in 3 or more games" in result.output
+    assert "5.Nf3 (Danish Gambit Accepted) in 4 games, last on 2026-10-05." in result.output
+    assert "Their best answer: 5...Nxe4, found 3 of 4 times." in result.output
+    assert "No puzzle for it yet." in result.output and "https://lichess.org/g4#9" in result.output
+    none = CliRunner().invoke(cli.app, ["--db", str(db), "repeats", "--min-games", "5"])
+    assert "No mistake of yours repeats from the same position in 5+ games." in none.output
+
+
+def test_the_digest_lists_repeats(tmp_path: Path):
+    db = tmp_path / "c.db"
+    games = store_games(db)
+    with Store(db) as store:
+        moves = list(store.iter_moves(user_only=True))
+        replies = store.replies_to_errors()
+    text = render(build(games, moves, replies=replies))
+    assert "## The same mistake in the same position" in text
+    assert (
+        "1. **5.Nf3** (Danish Gambit Accepted) in 4 games, last on 2026-10-05; better 5.e5. "
+        "Their best answer is 5...Nxe4, and they found it 3 of 4 times." in text
+    )
+    assert "[1](https://lichess.org/g4#9)" in text and "No puzzle for it yet." in text
+    # --since: only the ones played again since then, still counted over every game
+    assert "played again since 2026-10-05" in render(build(games, moves, since=games[4].played_at))
+    assert "## The same mistake" not in render(build(games, moves, since=games[5].played_at))
+
+
+def test_the_web_shows_repeats_without_stockfish(tmp_path: Path):
+    db = tmp_path / "c.db"
+    store_games(db)
+    (r,) = TestClient(create_app(db, no_engine)).get("/api/repeats").json()
+    assert (r["move"], r["better"], r["games"], r["punish"], r["puzzle"]) == (
+        "5.Nf3",
+        "5.e5",
+        4,
+        "5...Nxe4",
+        False,
+    )
+    assert r["svg"].startswith("<svg") and r["last"] == "2026-10-05" and r["reasons"]
+
+
+def test_sync_says_when_a_new_game_repeats_one(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(cli, "console", Console(width=200))
+    db = tmp_path / "c.db"
+    store_games(db)
+    new = game(9)
+    new.opening, new.analyzed_depth = "Danish Gambit Accepted", None
+    line = [*DANISH, "Nf6", "Nf3", "Nxe4"]
+    monkeypatch.setattr("chess_coach.sources.lichess.fetch_games", lambda *a, **kw: iter([new]))
+    monkeypatch.setattr(cli, "_engine", lambda settings, threads: nullcontext(object()))
+    monkeypatch.setattr(
+        cli,
+        "_analyze_games",
+        lambda store, engine, pending, depth: [
+            store.replace_moves(g.id, facts(g.id, line, LOSS, BEST), depth) for g in pending
+        ],
+    )
+    monkeypatch.setattr("chess_coach.puzzles.make.make", lambda store, engine, limit: MakeResult())
+    monkeypatch.setattr(
+        "chess_coach.puzzles.make.make_opening_fixes", lambda store, engine: MakeResult()
+    )
+    result = CliRunner().invoke(cli.app, ["--db", str(db), "sync"])
+    assert result.exit_code == 0, result.output
+    assert "You played 5.Nf3 again (5th time); the better move is 5.e5." in result.output
