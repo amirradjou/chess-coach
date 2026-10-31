@@ -477,6 +477,47 @@ def puzzles_prune(ctx: typer.Context) -> None:
     console.print(f"Removed {len(removed)} puzzles that no longer count; {left} left.")
 
 
+@puzzles_app.command("dedupe")
+def puzzles_dedupe(ctx: typer.Context) -> None:
+    """Merge puzzles stored more than once (same position, same answer): keep the copy you've
+    tried, otherwise the oldest, with every copy's tags. Tried copies are never deleted."""
+    import chess
+
+    from chess_coach.puzzles.make import dedupe
+
+    settings: Settings = ctx.obj
+    with Store(settings.db_path) as store:
+        merges = dedupe(store)
+        left = len(store.puzzles())
+    if not merges:
+        console.print(f"No puzzle is stored twice ({left} puzzles).")
+        return
+    for m in merges:
+        p = m.kept[0]
+        board = chess.Board(p.fen)
+        answer = f"{_number(board)}{p.solution_san}"
+        if len(m.kept) > 1:
+            kept = f"kept all {len(m.kept)} copies you've tried ({', '.join(k.id for k in m.kept)})"
+        else:
+            kept = f"kept {p.id}" + (" (the one you've tried)" if m.tried else "")
+        line = f"{answer} (you played {p.played_san}): {kept}"
+        if m.removed:
+            line += f", removed {', '.join(m.removed)}"
+        if m.added:
+            line += f"; it now also has {', '.join(m.added)}"
+        console.print(line)
+    removed = sum(len(m.removed) for m in merges)
+    console.print(
+        f"{len(merges)} positions were stored more than once: removed {removed} copies, "
+        f"{left} puzzles left."
+    )
+
+
+def _number(board) -> str:
+    """'12.' when White is to move, '12...' when Black is."""
+    return f"{board.fullmove_number}{'.' if board.turn else '...'}"
+
+
 @puzzles_app.command("list")
 def puzzles_list(
     ctx: typer.Context,

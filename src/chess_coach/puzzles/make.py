@@ -228,6 +228,44 @@ def make_opening_fixes(store: Store, engine: Engine, *, depth: int = VERIFY_DEPT
     return result
 
 
+@dataclass(slots=True)
+class Merge:
+    """A position and answer stored more than once, and what `dedupe` did with its copies."""
+
+    kept: list[Puzzle]  # one, or every copy you've tried when two or more have attempts
+    removed: list[str]
+    added: list[str]  # the tags the first kept copy took over
+    tried: int  # how many copies have attempts
+
+
+def dedupe(store: Store) -> list[Merge]:
+    """Merge puzzles with the same position and answer: keep the copy you've tried, otherwise the
+    oldest, give it the other copies' tags and delete them. A puzzle with attempts is never
+    deleted: when two or more copies have them, they are all kept."""
+    tried = {pid for pid, _, _ in store.attempts()}
+    groups: dict[tuple[str, str], list[Puzzle]] = {}
+    for p in store.puzzles():  # oldest first
+        groups.setdefault((p.fen, p.solution), []).append(p)
+    merges = []
+    for copies in groups.values():
+        if len(copies) < 2:
+            continue
+        kept = [p for p in copies if p.id in tried] or copies[:1]
+        gone = [p for p in copies if p.id not in tried and p is not kept[0]]
+        target, before = kept[0], kept[0].tags
+        tags = before
+        for p in gone:
+            tags = merged_tags(tags, p.tags)
+        if tags != before:
+            store.set_puzzle_tags(target.id, tags)
+            target.tags = tags
+        for p in gone:
+            store.delete_puzzle(p.id)
+        added = [t for t in tags if t not in before]
+        merges.append(Merge(kept, [p.id for p in gone], added, sum(p.id in tried for p in copies)))
+    return merges
+
+
 def prune(store: Store) -> list[str]:
     """Remove puzzles never attempted that `keep` would no longer make: from bullet after move
     10, or from a move made short on time and not repeated often enough. Returns the removed
