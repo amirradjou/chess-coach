@@ -173,9 +173,10 @@ move 10).
    - ~~Reasons for the opponent's mistakes in the opening tree~~: done. `principles.allows`
      says what the punishment does to them ("It lets e5 hit their knight on f6": check, mate,
      pieces hit) and `explain(..., theirs=True)` gives the faults in their voice, no ideas.
-   - Chess.com ply links (`mining._ply_url`, `repertoire._url` only anchor Lichess URLs): not
-     done. No documented move parameter for Chess.com game pages could be confirmed, and the
-     owner's games are all Lichess; check a real Chess.com game in a browser before adding one.
+   - ~~Chess.com ply links~~: done 2026-10-31 (`Game.move_url`, one place for all four links).
+     Checked on a real live game (183193101523): `?move=5` selects 3.Na3 and `?move=14` shows
+     7...Nd5, the position after that ply, like Lichess's `#ply`. Daily games (`/game/daily/`)
+     still open at the start: no public daily game was found to check them on.
    - ~~Phone width and favicon~~: done. The Learn openings select grew to 718 px on a 375 px
      screen (now capped); every tab checked at 375 px; inline SVG favicon.
    - ~~httpx deprecation in the tests~~: done, `httpx2` (pydantic/httpx2) as a dev dependency.

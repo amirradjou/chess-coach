@@ -139,19 +139,13 @@ def _evidence(rows: Sequence[MoveRow], limit: int, errors_only: bool = True) -> 
             r.fact.san,
             r.fact.best_san,
             r.fact.wp_loss,
-            _ply_url(r.game.url, r.fact.ply),
+            r.game.move_url(r.fact.ply),
             r.fact.fen_before,
             r.fact.uci,
             r.fact.best_move,
         )
         for r in worst
     ]
-
-
-def _ply_url(url: str | None, ply: int) -> str | None:
-    if url and "lichess.org" in url:
-        return f"{url}#{ply}"
-    return url
 
 
 def mine_moves(

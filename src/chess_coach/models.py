@@ -84,6 +84,20 @@ class Game:
         """The part of the opening name before the colon, for grouping across variations."""
         return self.opening.split(":", 1)[0].strip() if self.opening else None
 
+    def move_url(self, ply: int) -> str | None:
+        """The game's page opened at the position after `ply` (1 = White's first move).
+
+        Lichess takes "#ply" and Chess.com live games take "?move=ply" (checked on a real game
+        on 2026-10-31); other links open the game at the start.
+        """
+        if not self.url:
+            return None
+        if "lichess.org/" in self.url:
+            return f"{self.url}#{ply}"
+        if "chess.com/game/live/" in self.url:
+            return f"{self.url}?move={ply}"
+        return self.url
+
     @property
     def user_elo(self) -> int | None:
         return self.white_elo if self.user_color is Color.WHITE else self.black_elo

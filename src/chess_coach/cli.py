@@ -480,11 +480,7 @@ def drill(
                 store.save_attempt(after, answer, correct, now)
                 console.print(f"[dim]Next time: {after.due}.[/dim]")
             if game is not None and game.url:
-                console.print(
-                    f"[dim]The game: {game.url}#{p.ply}[/dim]"
-                    if "lichess" in game.url
-                    else f"[dim]The game: {game.url}[/dim]"
-                )
+                console.print(f"[dim]The game: {game.move_url(p.ply)}[/dim]")
         console.print(f"\nSolved {solved} of {len(due)}.")
 
 

@@ -52,6 +52,17 @@ def test_chesscom_export_is_parsed_case_insensitively(sample_pgn_text: str) -> N
     assert chesscom.opening_family == "Queen's Gambit Declined"
 
 
+def test_move_links_open_the_game_at_the_move(sample_pgn_text: str) -> None:
+    lichess, chesscom = list(games_from_pgn_text(sample_pgn_text, "coachme"))[:2]
+    assert lichess.move_url(14) == f"{lichess.url}#14"
+    assert chesscom.move_url(14) == "https://www.chess.com/game/live/123456789?move=14"
+    # No checked move parameter for daily games: they open at the start
+    chesscom.url = "https://www.chess.com/game/daily/987654321"
+    assert chesscom.move_url(14) == chesscom.url
+    chesscom.url = None
+    assert chesscom.move_url(14) is None
+
+
 def test_plain_pgn_gets_a_content_hash_id(sample_pgn_text: str) -> None:
     games = list(games_from_pgn_text(sample_pgn_text, "coachme"))
     plain = games[2]
