@@ -693,14 +693,15 @@ async function loadOpenings() {
 }
 
 // -- progress ------------------------------------------------------------------------------
-async function loadProgress() {
-  const p = await api("/api/progress");
+async function loadProgress(speed) {
+  const p = await api(`/api/progress${speed ? `?${new URLSearchParams({ speed })}` : ""}`);
   const rows = p.periods.map((r) => el("tr", {}, el("td", {}, r.label), el("td", {}, r.games), el("td", {}, r.score === null ? "–" : `${r.score}%`),
     el("td", {}, `${r.error_rate}%`), el("td", {}, r.acpl)));
   fill($("#progress"),
     el("h2", {}, "Your games by month"),
     el("p", { class: "muted" }, "In bullet only your first 10 moves count, and the score leaves bullet out: the clock decides those games."),
     el("table", {}, el("tr", {}, ["month", "games", "score", "mistakes + blunders", "average cp loss"].map((h) => el("th", {}, h))), rows),
+    trendSection(p.trend),
     el("h2", {}, "Puzzles"),
     p.puzzles.attempts
       ? el("div", {},
@@ -709,6 +710,28 @@ async function loadProgress() {
           p.tags.map((t) => el("tr", {}, el("td", {}, t.tag.replaceAll("_", " ")), el("td", {}, t.attempts), el("td", {}, `${t.rate}%`)))))
       : el("p", { class: "muted" }, "No attempts yet: try the Practice tab."),
   );
+}
+
+// Your rating week by week (read from your games; bullet left out) next to the practice you did.
+function trendSection(t) {
+  if (!t.speed) return null;
+  const signed = (n) => `${n > 0 ? "+" : ""}${n}`;
+  const pick = el("select", {}, t.speeds.map((s) => el("option", s === t.speed ? { value: s, selected: "" } : { value: s }, s)));
+  pick.addEventListener("change", () => loadProgress(pick.value));
+  const cell = (v) => el("td", {}, v ?? "");
+  const rows = t.weeks.map((w) => el("tr", {},
+    cell(w.label), cell(w.games || ""), cell(w.rating),
+    el("td", { class: w.change > 0 ? "better" : w.change < 0 ? "played" : "" }, w.change === null ? "" : signed(w.change)),
+    cell(w.puzzles ? `${w.solved} of ${w.puzzles}` : ""), cell(w.answers ? `${w.right} of ${w.answers}` : "")));
+  const e = t.effect;
+  return [
+    el("h2", {}, "Rating and practice by week"),
+    el("p", { class: "muted" }, "Your ", t.speeds.length > 1 ? pick : t.speed,
+      " rating in your last game each week (bullet is left out), next to the puzzles and opening training you did."),
+    el("table", {}, el("tr", {}, ["week", "games", "rating", "change", "puzzles solved", "openings right"].map((h) => el("th", {}, h))), rows),
+    e ? el("p", {}, `Weeks you practised: ${signed(e.practised)} a week on average (${e.practised_weeks} weeks); weeks you didn't: ${signed(e.idle)} (${e.idle_weeks} weeks). A comparison, not proof.`)
+      : el("p", { class: "muted small" }, "Once there are four weeks of games with practice and four without, this compares how your rating moved in each."),
+  ];
 }
 
 show("mistakes");

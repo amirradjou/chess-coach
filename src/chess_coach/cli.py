@@ -506,13 +506,24 @@ def progress(
     by: Annotated[str, typer.Option(help="month or week")] = "month",
     speed: Annotated[str | None, typer.Option(help="Only this speed, e.g. blitz.")] = None,
 ) -> None:
-    """Your error rate, centipawn loss and score over time, and how your puzzle practice goes."""
-    from chess_coach.coach.progress import periods, solve_rates
+    """Your error rate, centipawn loss and score over time, how your puzzle practice goes, and
+    your rating week by week next to the practice you did."""
+    from datetime import UTC, datetime
+
+    from chess_coach.coach.progress import (
+        periods,
+        practice_effect,
+        solve_rates,
+        trend_speeds,
+        weekly,
+    )
 
     settings: Settings = ctx.obj
     with Store(settings.db_path) as store:
-        rows = periods(list(store.iter_games()), list(store.iter_moves(user_only=True)), by, speed)
-        overall, tags = solve_rates(store.puzzles(), store.attempts())
+        games = list(store.iter_games())
+        rows = periods(games, list(store.iter_moves(user_only=True)), by, speed)
+        attempts, answers = store.attempts(), store.coach_attempts()
+        overall, tags = solve_rates(store.puzzles(), attempts)
     if not rows:
         console.print("No analysed games yet. Run `chess-coach analyze` first.")
         return
@@ -535,6 +546,32 @@ def progress(
         for r in tags:
             t.add_row(r.name, str(r.attempts), f"{r.rate:.0%}")
         console.print(t)
+    speeds = trend_speeds(games)
+    trend = speed if speed in speeds else (speeds[0] if speeds else None)
+    if trend is None:
+        return
+    weeks = weekly(games, trend, attempts, answers, today=datetime.now(UTC).date())
+    t = Table(
+        title=f"Rating and practice by week ({trend})",
+        caption="Your rating in your last game each week; bullet is left out.",
+    )
+    for column in ("week", "games", "rating", "change", "puzzles solved", "openings right"):
+        t.add_column(column, justify="left" if column == "week" else "right")
+    for w in weeks:
+        t.add_row(
+            w.label,
+            str(w.games or ""),
+            "" if w.rating is None else str(w.rating),
+            "" if w.change is None else f"{w.change:+d}",
+            f"{w.solved} of {w.puzzles}" if w.puzzles else "",
+            f"{w.right} of {w.answers}" if w.answers else "",
+        )
+    console.print(t)
+    if effect := practice_effect(weeks):
+        console.print(
+            f"Weeks you practised: {effect[0]:+.1f} a week on average ({effect[1]} weeks); weeks "
+            f"you didn't: {effect[2]:+.1f} ({effect[3]} weeks). A comparison, not proof."
+        )
 
 
 @app.command()
