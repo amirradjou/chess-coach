@@ -172,9 +172,6 @@ def analyze(
     ] = False,
 ) -> None:
     """Run Stockfish over every game not yet analyzed at this depth and store per-move facts."""
-    from chess_coach.engine.analysis import analyze_game
-    from chess_coach.engine.stockfish import Engine, EngineNotFoundError
-
     settings: Settings = ctx.obj
     depth = depth or settings.analysis_depth
     with Store(settings.db_path) as store:
@@ -186,38 +183,131 @@ def analyze(
         if not pending:
             console.print(f"Nothing to do: every game is analyzed at depth {depth} or deeper.")
             return
-        try:
-            engine = Engine(
-                settings.stockfish_path,
-                threads=threads or settings.engine_threads,
-                hash_mb=settings.engine_hash_mb,
-            )
-        except EngineNotFoundError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(code=1) from exc
-        console.print(f"Using {engine.name} at depth {depth} for {len(pending)} games")
-        progress = Progress(
-            TextColumn("{task.description}"),
-            BarColumn(),
-            TextColumn("{task.completed}/{task.total}"),
-            TimeRemainingColumn(),
-            console=console,
-        )
-        with engine, progress:
-            games_task = progress.add_task("games", total=len(pending))
-            plies_task = progress.add_task("plies", total=1)
-            for game in pending:
-                progress.update(plies_task, completed=0, total=1, description=game.id)
-
-                def on_ply(done: int, total: int) -> None:
-                    progress.update(plies_task, completed=done, total=total)
-
-                facts = analyze_game(game, engine, depth=depth, on_ply=on_ply)
-                store.replace_moves(game.id, facts, depth=depth)
-                progress.advance(games_task)
+        with _engine(settings, threads) as engine:
+            _analyze_games(store, engine, pending, depth)
         console.print(
             f"[green]Analyzed {len(pending)} games[/green] -> [dim]{settings.db_path}[/dim]"
         )
+
+
+def _analyze_games(store: Store, engine, pending: list[Game], depth: int) -> None:
+    from chess_coach.engine.analysis import analyze_game
+
+    console.print(f"Using {engine.name} at depth {depth} for {len(pending)} games")
+    progress = Progress(
+        TextColumn("{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        TimeRemainingColumn(),
+        console=console,
+    )
+    with progress:
+        games_task = progress.add_task("games", total=len(pending))
+        plies_task = progress.add_task("plies", total=1)
+        for game in pending:
+            progress.update(plies_task, completed=0, total=1, description=game.id)
+
+            def on_ply(done: int, total: int) -> None:
+                progress.update(plies_task, completed=done, total=total)
+
+            facts = analyze_game(game, engine, depth=depth, on_ply=on_ply)
+            store.replace_moves(game.id, facts, depth=depth)
+            progress.advance(games_task)
+
+
+SOURCES = {"lichess": "Lichess", "chesscom": "Chess.com"}
+
+
+@app.command()
+def sync(
+    ctx: typer.Context,
+    threads: Annotated[int | None, typer.Option(help="Engine threads.")] = None,
+    puzzles: Annotated[
+        int, typer.Option(help="How many new costly moves to check for puzzles.")
+    ] = 200,
+) -> None:
+    """Bring the coach up to date in one step: new games from the accounts you've imported,
+    analysed, and puzzles from them."""
+    from datetime import UTC, datetime
+
+    from chess_coach.puzzles.make import make, make_opening_fixes
+    from chess_coach.sources import chesscom, lichess
+
+    settings: Settings = ctx.obj
+    with Store(settings.db_path) as store:
+        accounts = [a for a in store.accounts() if a[0] in SOURCES]
+        if not accounts:
+            console.print(
+                "Nothing to sync from: import your games once first, "
+                "e.g. `chess-coach import lichess <username>`."
+            )
+            raise typer.Exit(code=1)
+        new: list[Game] = []
+        for source, user, newest in accounts:
+            where = SOURCES[source]
+            with console.status(f"Fetching new games for {user} from {where}..."):
+                try:
+                    # All or nothing: both sites send newest first, so storing part of the
+                    # stream would leave a gap that the next sync (from the newest game) skips.
+                    if source == "lichess":
+                        fetched = list(
+                            lichess.fetch_games(
+                                user, max_games=None, since=newest, token=settings.lichess_token
+                            )
+                        )
+                    else:
+                        fetched = list(chesscom.fetch_games(user, max_games=None, since=newest))
+                except httpx.HTTPError as exc:
+                    console.print(f"[red]{where} failed for {user}, nothing stored:[/red] {exc}")
+                    continue
+            added = [g for g in reversed(fetched) if store.upsert_game(g)]
+            console.print(f"{user} on {where}: [green]{len(added)}[/green] new games")
+            new += added
+        if new:
+            console.print(_new_games_line(new))
+
+        depth = settings.analysis_depth
+        pending = list(store.iter_games(unanalyzed_below_depth=depth))
+        pending.reverse()  # newest first, so an interrupted sync has analysed the recent ones
+        with _engine(settings, threads) as engine:
+            if pending:
+                _analyze_games(store, engine, pending, depth)
+            with console.status("Making puzzles from your new mistakes..."):
+                made = make(store, engine, limit=puzzles)
+                fixes = make_opening_fixes(store, engine)
+        total = len(store.puzzles())
+        today = datetime.now(UTC).date().isoformat()
+        due = len(store.due(today))
+        cards = sum(c.due <= today for c in store.coach_cards())
+    console.print(
+        f"Analysed {len(pending)} games. Checked {made.checked + fixes.checked} moves, made "
+        f"[green]{made.made + fixes.made}[/green] puzzles ({total} in all)."
+    )
+    console.print(
+        f"Due today: {due} puzzles (`chess-coach drill`) and {cards} opening positions "
+        "(Learn openings in `chess-coach serve`)."
+    )
+
+
+def _new_games_line(games: list[Game]) -> str:
+    """'23 new games: 18 bullet; 5 blitz (won 3, lost 2)'. Bullet results don't count."""
+    from chess_coach.patterns.features import is_bullet, result_of
+
+    speeds = Counter(g.speed.value for g in games)
+    parts = []
+    for speed, n in speeds.most_common():
+        group = [g for g in games if g.speed.value == speed]
+        if is_bullet(group[0]):
+            parts.append(f"{n} {speed}")
+            continue
+        results = Counter(result_of(g) for g in group)
+        scored = ", ".join(
+            f"{word} {results[key]}"
+            for key, word in (("win", "won"), ("draw", "drew"), ("loss", "lost"))
+            if results[key]
+        )
+        parts.append(f"{n} {speed} ({scored})" if scored else f"{n} {speed}")
+    return f"{len(games)} new games: " + "; ".join(parts)
 
 
 @app.command()

@@ -283,6 +283,14 @@ class Store:
     def count_games(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
 
+    def accounts(self) -> list[tuple[str, str, datetime | None]]:
+        """(source, user, when their newest stored game was played) for every account stored."""
+        rows = self.conn.execute(
+            "SELECT source, user, MAX(played_at) FROM games GROUP BY source, user "
+            "ORDER BY source, user"
+        )
+        return [(source, user, _from_iso(newest)) for source, user, newest in rows]
+
     # -- moves -----------------------------------------------------------------
 
     def replace_moves(self, game_id: str, moves: Iterable[MoveFact], depth: int) -> None:
