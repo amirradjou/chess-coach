@@ -440,9 +440,11 @@ def explain(fen: str, played: str, best: str | None, *, theirs: bool = False) ->
     return reasons
 
 
-def allows(fen: str, punish: str) -> list[str]:
+def allows(fen: str, punish: str, *, yours: bool = False) -> list[str]:
     """What the opponent's mistake lets you do, in chess terms: `fen` is the position after it
-    (you to move) and `punish` the engine's answer (UCI). Empty when there's nothing to name."""
+    (you to move) and `punish` the engine's answer (UCI). With `yours` the mistake was yours and
+    `punish` is their answer, so the pieces it hits are yours. Empty when there's nothing to
+    name."""
     board = chess.Board(fen)
     move = chess.Move.from_uci(punish)
     if move not in board.legal_moves:
@@ -457,9 +459,10 @@ def allows(fen: str, punish: str) -> list[str]:
     if not hit:
         return []
     names = [f"{chess.piece_name(kind)} on {chess.square_name(square)}" for kind, square in hit]
+    whose = "your" if yours else "their"
     if len(names) > 1:
-        return [f"It lets {san} hit their {names[0]} and {names[1]} at once."]
-    return [f"It lets {san} hit their {names[0]}."]
+        return [f"It lets {san} hit {whose} {names[0]} and {names[1]} at once."]
+    return [f"It lets {san} hit {whose} {names[0]}."]
 
 
 def _null(board: chess.Board) -> chess.Board:
