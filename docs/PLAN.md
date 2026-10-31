@@ -145,14 +145,19 @@ move 10).
    per week in the Progress tab, so you can see whether practice moves the rating.
 4. **New screenshots** for the README (puzzle review lines, Learn openings) from the owner's
    games; the current two predate v5.
-5. Smaller:
-   - Reasons for the opponent's mistakes in the opening tree ("their 4...Nf6 lets e5 hit the
-     knight"): `principles.explain` speaks to the mover ("your"); add a "their" voice.
-   - Chess.com ply links (`mining._ply_url`, `repertoire._url` only anchor Lichess URLs).
-   - Check the pages at phone width (the board column and line cards), add a favicon (404 now).
-   - Tests: `fastapi.testclient` warns that httpx support is going away; follow Starlette's
-     replacement when it lands.
-   - A hand-graded accuracy set for the model-written digest (the brief's other metric).
+5. Smaller (branch `chore/polish`, 2026-10-31):
+   - ~~Reasons for the opponent's mistakes in the opening tree~~: done. `principles.allows`
+     says what the punishment does to them ("It lets e5 hit their knight on f6": check, mate,
+     pieces hit) and `explain(..., theirs=True)` gives the faults in their voice, no ideas.
+   - Chess.com ply links (`mining._ply_url`, `repertoire._url` only anchor Lichess URLs): not
+     done. No documented move parameter for Chess.com game pages could be confirmed, and the
+     owner's games are all Lichess; check a real Chess.com game in a browser before adding one.
+   - ~~Phone width and favicon~~: done. The Learn openings select grew to 718 px on a 375 px
+     screen (now capped); every tab checked at 375 px; inline SVG favicon.
+   - ~~httpx deprecation in the tests~~: done, `httpx2` (pydantic/httpx2) as a dev dependency.
+   - ~~Tests comparing UTC due dates with the local date~~: fixed (they failed 20:00-24:00 EDT).
+   - A hand-graded accuracy set for the model-written digest (the brief's other metric): needs
+     the owner to grade sentences; not started.
 
 ## Conventions that matter here
 
