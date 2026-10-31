@@ -30,7 +30,7 @@ from chess_coach.coach.habits import (
     from_pressure,
     missed_kinds,
 )
-from chess_coach.coach.principles import Reasons, explain, opening_idea
+from chess_coach.coach.principles import Reasons, allows, explain, opening_idea
 from chess_coach.coach.progress import (
     periods,
     practice_effect,
@@ -478,8 +478,13 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
                     {"san": e.san, "games": len(e.facts), "right": e.uci == f.best_move}
                     for e in sorted(edge.child.edges.values(), key=lambda e: -len(e.facts))
                 ]
-            if edge.by_user and edge.verdict not in ("best", "good") and node.best is not None:
-                item["reasons"] = explain(node.fen, edge.uci, node.best.best_move).all()[:3]
+            if edge.verdict not in ("best", "good") and node.best is not None:
+                # Yours: what's wrong and what the better move does. Theirs: what it lets you do,
+                # then what's wrong with it.
+                why = explain(node.fen, edge.uci, node.best.best_move, theirs=not edge.by_user)
+                punish = edge.child.best if edge.punishable else None
+                let = allows(edge.child.fen, punish.best_move) if punish else []
+                item["reasons"] = [*let, *why.all()][:3]
             moves.append(item)
         # The move to learn here: your most-played sound move, so training keeps to your
         # opening; the engine's move only where you have none.

@@ -132,7 +132,7 @@ def test_make_checks_each_candidate_once(tmp_path: Path):
     with Store(db) as store:
         assert (make(store, engine, limit=10).made, engine.calls) == (3, 3)
         assert make(store, engine, limit=10).checked == 0  # nothing new to check
-        assert len(store.due(date.today().isoformat())) == 3
+        assert len(store.due(datetime.now(UTC).date().isoformat())) == 3
 
 
 def test_drill_records_attempts_and_reschedules(tmp_path: Path):
@@ -151,7 +151,7 @@ def test_drill_records_attempts_and_reschedules(tmp_path: Path):
         assert [a[2] for a in attempts] == [True, False]
         reviews = [store.review(p.id) for p in store.puzzles()]
         assert sorted(r.lapses for r in reviews) == [0, 1]
-        assert store.due(date.today().isoformat()) == []
+        assert store.due(datetime.now(UTC).date().isoformat()) == []
     again = runner.invoke(app, ["--db", str(db), "drill"])
     assert "Nothing due" in again.output
 
