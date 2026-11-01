@@ -5,7 +5,7 @@ import chess
 from fastapi.testclient import TestClient
 
 from chess_coach.coach.digest import build, render
-from chess_coach.coach.threats import check, gap, pending, percent, report
+from chess_coach.coach.threats import Share, check, gap, pending, percent, report
 from chess_coach.db import Store
 from chess_coach.engine.motifs import pass_turn
 from chess_coach.engine.stockfish import LineEval
@@ -84,6 +84,7 @@ def test_shares_against_your_opponents():
     assert ignored.verdict == "more often than your opponents" and ignored.yours
     assert unsafe.verdict == "same as your opponents" and not unsafe.yours
     assert percent(ignored.you) == "30% (22-40%)"
+    assert percent(Share(0, 10)) == "0% (0-28%)" and percent(Share(5, 5)) == "100% (57-100%)"
     assert gap(ignored).startswith("+20.0 points, +9.")
     assert ignored.examples == []  # these planted moves have no position to explain
 

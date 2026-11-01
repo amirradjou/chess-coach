@@ -29,7 +29,9 @@ def wilson(hits: int, n: int, z: float = 1.96) -> tuple[float, float]:
     centre = p + z * z / (2 * n)
     margin = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))
     scale = 1 + z * z / n
-    return (centre - margin) / scale, (centre + margin) / scale
+    # The bounds lie in [0, 1], but rounding can put one a hair outside: 0 of 5 gave -3e-17,
+    # which prints as "-0%".
+    return max(0.0, (centre - margin) / scale), min(1.0, (centre + margin) / scale)
 
 
 def wilson_lower(hits: int, n: int, z: float = 1.96) -> float:
