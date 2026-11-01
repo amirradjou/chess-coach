@@ -15,7 +15,7 @@ import chess
 from chess_coach.db import Store
 from chess_coach.engine.stockfish import Engine
 from chess_coach.models import Game, MoveFact, Puzzle
-from chess_coach.patterns.features import counted, rushed, rushed_rows
+from chess_coach.patterns.features import counted, punish_tag, rushed, rushed_rows
 from chess_coach.patterns.mining import repeated_under_pressure
 
 MIN_WP_LOSS = 20.0
@@ -83,13 +83,16 @@ def verify(engine: Engine, m: MoveFact, depth: int = VERIFY_DEPTH) -> Puzzle | N
     tags = [*m.motifs, m.phase.value]
     if only_mate:
         tags.append("mate")
+    solution_san = board.san(best.move)
+    if "missed_tactic" in tags:  # their blunder, unpunished: which kind of move punishes it
+        tags.append(punish_tag(solution_san))
     return Puzzle(
         id=f"{m.game_id}:{m.ply}",
         game_id=m.game_id,
         ply=m.ply,
         fen=m.fen_before,
         solution=best.move.uci(),
-        solution_san=board.san(best.move),
+        solution_san=solution_san,
         played_san=m.san,
         line=" ".join(mv.uci() for mv in best.pv[1:8]),
         gap_cp=gap,

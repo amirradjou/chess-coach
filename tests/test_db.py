@@ -157,3 +157,31 @@ def test_gifts_pair_each_costly_move_with_the_next_one() -> None:
     # 2 and 3 are both costly (3 is the reply to 2 and a gift of its own); 7 has no reply
     assert [(g.ply, r.ply) for g, r in pairs] == [(2, 3), (3, 4)]
     assert [(g.is_user, r.is_user) for g, r in pairs] == [(False, True), (True, False)]
+
+
+def test_old_missed_punishment_puzzles_get_their_punish_tag_on_open(tmp_path) -> None:
+    from chess_coach.models import Puzzle
+
+    db = tmp_path / "coach.db"
+    with Store(db) as store:
+        store.upsert_game(make_game())
+        for ply, san, tags in (
+            (1, "Nxe5", ["missed_tactic", "opening"]),
+            (3, "Bb5+", ["missed_tactic"]),
+            (5, "O-O", ["missed_tactic"]),  # castling punishes quietly
+            (7, "Qxd8", ["hanging_piece"]),  # not a missed punishment: left alone
+        ):
+            store.add_puzzle(
+                Puzzle(f"pgn:1:{ply}", "pgn:1", ply, "fen", "e2e4", san, "a3", "", 200, 18, tags)
+            )
+
+    with Store(db) as store:
+        tags = {p.ply: p.tags for p in store.puzzles()}
+        assert tags == {
+            1: ["missed_tactic", "opening", "punish_capture"],
+            3: ["missed_tactic", "punish_check"],
+            5: ["missed_tactic", "punish_quiet"],
+            7: ["hanging_piece"],
+        }
+    with Store(db) as store:  # once is enough
+        assert {p.ply: p.tags for p in store.puzzles()} == tags

@@ -162,6 +162,7 @@ class Store:
         if "accept" not in columns:  # databases from before opening-fix drills
             self.conn.execute("ALTER TABLE puzzles ADD COLUMN accept TEXT NOT NULL DEFAULT '[]'")
         self._fix_lichess_ids()
+        self._tag_punishments()
 
     def _fix_lichess_ids(self) -> None:
         """Lichess games imported while the importer missed Site "lichess.org/game/<id>" got a
@@ -204,6 +205,24 @@ class Store:
                         (new, len(old) + 1, len(old) + 1, f"{old}:"),
                     )
                 self.conn.execute("UPDATE puzzles SET game_id = ? WHERE game_id = ?", (new, old))
+
+    def _tag_punishments(self) -> None:
+        """Puzzles made before the punish sub-tags: a missed punishment (missed_tactic) also gets
+        punish_capture, punish_check or punish_quiet from its solution, as new ones do."""
+        rows = self.conn.execute(
+            "SELECT id, solution_san, tags FROM puzzles "
+            "WHERE tags LIKE '%\"missed_tactic\"%' AND tags NOT LIKE '%\"punish_%'"
+        ).fetchall()
+        if not rows:
+            return
+        from chess_coach.patterns.features import punish_tag
+
+        with self.conn:
+            for puzzle_id, san, tags in rows:
+                tagged = sorted({*json.loads(tags), punish_tag(san)})
+                self.conn.execute(
+                    "UPDATE puzzles SET tags = ? WHERE id = ?", (json.dumps(tagged), puzzle_id)
+                )
 
     def close(self) -> None:
         self.conn.close()

@@ -129,6 +129,11 @@ def punish_kind(san: str) -> str:
     return "quiet" if kind == "castle" else kind
 
 
+def punish_tag(san: str) -> str:
+    """The puzzle tag for a missed punishment: punish_capture, punish_check or punish_quiet."""
+    return f"punish_{punish_kind(san)}"
+
+
 def castling_move(game: Game) -> int | None:
     """The move number on which the user castled; None if they never did or the PGN won't parse."""
     parsed = chess.pgn.read_game(io.StringIO(game.pgn))
