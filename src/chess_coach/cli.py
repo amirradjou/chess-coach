@@ -227,11 +227,10 @@ def sync(
     ] = 200,
 ) -> None:
     """Bring the coach up to date in one step: new games from the accounts you've imported,
-    analysed, puzzles from them, and their threats before the new mistakes."""
-    import logging
+    analysed, puzzles from them, and their threats before every mistake not checked yet."""
     from datetime import UTC, datetime
 
-    from chess_coach.coach.threats import check as check_threats
+    from chess_coach.engine.threats import DEPTH as THREAT_DEPTH
     from chess_coach.puzzles.make import make, make_opening_fixes
     from chess_coach.sources import chesscom, lichess
 
@@ -277,9 +276,10 @@ def sync(
             with console.status("Making puzzles from your new mistakes..."):
                 made = make(store, engine, limit=puzzles)
                 fixes = make_opening_fixes(store, engine)
-            with console.status("Looking for their threats before the new mistakes..."):
-                logging.getLogger("chess.engine").setLevel(logging.ERROR)
-                checked = check_threats(store, engine)
+            checked = 0
+            if todo := _threats_todo(store):  # the first sync also checks the older backlog
+                console.print(f"Looking for their threats before {todo} mistakes and blunders")
+                checked = _check_threats(store, engine, todo, depth=THREAT_DEPTH)
         total = len(store.puzzles())
         today = datetime.now(UTC).date().isoformat()
         due = len(store.due(today))
@@ -289,8 +289,8 @@ def sync(
         f"[green]{made.made + fixes.made}[/green] puzzles ({total} in all)."
     )
     console.print(
-        f"Looked for their threats before {checked} new mistakes and blunders (yours and your "
-        "opponents'): `chess-coach threats` shows how your mistakes happen."
+        f"Looked for their threats before {checked} mistakes and blunders not checked before "
+        "(yours and your opponents'): `chess-coach threats` shows how your mistakes happen."
     )
     console.print(
         f"Due today: {due} puzzles (`chess-coach drill`) and {cards} opening positions "
@@ -440,36 +440,47 @@ def threats(
     """What was their threat? Before every counted mistake and blunder, yours and your
     opponents', the mover passes and the engine finds what the other side threatened. Mistakes
     split into ignored threats and unsafe moves, compared with your opponents'. Resumable."""
-    import logging
-
-    from chess_coach.coach.threats import check, pending
-    from chess_coach.patterns.features import ERRORS
-
     settings: Settings = ctx.obj
     with Store(settings.db_path) as store:
-        todo = len(
-            pending(store.iter_games(), store.iter_moves(judgements=ERRORS), store.threats())
-        )
-        todo = min(todo, limit) if limit is not None else todo
+        todo = _threats_todo(store, limit)
         if todo:
-            logging.getLogger("chess.engine").setLevel(logging.ERROR)
             with _engine(settings, threads) as engine:
                 console.print(f"Using {engine.name} at depth {depth} for {todo} moves")
-                progress = Progress(
-                    TextColumn("checking"),
-                    BarColumn(),
-                    TextColumn("{task.completed}/{task.total}"),
-                    TimeRemainingColumn(),
-                    console=console,
-                )
-                with progress:
-                    task = progress.add_task("check", total=todo)
-
-                    def on_check(done: int, total: int) -> None:
-                        progress.update(task, completed=done, total=total)
-
-                    check(store, engine, depth=depth, limit=limit, on_check=on_check)
+                _check_threats(store, engine, todo, depth=depth, limit=limit)
         _threat_summary(store)
+
+
+def _threats_todo(store: Store, limit: int | None = None) -> int:
+    """How many mistakes and blunders (yours and your opponents') a threat check has left."""
+    from chess_coach.coach.threats import pending
+    from chess_coach.patterns.features import ERRORS
+
+    todo = len(pending(store.iter_games(), store.iter_moves(judgements=ERRORS), store.threats()))
+    return min(todo, limit) if limit is not None else todo
+
+
+def _check_threats(store: Store, engine, todo: int, *, depth: int, limit: int | None = None) -> int:
+    """Look for their threats before the `todo` mistakes and blunders not checked yet, with a
+    progress bar; returns how many were checked."""
+    import logging
+
+    from chess_coach.coach.threats import check
+
+    logging.getLogger("chess.engine").setLevel(logging.ERROR)
+    progress = Progress(
+        TextColumn("checking"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        TimeRemainingColumn(),
+        console=console,
+    )
+    with progress:
+        task = progress.add_task("check", total=todo)
+
+        def on_check(done: int, total: int) -> None:
+            progress.update(task, completed=done, total=total)
+
+        return check(store, engine, depth=depth, limit=limit, on_check=on_check)
 
 
 def _threat_summary(store: Store) -> None:

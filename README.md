@@ -148,7 +148,9 @@ across 8+ games.
 - `sync` does import, analyse, `puzzles make` and `threats` for you: it fetches every game since
   the newest one stored for each Lichess and Chess.com account (all or nothing, so a failed
   download leaves no gap), analyses whatever isn't analysed yet, newest first, makes puzzles,
-  checks the new mistakes for threats, and says what came in and what's due. Bullet results aren't reported, by the rule above.
+  looks for their threats before every mistake not checked yet (the first time, the whole
+  backlog), and says what came in and what's due. Bullet results aren't reported, by the rule
+  above.
 - `stats` prints a per-game accuracy table and how often each motif shows up in your moves.
 - `threats` asks, before every counted mistake and blunder (yours and your opponents'), what the
   other side threatened: the mover passes and Stockfish (depth 12) finds their best move. A
@@ -157,7 +159,7 @@ across 8+ games.
   winning two pawns' worth or more). It shows each share of your mistakes next to your
   opponents', with 95% intervals, and only calls one yours to work on when you clearly do it more
   often than they do (on the author's games: neither). About 30 seconds for 2,500 mistakes;
-  resumable, and `sync` runs it for new games.
+  resumable, and `sync` runs it on whatever isn't checked yet.
 - `digest` slices your moves by phase, colour, speed, opening, move number and clock (and
   pairs of them), and your games by colour, speed, opening, castling and queen trades. It keeps a
   slice only when it has enough moves (30) or games (8), your mistake rate (or loss rate) there
@@ -286,8 +288,8 @@ uv run chess-coach serve --open                                  # the coach in 
 `analyze --newest` starts with your latest games, so a big import is useful early.
 
 After the first import, `sync` keeps the coach current in one step: new games from every Lichess
-and Chess.com account already stored, analysis, and puzzles from the new mistakes. Run it daily or
-weekly (`--threads 8` speeds it up).
+and Chess.com account already stored, analysis, puzzles from the new mistakes, and their threats
+before the mistakes not checked yet. Run it daily or weekly (`--threads 8` speeds it up).
 
 `--db <file>` picks another database (default `data/chess-coach.db`).
 
