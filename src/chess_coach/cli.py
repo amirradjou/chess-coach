@@ -476,9 +476,21 @@ def _threat_summary(store: Store) -> None:
     from chess_coach.coach.threats import gap, percent, report
     from chess_coach.patterns.features import ERRORS
 
-    r = report(list(store.iter_games()), store.iter_moves(judgements=ERRORS), store.threats())
+    games = list(store.iter_games())
+    r = report(games, store.iter_moves(judgements=ERRORS), store.threats())
     if not r.you:
-        console.print("No mistakes checked yet. Run `chess-coach analyze` first.")
+        if r.unchecked:
+            console.print(
+                f"[yellow]{r.unchecked} mistakes and blunders not checked yet[/yellow] "
+                "(yours and your opponents'): run `chess-coach threats` to check them."
+            )
+        elif not any(g.analyzed_depth for g in games):
+            console.print("No analysed games yet. Run `chess-coach analyze` first.")
+        else:
+            console.print(
+                "None of your mistakes and blunders count here: in bullet only the first 10 "
+                "moves count, and moves made short on time are left out."
+            )
         return
     table = Table(
         title=f"How your mistakes happen: {r.you} of your mistakes and blunders, "
@@ -506,7 +518,10 @@ def _threat_summary(store: Store) -> None:
             where = f" [dim]{e.evidence.url}[/dim]" if e.evidence.url else ""
             console.print(f"  {s.title}, {e.evidence.move}: {e.why}{where}")
     if r.unchecked:
-        console.print(f"[yellow]{r.unchecked} mistakes and blunders not checked yet.[/yellow]")
+        console.print(
+            f"[yellow]{r.unchecked} mistakes and blunders not checked yet:[/yellow] run "
+            "`chess-coach threats` to check them."
+        )
 
 
 def _engine(settings: Settings, threads: int | None):

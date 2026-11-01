@@ -3,7 +3,10 @@ from pathlib import Path
 
 import chess
 from fastapi.testclient import TestClient
+from rich.console import Console
+from typer.testing import CliRunner
 
+from chess_coach import cli
 from chess_coach.coach.digest import build, render
 from chess_coach.coach.threats import Share, check, gap, pending, percent, report
 from chess_coach.db import Store
@@ -240,6 +243,27 @@ def test_check_stores_a_row_per_error_and_resumes(tmp_path):
         # 16.Nc4's
         assert len(engine.asked) == len(set(engine.asked)) == 6
         assert check(store, engine) == 0 and len(engine.asked) == 6  # nothing left to do
+
+
+def test_the_summary_says_what_is_left_to_do(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli, "console", Console(width=200))
+    db = tmp_path / "coach.db"
+    with club_store(db) as store:
+        # a run stopped after their 14...Ne7: none of your three mistakes is checked yet
+        store.save_threats([ThreatFact("lichess:g1", 28, IGNORED, "a5b6", "axb6", 200, None, 12)])
+
+    def summary() -> str:
+        result = CliRunner().invoke(cli.app, ["--db", str(db), "threats", "--limit", "0"])
+        assert result.exit_code == 0, result.output
+        return result.output
+
+    out = summary()
+    assert "3 mistakes and blunders not checked yet (yours and your opponents'): run" in out
+    assert "analyze" not in out
+    with Store(db) as store:  # in bullet none of these moves (14 to 16) counts
+        store.conn.execute("UPDATE games SET speed = 'bullet'")
+        store.conn.commit()
+    assert "None of your mistakes and blunders count here" in summary()
 
 
 # -- the web coach --------------------------------------------------------------------------

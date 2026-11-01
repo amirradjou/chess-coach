@@ -27,7 +27,7 @@ def test_threats_needs_no_engine_when_nothing_is_left(
     _import(db)  # nothing analysed, so nothing to check
     result = runner.invoke(app, ["--db", str(db), "threats"])
     assert result.exit_code == 0, result.output
-    assert "No mistakes checked yet" in result.output
+    assert "No analysed games yet. Run `chess-coach analyze` first." in result.output
 
 
 @pytest.mark.engine
