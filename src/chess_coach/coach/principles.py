@@ -191,8 +191,17 @@ def _after(board: chess.Board, move: chess.Move) -> chess.Board:
 
 def hanging(board: chess.Board, color: chess.Color) -> dict[tuple[int, int], str]:
     """`color`'s pieces (knight or more) the side to move can take for free or for less, as
-    {(piece type, square): how}. Pins count: only legal captures are looked at."""
+    {(piece type, square): how}. Pins count: only legal captures are looked at. Nothing while the
+    side to move is in check: answering the check comes first."""
     if board.turn == color or board.is_check():
+        return {}
+    return en_prise(board, color)
+
+
+def en_prise(board: chess.Board, color: chess.Color) -> dict[tuple[int, int], str]:
+    """hanging() even when the side to move is in check: what its legal captures (which then
+    answer the check) win."""
+    if board.turn == color:
         return {}
     cheapest: dict[int, int] = {}
     for move in board.legal_moves:
@@ -460,7 +469,8 @@ def allows(fen: str, punish: str, *, captures: bool = False) -> list[str]:
     hit = sorted(threatened(after, me) - threatened(board, me), key=lambda ks: -PIECE_VALUES[ks[0]])
     names = [f"{chess.piece_name(kind)} on {chess.square_name(square)}" for kind, square in hit]
     taken = (board.piece_type_at(move.to_square), move.to_square)
-    if captures and board.is_capture(move) and (how := hanging(board, not me).get(taken)):
+    # en_prise, not hanging(): after a blunder that gives check you are in check (4.Bxf7+ Kxf7).
+    if captures and board.is_capture(move) and (how := en_prise(board, not me).get(taken)):
         piece = f"{chess.piece_name(taken[0])} on {chess.square_name(taken[1])}"
         if names:
             return [f"It lets {san} take their {piece}, which was {how}, and hit their {names[0]}."]

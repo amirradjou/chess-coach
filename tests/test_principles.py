@@ -86,6 +86,12 @@ def test_what_their_mistake_allows_to_take():
         "It lets exd5 take their knight on d5, which was attacked by a cheaper piece, and hit "
         "their bishop on c4."
     ]
+    bxf7 = chess.Board()
+    for san in "e4 e5 Nf3 Nc6 Bc4 Nd4 Bxf7+".split():  # in check, and nothing defends f7
+        bxf7.push_san(san)
+    assert allows(bxf7.fen(), "e8f7", captures=True) == [
+        "It lets Kxf7 take their bishop on f7, which was hanging (attacked and not defended)."
+    ]
     # Without `captures` (the opening tree, where explain() names the hanging piece) as before.
     assert allows(bh6.fen(), "g8h6") == []
     assert allows(nd5, "e6d5") == ["It lets exd5 hit their bishop on c4."]
