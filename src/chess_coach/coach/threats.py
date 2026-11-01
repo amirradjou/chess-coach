@@ -90,7 +90,7 @@ def check(
         facts = {f.ply: f for f in store.iter_moves(game_id)}
         rows = []
         for m in group:
-            rows.append(look(m, facts.get(m.ply - 1), facts.get(m.ply + 1), search, depth))
+            rows.append(look(m, facts.get(m.ply - 1), search, depth))
             done += 1
             if on_check:
                 on_check(done, len(todo))

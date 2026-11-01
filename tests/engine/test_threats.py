@@ -20,8 +20,14 @@ from chess_coach.sources.pgn import games_from_pgn_text
 # then 14...Ne7?, and two moves later 16.Nc4?? Bxc4.
 AFTER_A5 = "r5nr/2p2kpp/pp1bbp2/P1p5/4P3/1NN1BP2/1PP3PP/R2R2K1 b - - 0 14"
 BEFORE_A5 = "r5nr/2p2kpp/pp1bbp2/2p5/P3P3/1NN1BP2/1PP3PP/R2R2K1 w - - 1 14"
+AFTER_NE7 = "r6r/2p1nkpp/pp1bbp2/P1p5/4P3/1NN1BP2/1PP3PP/R2R2K1 w - - 1 15"
 BEFORE_NC4 = "r2r4/2p1nkpp/pp1bbp2/P1p5/4P3/2N1BP2/1PPN2PP/R2R2K1 w - - 3 16"
 U = chess.Move.from_uci
+
+
+def line(cp: int, moves: str, mate: int | None = None) -> LineEval:
+    pv = [U(m) for m in moves.split()]
+    return LineEval(cp, mate, pv[0], pv)
 
 
 def fact(ply: int, fen: str, uci: str, before: int, after: int, **kw) -> MoveFact:
@@ -56,7 +62,11 @@ def ne7() -> tuple[MoveFact, MoveFact]:
     return fact(28, AFTER_A5, "g8e7", -20, -286), fact(27, BEFORE_A5, "a4a5", 7, 20)
 
 
-AXB6 = LineEval(446, None, U("a5b6"), [U("a5b6")])
+# White's best had Black passed instead of 14...Ne7 (Stockfish, depth 8): two pawns, b6 and c7
+AXB6 = line(519, "a5b6 e6b3 c2b3 g8e7 b6c7 d6c7 e3c5")
+# ...and after 14...Ne7: still axb6, winning a pawn
+AXB6_AFTER_NE7 = line(241, "a5b6 h8b8 b3c5 d6c5 e3c5 c7b6")
+CALM = line(20, "b6b5")  # nothing happens
 
 
 def test_passing_hands_the_move_over_without_a_null_move_in_the_history():
@@ -70,36 +80,63 @@ def test_material_won_along_the_line():
     theirs = pass_turn(chess.Board(AFTER_A5))  # White to move
     assert won(theirs, [U("a5b6")]) == 1
     assert won(theirs, [U("a5b6"), U("c7b6")]) == 0
-    # four quiet moves and the line stops there, before the capture
-    quiet = [U("g1f2"), U("h7h6"), U("f2e2"), U("h6h5"), U("a5b6")]
-    assert won(theirs, quiet) == 0
+    assert won(theirs, AXB6.pv) == 2  # the knight trade on b3 in between doesn't count
+    quiet = [U("g1f2"), U("h7h6"), U("f2e2"), U("h6h5")]
+    # past the first four moves the line stops at the first quiet move...
+    assert won(theirs, [*quiet, U("e2d2"), U("a5b6")]) == 0
+    # ...but goes on while the captures continue, so a pending recapture is counted
+    assert won(theirs, [*quiet, U("a5b6")]) == 1
+    assert won(theirs, [*quiet, U("a5b6"), U("c7b6")]) == 0
     assert won(theirs, [U("a5a7")]) == 0  # not a legal move: the line stops
 
 
 def test_an_ignored_threat():
     m, previous = ne7()
-    row = classify(m, previous, AXB6, U("a5b6"), depth=12)
-    assert (row.label, row.threat, row.threat_san, row.gain) == (IGNORED, "a5b6", "axb6", 426)
+    row = classify(m, previous, AXB6, AXB6_AFTER_NE7, depth=12)
+    assert (row.label, row.threat, row.threat_san, row.gain) == (IGNORED, "a5b6", "axb6", 200)
 
 
 def test_an_old_threat_or_a_met_one_is_not_ignored():
     m, previous = ne7()
     previous.eval_before = 400  # they were already this well off before their last move
-    old = classify(m, previous, AXB6, U("a5b6"), 12)
+    old = classify(m, previous, AXB6, AXB6_AFTER_NE7, 12)
     assert (old.label, old.threat_san) == ("", "axb6")  # the threat is kept, unlabelled
     m, previous = ne7()
-    met = classify(m, previous, AXB6, U("b3d2"), 12)  # their best reply is something else
+    other = line(241, "b3d2")  # their best answer is something else
+    met = classify(m, previous, AXB6, other, 12)
     assert (met.label, met.threat_san) == ("", "axb6")
+
+
+def test_what_the_move_takes_pays_for_what_it_lets_them_take():
+    _, previous = ne7()
+    pawn = line(300, "a5b6")  # their answer: axb6, a pawn
+    m = fact(28, AFTER_A5, "g8e7", -20, -286)  # 14...Ne7 took nothing: ignored
+    assert classify(m, previous, AXB6, pawn, 12).label == IGNORED
+    bxb3 = fact(28, AFTER_A5, "e6b3", -20, -100)  # 14...Bxb3 took a knight first: met
+    assert classify(bxb3, previous, AXB6, pawn, 12).label == ""
 
 
 def test_a_free_tempo_is_not_a_threat():
     m, previous = ne7()
     # a quiet king move worth a lot only because they get two moves in a row, winning nothing
-    quiet = LineEval(446, None, U("g1f2"), [U("g1f2"), U("h7h6")])
-    assert classify(m, previous, quiet, U("g1f2"), 12).label == ""
-    # a mate is always a threat, whatever the numbers
-    mate = LineEval(9998, 2, U("g1f2"), [U("g1f2")])
-    assert classify(m, previous, mate, U("g1f2"), 12).label == IGNORED
+    quiet = line(446, "g1f2 h7h6")
+    assert classify(m, previous, quiet, AXB6_AFTER_NE7, 12).label == ""
+    # a mate is always a threat, whatever the numbers; met only when they no longer mate
+    mate = line(9998, "g1f2", mate=2)
+    assert classify(m, previous, mate, line(9998, "g1f2", mate=2), 12).label == IGNORED
+    assert classify(m, previous, mate, AXB6_AFTER_NE7, 12).label == ""
+
+
+def test_the_movers_own_edge_is_not_their_threat():
+    m, previous = ne7()
+    # Black had a shot of their own (+3.95), so passing costs a lot whatever White threatens:
+    # here White's best free move is axb6, which only trades pawns
+    m.eval_before = 395
+    trade = line(-8, "a5b6 c7b6")
+    assert classify(m, previous, trade, line(-20, "b3d2"), 12).label == ""
+    # ...unless the move makes it work: then the move was unsafe
+    row = classify(m, previous, trade, line(449, "a5b6 h8b8 b6c7"), 12)
+    assert (row.label, row.threat_san, row.gain) == (UNSAFE, "axb6", 200)
 
 
 def test_an_unsafe_move():
@@ -107,12 +144,12 @@ def test_an_unsafe_move():
     previous = fact(
         30, "r6r/2p1nkpp/pp1bbp2/P1p5/4P3/2N1BP2/1PPN2PP/R2R2K1 b - - 2 15", "h8d8", 24, 14
     )
-    calm = LineEval(20, None, U("b6b5"), [U("b6b5")])  # passing would have cost nothing
-    row = classify(m, previous, calm, U("e6c4"), 12)
-    assert (row.label, row.threat, row.threat_san, row.gain) == (UNSAFE, "e6c4", "Bxc4", 434)
-    # a move that only gives back what passing would have: no label
-    small = fact(31, BEFORE_NC4, "d2c4", -14, -100)
-    assert classify(small, previous, calm, U("e6c4"), 12).label == ""
+    row = classify(m, previous, CALM, line(434, "e6c4"), 12)  # passing would have cost nothing
+    assert (row.label, row.threat, row.threat_san, row.gain) == (UNSAFE, "e6c4", "Bxc4", 300)
+    # worse than passing, but their best answer is a quiet move that wins nothing: no label
+    assert classify(m, previous, CALM, line(434, "f7e8"), 12).label == ""
+    # an answer that wins the knight but leaves them barely better than passing: no label
+    assert classify(m, previous, CALM, line(100, "e6c4"), 12).label == ""
 
 
 def test_checks_and_pending_recaptures_are_not_looked_at():
@@ -127,22 +164,23 @@ def test_checks_and_pending_recaptures_are_not_looked_at():
     )
     after = board.fen()  # Black takes back on c6
     assert recapture_pending(board, bxc6)
-    row = look(fact(8, after, "d7c6", 0, -300), bxc6, None, search)
+    row = look(fact(8, after, "d7c6", 0, -300), bxc6, search)
     assert row.label == "" and row.threat == ""
     checked = "rnbqkbnr/pppp1ppp/8/4Q3/4P3/8/PPPP1PPP/RNB1KBNR b KQkq - 0 3"
-    assert look(fact(6, checked, "f8e7", 0, -300), None, None, search).label == ""
+    assert look(fact(6, checked, "f8e7", 0, -300), None, search).label == ""
 
 
-def test_the_last_move_of_a_game_gets_its_reply_searched():
+def test_two_searches_the_null_move_board_then_after_the_move():
     m, previous = ne7()
+    lines = {pass_turn(chess.Board(AFTER_A5)).fen(): AXB6, AFTER_NE7: AXB6_AFTER_NE7}
     seen = []
 
     def search(board):
-        seen.append(board.turn)
-        return AXB6
+        seen.append(board.fen())
+        return lines[board.fen()]
 
-    assert look(m, previous, None, search).label == IGNORED
-    assert seen == [chess.WHITE, chess.WHITE]  # the null-move board, then after the move
+    assert look(m, previous, search).label == IGNORED
+    assert seen == list(lines)
 
 
 def test_a_guess_at_their_threat_is_graded_leniently():
@@ -166,13 +204,28 @@ def test_the_club_game(sample_pgn_text: str, engine: Engine) -> None:
     def search(board):
         return engine.evaluate(board, depth=8)[0]
 
-    # Their 14...Ne7? ignored 14.a5's threat axb6 (the opponents are checked too)
-    ne7 = look(facts[28], facts[27], facts[29], search, 8)
-    assert facts[28].is_user is False
-    assert (ne7.label, ne7.threat_san) == (IGNORED, "axb6")
     # 16.Nc4?? with nothing threatened hangs the knight to Bxc4
-    nc4 = look(facts[31], facts[30], facts[32], search, 8)
+    nc4 = look(facts[31], facts[30], search, 8)
     assert facts[31].is_user is True
     assert (nc4.label, nc4.threat_san) == (UNSAFE, "Bxc4")
     # 15.Nd2 missed axb6 themselves: a missed shot is neither
-    assert look(facts[29], facts[28], facts[30], search, 8).label == ""
+    assert look(facts[29], facts[28], search, 8).label == ""
+    # (14...Ne7? is left out here: whether axb6 wins one pawn or two depends on the line the
+    # engine picks at this depth; the unit tests above pin its lines down)
+
+
+QUEEN_LEFT = """[Event "Casual"]
+[White "coachme"]
+[Black "rival"]
+[Result "0-1"]
+
+1. e4 e5 2. Qh5 Nc6 3. Bc4 g6 4. Nf3 gxh5 0-1
+"""
+
+
+@pytest.mark.engine
+def test_a_queen_left_where_their_pawn_attacks_it(engine: Engine) -> None:
+    game = next(iter(games_from_pgn_text(QUEEN_LEFT, "coachme")))
+    facts = {f.ply: f for f in analyze_game(game, engine, depth=8)}
+    nf3 = look(facts[7], facts[6], lambda board: engine.evaluate(board, depth=8)[0], 8)
+    assert (nf3.label, nf3.threat, nf3.threat_san) == (IGNORED, "g6h5", "gxh5")

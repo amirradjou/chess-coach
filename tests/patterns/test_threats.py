@@ -207,9 +207,22 @@ def club_store(db: Path) -> Store:
     return store
 
 
+def line(cp: int, moves: str) -> LineEval:
+    pv = [chess.Move.from_uci(m) for m in moves.split()]
+    return LineEval(cp, None, pv[0], pv)
+
+
 def test_check_stores_a_row_per_error_and_resumes(tmp_path):
-    axb6 = LineEval(446, None, chess.Move.from_uci("a5b6"), [chess.Move.from_uci("a5b6")])
-    engine = Lines({pass_turn(chess.Board(AFTER_A5)).fen(): axb6})
+    nc4 = chess.Board(BEFORE_NC4)
+    nc4.push_uci("d2c4")
+    engine = Lines(
+        {
+            # 14...Ne7 or passing: axb6 wins a pawn either way, two had Black passed
+            pass_turn(chess.Board(AFTER_A5)).fen(): line(519, "a5b6 e6b3 c2b3 g8e7 b6c7 d6c7 e3c5"),
+            AFTER_NE7: line(241, "a5b6 h8b8 b3c5 d6c5 e3c5 c7b6"),
+            nc4.fen(): line(434, "e6c4"),  # 16.Nc4?? Bxc4
+        }
+    )
     with club_store(tmp_path / "coach.db") as store:
         seen = []
         assert check(store, engine, on_check=lambda i, n: seen.append((i, n))) == 4
@@ -222,9 +235,10 @@ def test_check_stores_a_row_per_error_and_resumes(tmp_path):
             ("lichess:g1", 28): (IGNORED, "axb6"),  # theirs: the peer baseline
         }
         assert rows[("lichess:g1", 28)].last_san == "a5"
-        # one search per position: the two games share 16.Nc4's
-        assert len(engine.asked) == len(set(engine.asked)) == 3
-        assert check(store, engine) == 0 and len(engine.asked) == 3  # nothing left to do
+        # two searches a move (passing, and after it), each position once: the two games share
+        # 16.Nc4's
+        assert len(engine.asked) == len(set(engine.asked)) == 6
+        assert check(store, engine) == 0 and len(engine.asked) == 6  # nothing left to do
 
 
 # -- the web coach --------------------------------------------------------------------------
