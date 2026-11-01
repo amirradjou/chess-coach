@@ -10,8 +10,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from chess_coach.coach.threats import NO_GAP, gap, percent
 from chess_coach.coach.threats import Report as ThreatReport
-from chess_coach.coach.threats import gap, percent
 from chess_coach.coach.threats import report as threat_report
 from chess_coach.models import Game, MoveFact, ThreatFact
 from chess_coach.patterns.features import (
@@ -257,10 +257,7 @@ def _threats(r: ThreatReport) -> list[str]:
             f"opponents'. Practise: {s.tip}."
         )
     if not mine:
-        out.append(
-            "Neither is more common in your mistakes than in your opponents': this is how mistakes "
-            "happen at your level, not a weakness of yours."
-        )
+        out.append(NO_GAP)
     examples = [(s, e) for s in r.steps for e in s.examples]
     if examples:
         out += ["", "For example:", ""]

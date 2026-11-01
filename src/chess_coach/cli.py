@@ -473,7 +473,7 @@ def threats(
 
 
 def _threat_summary(store: Store) -> None:
-    from chess_coach.coach.threats import gap, percent, report
+    from chess_coach.coach.threats import NO_GAP, gap, percent, report
     from chess_coach.patterns.features import ERRORS
 
     games = list(store.iter_games())
@@ -509,10 +509,7 @@ def _threat_summary(store: Store) -> None:
     for s in mine:
         console.print(f"[bold]{s.title}[/bold] is a step to work on. Practise: {s.tip}.")
     if not mine:
-        console.print(
-            "Neither is more common in your mistakes than in your opponents': this is how "
-            "mistakes happen at your level, not a weakness of yours."
-        )
+        console.print(NO_GAP)
     for s in r.steps:
         for e in s.examples[:2]:
             where = f" [dim]{e.evidence.url}[/dim]" if e.evidence.url else ""

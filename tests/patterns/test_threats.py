@@ -8,7 +8,15 @@ from typer.testing import CliRunner
 
 from chess_coach import cli
 from chess_coach.coach.digest import build, render
-from chess_coach.coach.threats import Share, check, gap, pending, percent, report
+from chess_coach.coach.threats import (
+    NO_GAP,
+    Share,
+    check,
+    gap,
+    pending,
+    percent,
+    report,
+)
 from chess_coach.db import Store
 from chess_coach.engine.motifs import pass_turn
 from chess_coach.engine.stockfish import LineEval
@@ -123,7 +131,7 @@ def test_the_digest_compares_you_with_your_opponents():
     assert "Unsafe move** is a step" not in text  # the same as theirs: never called yours
     games, moves, threats = planted(you=(10, 10), them=(10, 10))
     text = render(build(games, [m for m in moves if m.is_user], threats=threats, errors=moves))
-    assert "not a weakness of yours" in text
+    assert NO_GAP in text and "weakness" not in text
     assert "blunder check" not in render(build(games, [m for m in moves if m.is_user]))
 
 

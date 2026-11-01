@@ -99,7 +99,7 @@ function threatSection(t) {
         el("td", {}, s.verdict, el("div", { class: "muted small" }, `${signed(s.diff.points)} points (${signed(s.diff.low)} to ${signed(s.diff.high)})`))))),
     mine.length
       ? mine.map((s) => el("div", { class: "lesson" }, el("b", {}, `${s.title}: `), `a step to work on, it's in more of your mistakes than of your opponents'. Practise: ${s.tip}.`))
-      : el("p", { class: "small" }, "Neither is more common in your mistakes than in your opponents': this is how mistakes happen at your level, not a weakness of yours."),
+      : el("p", { class: "small" }, "Neither is clearly more common in your mistakes than in your opponents' yet: the 95% interval of each difference includes zero."),
     el("div", { class: "examples" }, t.steps.flatMap((s) => s.examples.map((e) => example(e, s.title)))),
   ];
 }

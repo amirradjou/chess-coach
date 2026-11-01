@@ -37,6 +37,13 @@ STEPS: dict[str, tuple[str, str, str]] = {
     ),
 }
 
+# When neither step shows a peer gap: no difference shown is not the same as no difference, so
+# it isn't called "not a weakness" either.
+NO_GAP = (
+    "Neither is clearly more common in your mistakes than in your opponents' yet: the 95% "
+    "interval of each difference includes zero."
+)
+
 Key = tuple[str, int]  # (game id, ply)
 
 
