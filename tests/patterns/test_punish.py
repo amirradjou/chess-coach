@@ -212,6 +212,18 @@ def test_bullet_and_blitz_are_compared_apart():
     assert r.gifts == 320
 
 
+def test_slower_games_count_with_blitz_and_rapid_and_the_label_says_so():
+    blitz = game(1)
+    classical, daily = game(2, speed=Speed.CLASSICAL), game(3, speed=Speed.CORRESPONDENCE)
+    pairs = [chance(g, 5) for g in (blitz, classical, daily)]
+    r = report([blitz, classical, daily], pairs)
+    assert [(c.label, c.yours.n) for c in r.groups] == [
+        ("Bullet, moves 1-10", 0),
+        ("Blitz, rapid, classical and correspondence", 3),
+    ]
+    assert report([blitz], pairs).groups[1].label == "Blitz and rapid"
+
+
 def test_openings_and_examples_come_from_where_the_gap_is():
     games, pairs = _season()
     r = report(games, pairs)

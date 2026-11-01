@@ -10,7 +10,8 @@ of chance (Lichess Insights calls the two rates Opportunism and Luck). A gap onl
 
 The owner's rules apply to the replying move, on both sides alike: in bullet only moves 1-10
 count (features.counted) and replies made short on time don't (features.rushed). Bullet is
-reported apart from blitz and rapid; rapid alone is too small, and slower games count with it.
+reported apart from blitz and rapid (rapid alone is too small); classical, correspondence and
+unknown-speed games count with blitz and rapid, and then the group's label names them.
 """
 
 from __future__ import annotations
@@ -19,13 +20,19 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
 from chess_coach.coach.principles import allows
-from chess_coach.models import Color, Game, MoveFact
+from chess_coach.models import Color, Game, MoveFact, Speed
 from chess_coach.patterns.features import BULLET_MOVES, counted, is_bullet, punish_kind, rushed
 from chess_coach.patterns.mining import newcombe, wilson_lower, wilson_upper
 
 GIFT_WP_LOSS = 20.0  # the same bar as missed_tactic (engine/motifs.py)
 TREND_GIFTS = 150  # their blunders you could punish, per stretch of the trend: about ±8 points
 GROUPS = {"bullet": f"Bullet, moves 1-{BULLET_MOVES}", "slower": "Blitz and rapid"}
+# Other speeds that count with blitz and rapid, named in the label when there are any.
+OTHER_SPEEDS = {
+    Speed.CLASSICAL: "classical",
+    Speed.CORRESPONDENCE: "correspondence",
+    Speed.UNKNOWN: "games of unknown speed",
+}
 KINDS = {"capture": "a capture", "check": "a check", "quiet": "a quiet move"}
 # Only shown when you miss that kind of punishment clearly more often than your opponents do:
 # everyone misses quiet punishments more than captures, so that alone is no lesson.
@@ -86,6 +93,16 @@ class Gift:
         if not self.reply.fen_before or not self.reply.best_move:
             return []
         return allows(self.reply.fen_before, self.reply.best_move, captures=True)
+
+
+def group_names(found: Iterable[Gift]) -> dict[str, str]:
+    """GROUPS, with the slower group's label naming any classical, correspondence or
+    unknown-speed games among `found`: 'Blitz, rapid and classical'."""
+    speeds = {g.game.speed for g in found}
+    words = ["blitz", "rapid", *(name for speed, name in OTHER_SPEEDS.items() if speed in speeds)]
+    if len(words) == 2:
+        return GROUPS
+    return {**GROUPS, "slower": f"{', '.join(words[:-1])} and {words[-1]}".capitalize()}
 
 
 def gifts(games: Iterable[Game], pairs: Iterable[tuple[MoveFact, MoveFact]]) -> list[Gift]:
@@ -232,7 +249,7 @@ class Family:
 
 @dataclass(slots=True)
 class Report:
-    groups: list[Compare]  # bullet (moves 1-10), then blitz and rapid
+    groups: list[Compare]  # bullet (moves 1-10), then blitz and rapid (and slower: group_names)
     kinds: list[Compare]  # by the punishing move: capture, check, quiet (labels are KINDS keys)
     trend: list[Compare]
     # Where the gap comes from, inside the groups where you miss more than your opponents
@@ -265,8 +282,9 @@ def report(
     raw excess would list 1-of-1 samples. They are ranked by `Compare.excess`, so the first are
     where most of the gap comes from, not just where you play most."""
     found = gifts(games, pairs)
+    names = group_names(found)
     groups = {
-        key: compare(name, (g for g in found if g.group == key)) for key, name in GROUPS.items()
+        key: compare(name, (g for g in found if g.group == key)) for key, name in names.items()
     }
     worse = [key for key, c in groups.items() if c.verdict == "worse"]
     focused = [g for g in found if g.group in worse]
@@ -280,7 +298,7 @@ def report(
         groups=list(groups.values()),
         kinds=[compare(kind, (g for g in found if g.kind == kind)) for kind in KINDS],
         trend=trend(found),
-        focus=[GROUPS[key] for key in worse],
+        focus=[names[key] for key in worse],
         families=[
             Family(c, costliest((g for g in misses if g.game.opening_family == c.label), examples))
             for c in sorted(clear, key=lambda c: -c.excess)[:families]
