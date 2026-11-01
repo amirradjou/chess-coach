@@ -56,6 +56,12 @@ def opening_table() -> dict[str, Opening]:
     return table
 
 
+@lru_cache(maxsize=1)
+def opening_families() -> frozenset[str]:
+    """Every family the table names ("Italian Game", "Danish Gambit Accepted")."""
+    return frozenset(o.family for o in opening_table().values())
+
+
 def classify_board_sequence(moves: list[chess.Move]) -> Opening | None:
     table = opening_table()
     board = chess.Board()

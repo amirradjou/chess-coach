@@ -51,7 +51,7 @@ from chess_coach.coach.repertoire import (
 from chess_coach.db import Store
 from chess_coach.engine.stockfish import Engine, EngineNotFoundError, LineEval
 from chess_coach.models import Puzzle, card_id
-from chess_coach.openings import opening_table
+from chess_coach.openings import opening_families, opening_table
 from chess_coach.patterns.features import move_rows, result_of
 from chess_coach.patterns.mining import Evidence
 from chess_coach.puzzles import review
@@ -280,6 +280,17 @@ def _number(board: chess.Board) -> str:
     return f"{board.fullmove_number}{'.' if board.turn == chess.WHITE else '...'}"
 
 
+def _drill_opening(p: Puzzle, tag: str | None, game_family: str | None) -> str | None:
+    """The opening a drill is shown under: an opening fix's own opening (its tag after
+    "opening-fix"), any other puzzle's game's. A fix two openings share (Modern and Pirc 3...Bg7)
+    has both names: drilled as one of them (the tag asked for), it is that one's."""
+    if "opening-fix" not in p.tags:
+        return game_family
+    if tag in p.tags[1:] and tag in opening_families():  # not a theme such as "opening"
+        return tag
+    return p.tags[1] if len(p.tags) > 1 else None
+
+
 def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
     analyst = Analyst(engine)
 
@@ -394,7 +405,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             p = due[0]
             game = store.get_game(p.game_id)
         board = chess.Board(p.fen)
-        family = p.tags[1] if "opening-fix" in p.tags else (game.opening_family if game else None)
+        family = _drill_opening(p, tag, game.opening_family if game else None)
         early = board.fullmove_number <= OPENING_NOTE_MOVES
         return {
             "done": False,

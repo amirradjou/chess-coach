@@ -206,7 +206,7 @@ async function nextPuzzle() {
   $("#due").textContent = `${p.due} due`;
   fill($("#prompt"),
     p.opening_fix
-      ? el("span", {}, `Your opening (${p.tags[1] || ""}): here you usually play `, el("span", { class: "played" }, p.played), ". Find a better move.")
+      ? el("span", {}, `Your opening (${p.opening || ""}): here you usually play `, el("span", { class: "played" }, p.played), ". Find a better move.")
       : el("span", {}, "In the game you played ", el("span", { class: "played" }, p.played), ". Find the best move."),
     el("br"), el("span", { class: "muted small" }, `${p.side === "white" ? "White" : "Black"} to move · ${p.tags.join(", ").replaceAll("_", " ")}`),
     p.opening_idea ? el("span", { class: "idea" }, el("b", {}, `${p.opening}: `), p.opening_idea) : null,

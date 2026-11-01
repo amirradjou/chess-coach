@@ -5,16 +5,20 @@ from pathlib import Path
 
 import chess
 import pytest
+from fastapi.testclient import TestClient
 from rich.console import Console
 from typer.testing import CliRunner
 
 from chess_coach import cli
+from chess_coach.coach.principles import opening_idea
 from chess_coach.db import Store
 from chess_coach.engine.stockfish import LineEval
 from chess_coach.models import Puzzle
 from chess_coach.puzzles.make import Merge, Stored, dedupe, make_opening_fixes
+from chess_coach.web.app import create_app
 
 from .test_coach_web import AFTER_ITALIAN, italian_games, kf1
+from .test_opening_tree import no_engine
 
 O_O, D3 = chess.Move.from_uci("e1g1"), chess.Move.from_uci("d2d3")
 
@@ -218,3 +222,39 @@ def test_puzzles_dedupe_says_what_it_did(tmp_path: Path, monkeypatch):
     )
     again = CliRunner().invoke(cli.app, ["--db", str(db), "puzzles", "dedupe"])
     assert "No puzzle is stored twice (1 puzzles)." in again.output
+
+
+def test_a_shared_fix_drill_is_shown_under_the_opening_being_drilled(tmp_path: Path):
+    db = tmp_path / "c.db"
+    italian_games_stored(db, 1)  # the game's own opening doesn't name an opening fix
+    with Store(db) as store:  # 3...Bg7?? (4.Qxf7+) after 1.e4 d6 2.Bc4 g6 3.Qf3: Modern and Pirc
+        store.add_puzzle(
+            Puzzle(
+                id="lichess:g0:6",
+                game_id="lichess:g0",
+                ply=6,
+                fen=_fen("e4 d6 Bc4 g6 Qf3"),
+                solution="g8f6",
+                solution_san="Nf6",
+                played_san="Bg7",
+                line="",
+                gap_cp=300,
+                depth=18,
+                tags=["opening-fix", "Modern Defense", "Pirc Defense", "opening"],
+            )
+        )
+    client = TestClient(create_app(db, no_engine))
+
+    def shown(tag: str | None = None) -> tuple[str, str]:
+        p = client.get("/api/drill/next", params={"tag": tag} if tag else {}).json()
+        return p["opening"], p["opening_idea"]
+
+    pirc, modern = (
+        ("Pirc Defense", opening_idea("Pirc Defense")),
+        ("Modern Defense", opening_idea("Modern Defense")),
+    )
+    assert pirc[1] and modern[1] and pirc[1] != modern[1]
+    assert shown("Pirc Defense") == pirc  # the Pirc's "Drill these fixes"
+    assert shown("Modern Defense") == modern
+    assert shown() == modern  # everything due: its first opening
+    assert shown("opening") == modern  # a theme, not an opening
