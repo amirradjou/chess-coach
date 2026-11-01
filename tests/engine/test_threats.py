@@ -107,6 +107,19 @@ def test_an_old_threat_or_a_met_one_is_not_ignored():
     assert (met.label, met.threat_san) == ("", "axb6")
 
 
+def test_an_attack_left_from_before_a_check_is_not_their_threat():
+    bxe6 = line(850, "c8e6")
+    # 1...Ka7 answers Bd5+; the bishop on c8 attacked the queen on e6 before it already
+    previous = fact(1, "2b5/1k6/4Q3/3B4/8/8/5PPP/6K1 b - - 0 1", "b7a7", -50, -50)
+    m = fact(2, "2b5/k7/4Q3/3B4/8/8/5PPP/6K1 w - - 1 2", "h2h3", 0, -900)
+    row = classify(m, previous, bxe6, bxe6, 12)
+    assert (row.label, row.threat_san) == ("", "Bxe6")  # kept, unlabelled
+    # 1...Kd8 out of Bb5+ opens the bishop's line to e6 itself: their threat
+    previous = fact(1, "2b5/3k4/4Q3/1B6/8/8/5PPP/6K1 b - - 0 1", "d7d8", -50, -50)
+    m = fact(2, "2bk4/8/4Q3/1B6/8/8/5PPP/6K1 w - - 1 2", "h2h3", 0, -900)
+    assert classify(m, previous, bxe6, bxe6, 12).label == IGNORED
+
+
 def test_what_the_move_takes_pays_for_what_it_lets_them_take():
     _, previous = ne7()
     pawn = line(300, "a5b6")  # their answer: axb6, a pawn

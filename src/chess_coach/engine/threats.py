@@ -13,7 +13,8 @@ nothing, and a move that only gives back the mover's own edge leaves them better
 - Their threat: their line on the null-move board wins, and the free move is worth THREAT_CP to
   them (the mover's evaluation before plus theirs after passing). It is new when they were not
   already THREAT_CP better off before their last move (the stored evaluation of that position,
-  which has them to move like the null-move board).
+  which has them to move like the null-move board), and it wasn't already there behind a check
+  they had to answer first (the same piece, move and target).
 - `ignored_threat`: a new threat the move didn't meet. A mate threat is met when they no longer
   mate; any other is not met when their best answer is the threat itself and still wins material,
   or another capture on its square that still wins THREAT_MATERIAL, counted from before the move
@@ -92,9 +93,27 @@ def is_threat(m: MoveFact, line: LineEval, theirs: chess.Board) -> bool:
     return m.eval_before + line.cp >= THREAT_CP and wins(theirs, line)
 
 
-def is_new(line: LineEval, previous: MoveFact | None) -> bool:
-    """Their last move made the threat: before it (them to move) they were THREAT_CP worse off."""
-    return previous is None or line.cp - previous.eval_before >= THREAT_CP
+def behind_check(previous: MoveFact, theirs: chess.Board, threat: chess.Move) -> bool:
+    """Their last move answered a check and the threat was there before it: the same piece could
+    already make the same move against the same target, they just had to answer the check
+    first. (The evaluation before their move, in check, can't show it.)"""
+    before = chess.Board(previous.fen_before)
+    return (
+        before.is_check()
+        and before.piece_at(threat.from_square) == theirs.piece_at(threat.from_square)
+        and before.piece_at(threat.to_square) == theirs.piece_at(threat.to_square)
+        and before.is_pseudo_legal(threat)
+    )
+
+
+def is_new(line: LineEval, previous: MoveFact | None, theirs: chess.Board) -> bool:
+    """Their last move made the threat `line` (on `theirs`): before it (them to move) they were
+    THREAT_CP worse off, and it wasn't only waiting behind a check they had to answer."""
+    if previous is None:
+        return True
+    assert line.move is not None
+    old = line.cp - previous.eval_before < THREAT_CP or behind_check(previous, theirs, line.move)
+    return not old
 
 
 def answered(board: chess.Board, after: chess.Board, answer: LineEval) -> int:
@@ -147,7 +166,7 @@ def classify(
         assert line.move is not None
         row.threat, row.threat_san = line.move.uci(), theirs.san(line.move)
         row.gain, row.mate = 100 * won(theirs, line.pv), line.mate
-        if is_new(line, previous) and not met(line, answer, board, after):
+        if is_new(line, previous, theirs) and not met(line, answer, board, after):
             row.label = IGNORED
         return row
     if wins(theirs, line):
