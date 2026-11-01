@@ -6,10 +6,11 @@ invent a pattern.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from chess_coach.coach.punish import KINDS, Gift, Report, headline, label, report
 from chess_coach.models import Game, MoveFact
 from chess_coach.patterns.features import (
     BULLET_MOVES,
@@ -156,6 +157,8 @@ class Digest:
     # Moves played short on time are left out above; these are their mistakes that keep repeating.
     rushed_moves: int = 0
     pressure: list[MotifCount] = field(default_factory=list)
+    # When they blunder: your punish rate against your opponents' (with Store.gifts given).
+    punish: Report | None = None
 
 
 def build(
@@ -167,7 +170,10 @@ def build(
     min_lift: float = 1.5,
     game_lift: float = 1.25,
     since: datetime | None = None,
+    gifts: Iterable[tuple[MoveFact, MoveFact]] | None = None,
 ) -> Digest:
+    """`moves` are the user's; `gifts` (Store.gifts, both players' moves) adds When they
+    blunder."""
     analysed = [g for g in games if g.analyzed_depth]
     before: list = []
     if since is not None:
@@ -202,6 +208,7 @@ def build(
         bullet_games=sum(is_bullet(g) for g in analysed),
         rushed_moves=len(rrows),
         pressure=repeated_under_pressure(rrows),
+        punish=report(analysed, gifts) if gifts is not None else None,
     )
 
 
@@ -220,6 +227,46 @@ def _games_line(i: int, p: Pattern) -> str:
         f"{i}. **{describe(p.features)}**: lost {p.hits} of {p.n} ({p.rate:.0%} against your "
         f"usual {p.baseline:.0%}). For example: {games}."
     )
+
+
+def _miss(g: Gift) -> str:
+    """'[13.Bd3 after 12...Qd7 (best 13.Nxe5, -45%)](link): It lets Nxe5 take ...'"""
+    r = g.reply
+    text = f"{label(r)} after {label(g.blunder)} (best {label(r, r.best_san)}, -{r.wp_loss:.0f}%)"
+    linked = f"[{text}]({g.url})" if g.url else text
+    reasons = g.reasons()
+    return f"{linked}: {reasons[0]}" if reasons else linked
+
+
+def _punish_lines(r: Report) -> list[str]:
+    out = [
+        "## When they blunder",
+        "",
+        "A blunder here is a move that loses 20+ points of win probability; the reply misses the "
+        "punishment when it is an inaccuracy or worse. Your opponents' replies to your blunders "
+        "are the yardstick: players at your level with the same kind of chance.",
+        "",
+    ]
+    out += [f"- **{c.label}**: {headline(c)}" for c in r.groups if c.yours.n or c.theirs.n]
+    kinds = "; ".join(
+        f"{KINDS[c.label]}, you {c.yours.rate:.0%} of {c.yours.n} and them {c.theirs.rate:.0%} "
+        f"of {c.theirs.n}"
+        for c in r.kinds
+    )
+    verdict = " ".join(r.lessons) or "No kind stands out against your opponents."
+    out += ["", f"Missed, by the move that punishes: {kinds}. {verdict}"]
+    if r.families:
+        where = ", ".join(
+            f"the {c.label} (you missed {c.yours.missed} of {c.yours.n}, they missed "
+            f"{c.theirs.missed} of {c.theirs.n})"
+            for c in (f.compare for f in r.families)
+        )
+        focus = f"In {' and '.join(r.focus).lower()}, you" if r.focus else "You"
+        out += ["", f"{focus} miss more than your opponents most in {where}."]
+    if r.worst:
+        out += ["", "Your costliest misses:", "", *(f"- {_miss(g)}" for g in r.worst)]
+    out.append("")
+    return out
 
 
 def render(d: Digest, top: int = 5) -> str:
@@ -288,6 +335,9 @@ def render(d: Digest, top: int = 5) -> str:
             example = _move(m.evidence[0]) if m.evidence else ""
             out.append(f"| {what} | {m.moves} | {m.games} | {example} | {tip} |")
         out.append("")
+
+    if d.punish is not None and d.punish.gifts:
+        out += _punish_lines(d.punish)
 
     if d.pressure:
         out += [

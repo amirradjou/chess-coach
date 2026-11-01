@@ -1,7 +1,12 @@
 """When they blunder: your punish rate against your opponents' (coach/punish.py)."""
 
-import chess
+from pathlib import Path
 
+import chess
+from typer.testing import CliRunner
+
+from chess_coach.cli import app
+from chess_coach.coach.digest import build, render
 from chess_coach.coach.punish import (
     LESSONS,
     Compare,
@@ -13,6 +18,7 @@ from chess_coach.coach.punish import (
     report,
     trend,
 )
+from chess_coach.db import Store
 from chess_coach.models import Color, Judgement, MoveFact, Phase, Speed
 from chess_coach.patterns.features import punish_kind
 
@@ -281,3 +287,43 @@ def test_examples_say_what_the_blunder_allowed():
     assert x.reasons() == [
         "It lets Nxh6 take their bishop on h6, which was hanging (attacked and not defended)."
     ]
+
+
+# -- where it shows -------------------------------------------------------------------------
+
+
+def test_the_digest_has_a_section_only_with_both_sides_moves():
+    games, pairs = _season()
+    moves = [r for _, r in pairs if r.is_user]
+    text = render(build(games, moves, gifts=pairs))
+    assert "## When they blunder" in text
+    assert "- **Bullet, moves 1-10**: You missed the punishment for 60.0%" in text
+    assert "- **Blitz and rapid**:" in text and "about the same as your opponents" in text
+    assert "In bullet, moves 1-10, you miss more than your opponents most in the" in text
+    assert "Your costliest misses:" in text and "(https://lichess.org/g" in text
+    assert "When they blunder" not in render(build(games, moves))
+
+
+def _store(db: Path) -> None:
+    games, pairs = _season()
+    with Store(db) as store:
+        for g in games:
+            store.upsert_game(g)
+            own = {}
+            for blunder, reply in pairs:
+                if blunder.game_id == g.id:
+                    own[blunder.ply], own[reply.ply] = blunder, reply
+            store.replace_moves(g.id, list(own.values()), depth=12)
+
+
+def test_punish_command(tmp_path):
+    db = tmp_path / "coach.db"
+    _store(db)
+    result = CliRunner().invoke(app, ["--db", str(db), "punish"], env={"COLUMNS": "200"})
+    assert result.exit_code == 0, result.output
+    assert "Bullet, moves 1-10: You missed the punishment for" in result.output
+    assert "You miss it more often than your opponents do" in result.output
+    assert "By the move that punishes" in result.output
+    assert "Openings where you miss more than your opponents (Bullet, moves 1-10)" in result.output
+    empty = CliRunner().invoke(app, ["--db", str(tmp_path / "empty.db"), "punish"])
+    assert "No blunders to compare yet" in empty.output

@@ -387,12 +387,21 @@ def digest(
     With --since (e.g. 7d for a weekly digest) only those games count, compared with the ones
     before."""
     from chess_coach.coach.digest import build, render
+    from chess_coach.coach.punish import GIFT_WP_LOSS
 
     settings: Settings = ctx.obj
     with Store(settings.db_path) as store:
         games = list(store.iter_games())
         moves = list(store.iter_moves(user_only=True))
-    built = build(games, moves, min_moves=min_moves, min_games=min_games, since=parse_since(since))
+        gifts = store.gifts(GIFT_WP_LOSS)
+    built = build(
+        games,
+        moves,
+        min_moves=min_moves,
+        min_games=min_games,
+        since=parse_since(since),
+        gifts=gifts,
+    )
     text = render(built, top=top)
     if narrate:
         from chess_coach.coach.narrate import model_for
@@ -408,6 +417,69 @@ def digest(
     else:
         out.write_text(text, encoding="utf-8")
         console.print(f"Wrote the digest -> [dim]{out}[/dim]")
+
+
+@app.command()
+def punish(
+    ctx: typer.Context,
+    since: SinceOption = None,
+    examples: Annotated[int, typer.Option(help="Missed punishments to show per opening.")] = 2,
+) -> None:
+    """When they blunder: how often you miss the punishment, against how often your opponents
+    miss it when you blunder. In bullet only moves 1-10 count; replies short on time don't."""
+    from chess_coach.coach.punish import GIFT_WP_LOSS, KINDS, TREND_GIFTS, headline, label, report
+
+    settings: Settings = ctx.obj
+    with Store(settings.db_path) as store:
+        games = [g for g in store.iter_games(since=parse_since(since)) if g.analyzed_depth]
+        r = report(games, store.gifts(GIFT_WP_LOSS), examples=examples)
+    if not r.gifts:
+        console.print("No blunders to compare yet. Run `chess-coach analyze` first.")
+        return
+    console.print(
+        "[bold]When they blunder[/bold] (a move losing 20+ points of win probability): how often "
+        "the reply misses the punishment (an inaccuracy or worse), yours against your opponents'."
+    )
+    for c in r.groups:
+        console.print(f"\n[bold]{c.label}[/bold]: {headline(c)}")
+    console.print(_rates_table("By the move that punishes", "punishing move", r.kinds, names=KINDS))
+    for lesson in r.lessons:
+        console.print(f"[green]What to learn:[/green] {lesson}")
+    if not r.lessons:
+        console.print("No kind of punishing move stands out against your opponents.")
+    title = f"Over time (each row holds {TREND_GIFTS} of their blunders you could punish)"
+    console.print(_rates_table(title, "games played", r.trend))
+    if r.families:
+        where = f" ({', '.join(r.focus)})" if r.focus else ""
+        title = f"Openings where you miss more than your opponents{where}"
+        console.print(_rates_table(title, "opening", [f.compare for f in r.families]))
+    for f in r.families:
+        for g in f.examples:
+            best = label(g.reply, g.reply.best_san)
+            console.print(
+                f"{f.compare.label}: after {label(g.blunder)} you played {label(g.reply)}; "
+                f"{best} punished it. {' '.join(g.reasons())} [dim]{g.url or ''}[/dim]"
+            )
+    console.print(
+        "Drill your missed punishments: `chess-coach drill --tag punish_capture` (or "
+        "punish_check, punish_quiet; missed_tactic for all of them)."
+    )
+
+
+def _rates_table(title: str, first: str, rows, names: dict[str, str] | None = None) -> Table:
+    """Your miss rate against your opponents' per row, each with its 95% interval."""
+    table = Table(title=title)
+    for column in (first, "you missed", "they missed", "gap, points (95%)"):
+        table.add_column(column, justify="left" if column == first else "right")
+    for c in rows:
+        low, high = c.interval
+        table.add_row(
+            (names or {}).get(c.label, c.label),
+            f"{c.yours.rate:.1%} of {c.yours.n} ({c.yours.low:.0%}-{c.yours.high:.0%})",
+            f"{c.theirs.rate:.1%} of {c.theirs.n} ({c.theirs.low:.0%}-{c.theirs.high:.0%})",
+            f"{100 * c.gap:+.1f} ({100 * low:+.1f} to {100 * high:+.1f})",
+        )
+    return table
 
 
 def _engine(settings: Settings, threads: int | None):
