@@ -454,9 +454,15 @@ def allows(fen: str, punish: str) -> list[str]:
     if after.is_check():
         return [f"It lets {san} come with check."]
     hit = sorted(threatened(after, me) - threatened(board, me), key=lambda ks: -PIECE_VALUES[ks[0]])
-    if not hit:
-        return []
     names = [f"{chess.piece_name(kind)} on {chess.square_name(square)}" for kind, square in hit]
+    taken = (board.piece_type_at(move.to_square), move.to_square)
+    if board.is_capture(move) and (how := hanging(board, not me).get(taken)):
+        piece = f"{chess.piece_name(taken[0])} on {chess.square_name(taken[1])}"
+        if names:
+            return [f"It lets {san} take their {piece}, which was {how}, and hit their {names[0]}."]
+        return [f"It lets {san} take their {piece}, which was {how}."]
+    if not names:
+        return []
     if len(names) > 1:
         return [f"It lets {san} hit their {names[0]} and {names[1]} at once."]
     return [f"It lets {san} hit their {names[0]}."]

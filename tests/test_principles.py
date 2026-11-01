@@ -74,6 +74,20 @@ def test_what_their_mistake_allows():
     assert allows(chess.STARTING_FEN, "e2e5") == []  # not a legal move
 
 
+def test_what_their_mistake_allows_to_take():
+    bh6 = chess.Board()
+    for san in "d4 g6 Bh6".split():  # 2.Bh6?? leaves the bishop to the knight and the bishop
+        bh6.push_san(san)
+    assert allows(bh6.fen(), "g8h6") == [
+        "It lets Nxh6 take their bishop on h6, which was hanging (attacked and not defended)."
+    ]
+    nd5 = "r1bqk2r/pppp1ppp/2n1pn2/3N4/1bB1P3/5N2/PPPP1PPP/R1BQK2R b KQkq - 5 5"  # 5.Nd5?
+    assert allows(nd5, "e6d5") == [
+        "It lets exd5 take their knight on d5, which was attacked by a cheaper piece, and hit "
+        "their bishop on c4."
+    ]
+
+
 def test_pawn_structure_and_the_centre():
     r = explain("rnbqkbnr/pp1ppppp/8/2p5/3P4/8/PPP1PPPP/RNBQKBNR w KQkq c6 0 2", "d4c5", "d4d5")
     assert r.faults == [
