@@ -123,6 +123,12 @@ def kind_of(san: str) -> str:
     return "quiet"
 
 
+def punish_kind(san: str) -> str:
+    """capture, check or quiet: the kind of a punishing move (castling counts as quiet)."""
+    kind = kind_of(san)
+    return "quiet" if kind == "castle" else kind
+
+
 def castling_move(game: Game) -> int | None:
     """The move number on which the user castled; None if they never did or the PGN won't parse."""
     parsed = chess.pgn.read_game(io.StringIO(game.pgn))
