@@ -36,7 +36,9 @@ def _wilson(hits: int, n: int, z: float, side: int) -> float:
     p = hits / n
     centre = p + z * z / (2 * n)
     margin = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))
-    return (centre + side * margin) / (1 + z * z / n)
+    # The bounds lie in [0, 1], but rounding can put one a hair outside: 0 of 5 gave -3e-17,
+    # which prints as "-0%".
+    return min(1.0, max(0.0, (centre + side * margin) / (1 + z * z / n)))
 
 
 @dataclass(frozen=True, slots=True)

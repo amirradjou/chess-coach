@@ -104,6 +104,9 @@ def test_wilson_interval():
     assert wilson_lower(5, 10) == pytest.approx(0.2366, abs=1e-4)
     assert wilson_upper(5, 10) == pytest.approx(1 - 0.2366, abs=1e-4)  # symmetric at 50%
     assert wilson_lower(10, 10) < 1.0 and wilson_upper(0, 10) > 0.0
+    # rounding never takes a bound outside [0, 1] (0 of 5 printed as "-0%")
+    assert f"{wilson_lower(0, 5):.0%} {wilson_upper(5, 5):.1%}" == "0% 100.0%"
+    assert all(wilson_lower(0, n) >= 0.0 and wilson_upper(n, n) <= 1.0 for n in range(1, 3000))
 
 
 def test_buckets():
