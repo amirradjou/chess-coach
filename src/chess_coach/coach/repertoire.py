@@ -23,7 +23,7 @@ import chess
 
 from chess_coach.engine.evaluation import CP_LOSS_CEILING
 from chess_coach.models import Game, MoveFact
-from chess_coach.openings import book_line, opening_table
+from chess_coach.openings import book_line, epd, opening_table
 from chess_coach.patterns.features import BULLET_MOVES, ERRORS, counted, move_rows, result_of
 from chess_coach.patterns.mining import wilson_lower, wilson_upper
 
@@ -218,10 +218,6 @@ def evals_after_ten(games: Iterable[Game], moves: Iterable[MoveFact]) -> dict[st
     }
 
 
-def _epd(fen: str) -> str:
-    return " ".join(fen.split()[:4])  # the table's key: a FEN without the move counters
-
-
 def book_eval(own: Sequence[MoveFact]) -> int | None:
     """Your eval (cp, your side) at the last position of these moves that the opening table names,
     so a transposition back into a named line counts. `own` is your moves in order, both sides'
@@ -229,7 +225,7 @@ def book_eval(own: Sequence[MoveFact]) -> int | None:
     table = opening_table()
     found = None
     for m in own:
-        if m.ply > 1 and _epd(m.fen_before) in table:  # the position their move left
+        if m.ply > 1 and epd(m.fen_before) in table:  # the position their move left
             found = m.eval_before
         if is_book(m.fen_before, m.uci):
             found = m.eval_after

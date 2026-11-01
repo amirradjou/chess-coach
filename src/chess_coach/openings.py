@@ -28,6 +28,12 @@ class Opening:
         return self.name.split(":", 1)[0].strip()
 
 
+def epd(fen: str) -> str:
+    """The FEN without its move counters (halfmove clock, move number), as the table keys it:
+    the same position however the game got there, so a transposition counts as the same."""
+    return " ".join(fen.split()[:4])
+
+
 def _epd_of(pgn_moves: str) -> str:
     board = chess.Board()
     for token in pgn_moves.split():

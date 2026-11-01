@@ -76,6 +76,28 @@ def test_a_repeat_knows_its_puzzle(tmp_path: Path):
     assert found_in(db, [puzzle("g1f3")])[0].puzzle is None  # that one says Nf3 is right
 
 
+# 1.e4 e5 2.Nf3 Nc6 3.Bc4 Nf6 and 1.Nf3 Nc6 2.e4 e5 3.Bc4 Nf6 meet in the same position, but its
+# FEN's halfmove clock differs (4 and 2): the last pawn move came at another ply.
+TWO_KNIGHTS = ("e4 e5 Nf3 Nc6 Bc4 Nf6".split(), "Nf3 Nc6 e4 e5 Bc4 Nf6".split())
+
+
+def test_the_same_position_by_another_move_order_is_the_same_repeat(tmp_path: Path):
+    db = tmp_path / "c.db"
+    with Store(db) as store:
+        for i in range(3):  # 4.Kf1?! twice by one move order, once by the other
+            g = game(i)
+            moves = facts(g.id, [*TWO_KNIGHTS[i == 2], "Kf1"], {7: 12.0}, {7: "Ng5"})
+            store.upsert_game(g)
+            store.replace_moves(g.id, moves, depth=12)
+    (r,) = found_in(db)
+    assert (r.move, r.better, r.games) == ("4.Kf1", "4.Ng5", 3)
+    # ...and a puzzle made in a game of the other move order drills it
+    fen = facts("x", [*TWO_KNIGHTS[1], "Kf1"])[6].fen_before
+    assert (r.fen.split()[-2:], fen.split()[-2:]) == (["4", "4"], ["2", "4"])
+    drill = Puzzle("lichess:g2:7", "lichess:g2", 7, fen, "f3g5", "Ng5", "Kf1", "", 200, 18)
+    assert found_in(db, [drill])[0].puzzle == "lichess:g2:7"
+
+
 def test_fewer_than_three_games_is_not_a_repeat(tmp_path: Path):
     db = tmp_path / "c.db"
     store_games(db)

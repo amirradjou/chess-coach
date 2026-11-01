@@ -2,8 +2,11 @@
 
 A repeat is one of your counted errors (an inaccuracy or worse; in bullet only your first 10
 moves, and never a move made short on time) played from the same position in 3 or more games.
-Named book moves are left out, as in coach.repertoire: 2.d4 in the Blackmar-Diemer is a choice of
-gambit, not a slip, whatever the engine thinks of it.
+The same position means the same board, side to move, castling and en passant rights, however
+the game got there: a transposition (the Scotch and the Danish meeting at 7.O-O) is the same
+mistake, though its FEN's move counters differ. Named book moves are left out, as in
+coach.repertoire: 2.d4 in the Blackmar-Diemer is a choice of gambit, not a slip, whatever the
+engine thinks of it.
 Each comes with the better move, their best answer to yours (the stored best move of the next
 ply, and how often they found it), the reasons in chess terms (coach.principles), links to the
 games and whether a puzzle drills the position. Nothing here runs the engine.
@@ -19,6 +22,7 @@ from datetime import datetime
 from chess_coach.coach.principles import allows, explain
 from chess_coach.coach.repertoire import is_book
 from chess_coach.models import Game, Judgement, MoveFact, Puzzle
+from chess_coach.openings import epd
 from chess_coach.patterns.features import MoveRow, move_rows
 
 MIN_GAMES = 3
@@ -32,7 +36,7 @@ def _number(move_number: int, color: str) -> str:
 
 @dataclass(slots=True)
 class Repeat:
-    fen: str  # before your move
+    fen: str  # before your move, in the oldest game (another move order has other counters)
     uci: str
     move: str  # "3...Bg7"
     better: str  # "3...Nf6"
@@ -70,11 +74,11 @@ def repeats(
     groups: dict[tuple[str, str], list[MoveRow]] = {}
     for r in move_rows([g for g in games if g.analyzed_depth], moves):
         if r.fact.judgement in ERRORS and r.fact.fen_before:  # no position, nothing to repeat
-            groups.setdefault((r.fact.fen_before, r.fact.uci), []).append(r)
+            groups.setdefault((epd(r.fact.fen_before), r.fact.uci), []).append(r)
     out = [
         _repeat(sorted(rows, key=lambda r: _when(r.game)), replies, puzzles)
-        for (fen, uci), rows in groups.items()
-        if len({r.game.id for r in rows}) >= min_games and not is_book(fen, uci)
+        for (_, uci), rows in groups.items()
+        if len({r.game.id for r in rows}) >= min_games and not is_book(rows[0].fact.fen_before, uci)
     ]
     return sorted(out, key=lambda r: (r.games, r.last.isoformat() if r.last else ""), reverse=True)
 
@@ -87,6 +91,7 @@ def _repeat(
     best_san = next(r.fact.best_san for r in rows if r.fact.best_move == best_uci)
     number = _number(first.move_number, first.color.value)
     families = Counter(r.game.opening_family for r in rows if r.game.opening_family)
+    where = epd(first.fen_before)
     out = Repeat(
         fen=first.fen_before,
         uci=first.uci,
@@ -98,8 +103,7 @@ def _repeat(
         family=families.most_common(1)[0][0] if families else None,
         urls=[url for r in reversed(rows) if (url := r.game.move_url(r.fact.ply))][:LINKS],
         puzzle=next(
-            (p.id for p in puzzles if p.fen == first.fen_before and not p.is_right(first.uci)),
-            None,
+            (p.id for p in puzzles if epd(p.fen) == where and not p.is_right(first.uci)), None
         ),
     )
     theirs = [m for r in rows if (m := replies.get((r.game.id, r.fact.ply))) is not None]
