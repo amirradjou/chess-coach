@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import chess
+from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
 from chess_coach.cli import app
@@ -19,8 +20,10 @@ from chess_coach.coach.punish import (
     trend,
 )
 from chess_coach.db import Store
+from chess_coach.engine.stockfish import EngineNotFoundError
 from chess_coach.models import Color, Judgement, MoveFact, Phase, Speed
 from chess_coach.patterns.features import punish_kind
+from chess_coach.web.app import create_app
 
 from .test_patterns import game
 
@@ -327,3 +330,21 @@ def test_punish_command(tmp_path):
     assert "Openings where you miss more than your opponents (Bullet, moves 1-10)" in result.output
     empty = CliRunner().invoke(app, ["--db", str(tmp_path / "empty.db"), "punish"])
     assert "No blunders to compare yet" in empty.output
+
+
+def test_the_web_page_needs_no_engine(tmp_path):
+    db = tmp_path / "coach.db"
+    _store(db)
+
+    def missing():
+        raise EngineNotFoundError("no engine")
+
+    p = TestClient(create_app(db, missing)).get("/api/punish").json()
+    bullet_group = p["groups"][0]
+    assert (bullet_group["label"], bullet_group["verdict"]) == ("Bullet, moves 1-10", "worse")
+    assert bullet_group["yours"] == {"missed": 48, "n": 80, "rate": 60.0, "low": 49.0, "high": 70.0}
+    assert bullet_group["headline"].startswith("You missed the punishment for 60.0%")
+    assert [k["name"] for k in p["kinds"]] == ["a capture", "a check", "a quiet move"]
+    assert p["focus"] == ["Bullet, moves 1-10"] and p["trend"]
+    example = p["families"][0]["examples"][0]
+    assert example["url"].startswith("https://lichess.org/g") and "move" in example

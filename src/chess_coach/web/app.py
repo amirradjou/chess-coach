@@ -38,6 +38,16 @@ from chess_coach.coach.progress import (
     trend_speeds,
     weekly,
 )
+from chess_coach.coach.punish import (
+    GIFT_WP_LOSS,
+    KINDS,
+    Compare,
+    Gift,
+    Rate,
+    headline,
+    label,
+    report,
+)
 from chess_coach.coach.repertoire import Favorite, Fix, favorites
 from chess_coach.db import Store
 from chess_coach.engine.stockfish import Engine, EngineNotFoundError, LineEval
@@ -144,6 +154,45 @@ def _habit(h: Habit) -> dict:
         "games": h.games,
         "practice": h.practice,
         "examples": [_example(e) for e in h.examples],
+    }
+
+
+def _rate(r: Rate) -> dict:
+    return {
+        "missed": r.missed,
+        "n": r.n,
+        "rate": round(r.rate * 100, 1),
+        "low": round(r.low * 100, 1),
+        "high": round(r.high * 100, 1),
+    }
+
+
+def _compare(c: Compare) -> dict:
+    low, high = c.interval
+    return {
+        "label": c.label,
+        "yours": _rate(c.yours),
+        "theirs": _rate(c.theirs),
+        "gap": round(c.gap * 100, 1),
+        "interval": [round(low * 100, 1), round(high * 100, 1)],
+        "verdict": c.verdict,
+    }
+
+
+def _miss(g: Gift) -> dict:
+    """One of your missed punishments: their blunder as the last move, your reply in red and the
+    punishment in green."""
+    r = g.reply
+    arrows = [(r.uci, PLAYED), (r.best_move, BETTER)]
+    return {
+        "svg": board_svg(r.fen_before, arrows, lastmove=g.blunder.uci) if r.fen_before else "",
+        "theirs": label(g.blunder),
+        "move": label(r),
+        "best": label(r, r.best_san),
+        "loss": round(r.wp_loss),
+        "kind": g.kind,
+        "url": g.url,
+        "reasons": g.reasons(),
     }
 
 
@@ -297,6 +346,31 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             }
 
         return cached("overview", key, make)
+
+    @app.get("/api/punish")
+    def punish() -> dict:
+        """When they blunder: your punish rate against your opponents' (coach/punish.py)."""
+        with Store(db_path) as store:
+            games = [g for g in store.iter_games() if g.analyzed_depth]
+            key = (len(games), store.count_moves())
+
+        def make() -> dict:
+            with Store(db_path) as store:
+                r = report(games, store.gifts(GIFT_WP_LOSS))
+            return {
+                "gifts": r.gifts,
+                "groups": [{**_compare(c), "headline": headline(c)} for c in r.groups],
+                "kinds": [{**_compare(c), "name": KINDS[c.label]} for c in r.kinds],
+                "lessons": r.lessons,
+                "trend": [_compare(c) for c in r.trend],
+                "focus": r.focus,
+                "families": [
+                    {**_compare(f.compare), "examples": [_miss(g) for g in f.examples]}
+                    for f in r.families
+                ],
+            }
+
+        return cached("punish", key, make)
 
     @app.get("/api/openings")
     def openings() -> dict:
