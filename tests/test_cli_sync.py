@@ -92,6 +92,7 @@ def test_sync_fetches_since_the_newest_game_and_analyses_newest_first(
     monkeypatch.setattr(
         "chess_coach.puzzles.make.make_opening_fixes", lambda store, engine: MakeResult(2, 0)
     )
+    monkeypatch.setattr("chess_coach.coach.threats.check", lambda store, engine: 7)
 
     result = runner.invoke(app, ["--db", str(db), "sync"])
     assert result.exit_code == 0, result.output
@@ -111,6 +112,7 @@ def test_sync_fetches_since_the_newest_game_and_analyses_newest_first(
     assert [g.id for g in analysed][:2] == ["lichess:Bullet01", "lichess:Blitz001"]
     assert len(analysed) == 5
     assert "Analysed 5 games. Checked 6 moves, made 1 puzzles (0 in all)." in result.output
+    assert "Looked for their threats before 7 new mistakes and blunders" in result.output
     assert "Due today: 0 puzzles" in result.output
 
 

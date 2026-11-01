@@ -20,14 +20,33 @@ from chess_coach.patterns.features import GameRow, MoveRow
 Feature = tuple[str, str]
 
 
-def wilson_lower(hits: int, n: int, z: float = 1.96) -> float:
-    """Lower bound of the Wilson score interval for hits/n."""
+def wilson(hits: int, n: int, z: float = 1.96) -> tuple[float, float]:
+    """The Wilson score interval for hits/n (95% by default)."""
     if n == 0:
-        return 0.0
+        return 0.0, 1.0
     p = hits / n
     centre = p + z * z / (2 * n)
     margin = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))
-    return (centre - margin) / (1 + z * z / n)
+    scale = 1 + z * z / n
+    return (centre - margin) / scale, (centre + margin) / scale
+
+
+def wilson_lower(hits: int, n: int, z: float = 1.96) -> float:
+    """Lower bound of the Wilson score interval for hits/n."""
+    return wilson(hits, n, z)[0]
+
+
+def difference(
+    a_hits: int, a_n: int, b_hits: int, b_n: int, z: float = 1.96
+) -> tuple[float, float]:
+    """Interval for the difference of two independent rates, a - b, built from their Wilson
+    intervals (Newcombe's hybrid score method)."""
+    if a_n == 0 or b_n == 0:
+        return -1.0, 1.0
+    p, q = a_hits / a_n, b_hits / b_n
+    (p_low, p_high), (q_low, q_high) = wilson(a_hits, a_n, z), wilson(b_hits, b_n, z)
+    d = p - q
+    return d - math.hypot(p - p_low, q_high - q), d + math.hypot(p_high - p, q - q_low)
 
 
 @dataclass(frozen=True, slots=True)

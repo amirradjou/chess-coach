@@ -227,9 +227,11 @@ def sync(
     ] = 200,
 ) -> None:
     """Bring the coach up to date in one step: new games from the accounts you've imported,
-    analysed, and puzzles from them."""
+    analysed, puzzles from them, and their threats before the new mistakes."""
+    import logging
     from datetime import UTC, datetime
 
+    from chess_coach.coach.threats import check as check_threats
     from chess_coach.puzzles.make import make, make_opening_fixes
     from chess_coach.sources import chesscom, lichess
 
@@ -275,6 +277,9 @@ def sync(
             with console.status("Making puzzles from your new mistakes..."):
                 made = make(store, engine, limit=puzzles)
                 fixes = make_opening_fixes(store, engine)
+            with console.status("Looking for their threats before the new mistakes..."):
+                logging.getLogger("chess.engine").setLevel(logging.ERROR)
+                checked = check_threats(store, engine)
         total = len(store.puzzles())
         today = datetime.now(UTC).date().isoformat()
         due = len(store.due(today))
@@ -282,6 +287,10 @@ def sync(
     console.print(
         f"Analysed {len(pending)} games. Checked {made.checked + fixes.checked} moves, made "
         f"[green]{made.made + fixes.made}[/green] puzzles ({total} in all)."
+    )
+    console.print(
+        f"Looked for their threats before {checked} new mistakes and blunders (yours and your "
+        "opponents'): `chess-coach threats` shows how your mistakes happen."
     )
     console.print(
         f"Due today: {due} puzzles (`chess-coach drill`) and {cards} opening positions "
@@ -387,12 +396,23 @@ def digest(
     With --since (e.g. 7d for a weekly digest) only those games count, compared with the ones
     before."""
     from chess_coach.coach.digest import build, render
+    from chess_coach.patterns.features import ERRORS
 
     settings: Settings = ctx.obj
     with Store(settings.db_path) as store:
         games = list(store.iter_games())
         moves = list(store.iter_moves(user_only=True))
-    built = build(games, moves, min_moves=min_moves, min_games=min_games, since=parse_since(since))
+        threats = store.threats()
+        errors = list(store.iter_moves(judgements=ERRORS)) if threats else []
+    built = build(
+        games,
+        moves,
+        min_moves=min_moves,
+        min_games=min_games,
+        since=parse_since(since),
+        threats=threats,
+        errors=errors,
+    )
     text = render(built, top=top)
     if narrate:
         from chess_coach.coach.narrate import model_for
@@ -408,6 +428,85 @@ def digest(
     else:
         out.write_text(text, encoding="utf-8")
         console.print(f"Wrote the digest -> [dim]{out}[/dim]")
+
+
+@app.command()
+def threats(
+    ctx: typer.Context,
+    depth: Annotated[int, typer.Option(help="Search depth per position.")] = 12,
+    threads: Annotated[int | None, typer.Option(help="Engine threads.")] = None,
+    limit: Annotated[int | None, typer.Option(help="Stop after this many moves.")] = None,
+) -> None:
+    """What was their threat? Before every counted mistake and blunder, yours and your
+    opponents', the mover passes and the engine finds what the other side threatened. Mistakes
+    split into ignored threats and unsafe moves, compared with your opponents'. Resumable."""
+    import logging
+
+    from chess_coach.coach.threats import check, pending
+    from chess_coach.patterns.features import ERRORS
+
+    settings: Settings = ctx.obj
+    with Store(settings.db_path) as store:
+        todo = len(
+            pending(store.iter_games(), store.iter_moves(judgements=ERRORS), store.threats())
+        )
+        todo = min(todo, limit) if limit is not None else todo
+        if todo:
+            logging.getLogger("chess.engine").setLevel(logging.ERROR)
+            with _engine(settings, threads) as engine:
+                console.print(f"Using {engine.name} at depth {depth} for {todo} moves")
+                progress = Progress(
+                    TextColumn("checking"),
+                    BarColumn(),
+                    TextColumn("{task.completed}/{task.total}"),
+                    TimeRemainingColumn(),
+                    console=console,
+                )
+                with progress:
+                    task = progress.add_task("check", total=todo)
+
+                    def on_check(done: int, total: int) -> None:
+                        progress.update(task, completed=done, total=total)
+
+                    check(store, engine, depth=depth, limit=limit, on_check=on_check)
+        _threat_summary(store)
+
+
+def _threat_summary(store: Store) -> None:
+    from chess_coach.coach.threats import gap, percent, report
+    from chess_coach.patterns.features import ERRORS
+
+    r = report(list(store.iter_games()), store.iter_moves(judgements=ERRORS), store.threats())
+    if not r.you:
+        console.print("No mistakes checked yet. Run `chess-coach analyze` first.")
+        return
+    table = Table(
+        title=f"How your mistakes happen: {r.you} of your mistakes and blunders, "
+        f"{r.them} of your opponents'",
+        caption="Share of the mistakes and blunders, with its 95% interval. In bullet only the "
+        "first 10 moves count; moves made short on time are left out.",
+    )
+    for column in ("what happened", "you", "your opponents", "compared"):
+        table.add_column(
+            column, justify="left" if column in ("what happened", "compared") else "right"
+        )
+    for s in r.steps:
+        table.add_row(s.title, percent(s.you), percent(s.them), f"{s.verdict} ({gap(s)})")
+    console.print(table)
+    mine = [s for s in r.steps if s.yours]
+    for s in mine:
+        console.print(f"[bold]{s.title}[/bold] is a step to work on. Practise: {s.tip}.")
+    if not mine:
+        console.print(
+            "Neither is more common in your mistakes than in your opponents': this is how "
+            "mistakes happen at your level, not a weakness of yours."
+        )
+    for s in r.steps:
+        for e in s.examples[:2]:
+            where = f" [dim]{e.evidence.url}[/dim]" if e.evidence.url else ""
+            console.print(f"  {s.title}, {e.evidence.move}: {e.why}{where}")
+    if r.unchecked:
+        console.print(f"[yellow]{r.unchecked} mistakes and blunders not checked yet.[/yellow]")
 
 
 def _engine(settings: Settings, threads: int | None):

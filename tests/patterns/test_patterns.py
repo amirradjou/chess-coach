@@ -9,7 +9,14 @@ from chess_coach.coach.digest import build, describe, render
 from chess_coach.db import Store
 from chess_coach.models import Color, Game, Judgement, MoveFact, Phase, Speed
 from chess_coach.patterns.features import castling, clock_bucket, game_rows, move_bucket, move_rows
-from chess_coach.patterns.mining import mine_games, mine_moves, motif_counts, wilson_lower
+from chess_coach.patterns.mining import (
+    difference,
+    mine_games,
+    mine_moves,
+    motif_counts,
+    wilson,
+    wilson_lower,
+)
 
 CASTLES = "1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. O-O Nf6 *"
 NO_CASTLE = "1. e4 e5 2. Nf3 Nc6 *"
@@ -201,3 +208,16 @@ def test_digest_command(tmp_path: Path):
     assert "**In the endgame**" in out.read_text()
     empty = CliRunner().invoke(app, ["--db", str(tmp_path / "empty.db"), "digest"])
     assert "No analysed games yet" in empty.output
+
+
+def test_wilson_interval_and_the_difference_of_two_rates():
+    low, high = wilson(20, 100)
+    assert low == pytest.approx(0.1333, abs=1e-4) and high == pytest.approx(0.2888, abs=1e-4)
+    assert wilson_lower(20, 100) == low and wilson(0, 0) == (0.0, 1.0)
+    # the same share in both: the difference's interval straddles zero
+    low, high = difference(180, 1000, 180, 1000)
+    assert low < 0 < high and low == pytest.approx(-high)
+    # 30% against 15% on a thousand each: clearly more
+    low, high = difference(300, 1000, 150, 1000)
+    assert 0.11 < low < 0.15 < high < 0.19
+    assert difference(1, 0, 1, 10) == (-1.0, 1.0)

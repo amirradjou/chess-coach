@@ -6,11 +6,14 @@ invent a pattern.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from chess_coach.models import Game, MoveFact
+from chess_coach.coach.threats import Report as ThreatReport
+from chess_coach.coach.threats import gap, percent
+from chess_coach.coach.threats import report as threat_report
+from chess_coach.models import Game, MoveFact, ThreatFact
 from chess_coach.patterns.features import (
     BULLET_MOVES,
     game_rows,
@@ -156,6 +159,8 @@ class Digest:
     # Moves played short on time are left out above; these are their mistakes that keep repeating.
     rushed_moves: int = 0
     pressure: list[MotifCount] = field(default_factory=list)
+    # Ignored threats and unsafe moves, yours against your opponents' (once `threats` has run).
+    threats: ThreatReport | None = None
 
 
 def build(
@@ -167,7 +172,11 @@ def build(
     min_lift: float = 1.5,
     game_lift: float = 1.25,
     since: datetime | None = None,
+    threats: Mapping[tuple[str, int], ThreatFact] | None = None,
+    errors: Sequence[MoveFact] = (),
 ) -> Digest:
+    """The digest of the analysed games in `games`. With `threats` (Store.threats) and `errors`
+    (both sides' mistakes and blunders) it also says how your mistakes happen."""
     analysed = [g for g in games if g.analyzed_depth]
     before: list = []
     if since is not None:
@@ -202,6 +211,7 @@ def build(
         bullet_games=sum(is_bullet(g) for g in analysed),
         rushed_moves=len(rrows),
         pressure=repeated_under_pressure(rrows),
+        threats=threat_report(analysed, errors, threats) if threats else None,
     )
 
 
@@ -220,6 +230,42 @@ def _games_line(i: int, p: Pattern) -> str:
         f"{i}. **{describe(p.features)}**: lost {p.hits} of {p.n} ({p.rate:.0%} against your "
         f"usual {p.baseline:.0%}). For example: {games}."
     )
+
+
+def _threats(r: ThreatReport) -> list[str]:
+    left = f" ({r.unchecked} not checked yet: run `chess-coach threats`)" if r.unchecked else ""
+    out = [
+        "## Their threats and your blunder check",
+        "",
+        "Before each counted mistake or blunder the engine let the mover pass, to see what the "
+        f"other side threatened. Checked: {r.you} of your mistakes and blunders and {r.them} of "
+        f"your opponents'{left}.",
+        "",
+        "| What happened | You | Your opponents | Compared |",
+        "|---|---:|---:|---|",
+    ]
+    for s in r.steps:
+        out.append(
+            f"| **{s.title}**: {s.what} | {percent(s.you)} | {percent(s.them)} | "
+            f"{s.verdict} ({gap(s)}) |"
+        )
+    out.append("")
+    mine = [s for s in r.steps if s.yours]
+    for s in mine:
+        out.append(
+            f"**{s.title}** is a step to work on: it is in more of your mistakes than of your "
+            f"opponents'. Practise: {s.tip}."
+        )
+    if not mine:
+        out.append(
+            "Neither is more common in your mistakes than in your opponents': this is how mistakes "
+            "happen at your level, not a weakness of yours."
+        )
+    examples = [(s, e) for s in r.steps for e in s.examples]
+    if examples:
+        out += ["", "For example:", ""]
+        out += [f"- {s.title}, {_link(e.evidence, e.evidence.move)}: {e.why}" for s, e in examples]
+    return [*out, ""]
 
 
 def render(d: Digest, top: int = 5) -> str:
@@ -288,6 +334,9 @@ def render(d: Digest, top: int = 5) -> str:
             example = _move(m.evidence[0]) if m.evidence else ""
             out.append(f"| {what} | {m.moves} | {m.games} | {example} | {tip} |")
         out.append("")
+
+    if d.threats is not None and d.threats.you:
+        out += _threats(d.threats)
 
     if d.pressure:
         out += [
