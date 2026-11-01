@@ -180,6 +180,58 @@ move 10).
 - On a copy of the owner's database (2026-10-31): 8 new bullet games since 10-29, analysed,
   4 moves checked, 2 new puzzles.
 
+## When they blunder: punish rate against your opponents (2026-11-01, branch `feat/punish-rate`)
+
+- `coach/punish.py`: a gift is any move losing 20+ points of win probability (`Store.gifts`, a
+  self-join that pairs it with the next move, either side); the reply missed the punishment when
+  it carries `missed_tactic`, which the engine already sets for exactly that (an inaccuracy or
+  worse right after a 20+ move), so nothing is re-derived. The mirror ("Luck") is the same over
+  your gifts and your opponents' replies, and is the yardstick: players at your level with the
+  same kind of chance. `features.counted` and `features.rushed` are applied to the replying move
+  on both sides (in bullet, opponents' replies after move 10 are out too).
+- Groups: bullet (moves 1-10) and everything slower together ("Blitz and rapid"; rapid alone is
+  too small). Each rate has a Wilson interval (`mining.wilson_upper` joins `wilson_lower`), the
+  gap a Newcombe hybrid-score interval (`mining.newcombe`); the sentence says worse or better only
+  when that interval leaves out zero, otherwise "about the same as your opponents".
+- Kind of punishment from the reply's `best_san` (`features.punish_kind`: capture, check, quiet;
+  castling is quiet). A kind's lesson (`punish.LESSONS`) fires only when you miss that kind more
+  than your opponents do with the interval clear of zero; your quiet rate against your own
+  capture rate is never compared (everyone misses quiet punishments more).
+- Trend: stretches of games holding 150 of your chances each, counted back from the newest game
+  and closed at a game boundary; both rates in a stretch come from the same games. No month column
+  (2026 months have 4-50 chances each).
+- Evidence: openings ranked by excess misses (yours minus your n times their rate), taken from the
+  groups where you're worse (or all of them when none is), with your costliest misses there:
+  board with their blunder as the last move, your reply in red, the punishment in green,
+  `Game.move_url` at the reply's ply and `principles.allows`. `allows` now also names a capture of
+  a piece that was hanging or attacked by a cheaper piece ("It lets Nxh6 take their bishop on h6,
+  which was hanging ..."), with a new attack it makes; before, it said nothing for captures, the
+  commonest punishment.
+- Puzzle sub-tags: a puzzle with `missed_tactic` gets `punish_capture|punish_check|punish_quiet`
+  from its solution SAN (`features.punish_tag`); new ones in `make.verify`, existing ones by a
+  tiny Store migration on open (`Store._tag_punishments`, idempotent: it only touches puzzles
+  with `missed_tactic` and no `punish_` tag yet), not by `puzzles prune`. No new deck: the
+  Practice tag filter (and `drill --tag`) offers them.
+- Surfaces: `chess-coach punish [--since] [--examples]`, a *When they blunder* section in the
+  digest (only when the CLI passes `gifts`; the narrated summary and the eval harness don't get
+  it), and `GET /api/punish` (cached like the overview) rendered on What you get wrong, loaded
+  after the rest of the page, with practice buttons per sub-tag and a note that Learn openings'
+  punish deck covers only the first 8 moves. No engine anywhere.
+- On a copy of the owner's database (2,099 Lichess games, depth 12; 8,493 answered moves losing
+  20+, 2,398 of them with a counted, unhurried reply), about 0.2 s:
+  - Bullet, moves 1-10: you missed 44.0% (248 of 563), they missed 36.3% (212 of 584): +7.7
+    points, 95% interval +2.1 to +13.4, the one real gap.
+  - Blitz and rapid: 36.0% (221 of 614) against 35.6% (227 of 637): +0.4, -4.9 to +5.7, level.
+  - By kind: capture 33.1% (599) vs 29.1% (670), check 45.6% (68) vs 39.7% (73), quiet 47.1%
+    (510) vs 45.0% (478); no interval clears zero, so no kind lesson.
+  - Trend (8 stretches, 2018-10 to 2026-10): your rate 34.7-45.3%, theirs 30.6-40.6%; no
+    stretch's gap clears zero.
+  - Where the bullet gap comes from: Danish Gambit Accepted 23/42 vs 12/42, Queen's Pawn Game
+    23/38 vs 12/37, Blackmar-Diemer Gambit 30/48 vs 26/62, Sicilian Defense 22/44 vs 10/32. The
+    costliest misses are fianchetto reflexes: 2.Bh6 2...Bg7?? (2...Nxh6 wins the bishop).
+  - Puzzles: the migration tagged all 228 `missed_tactic` puzzles: 112 punish_capture, 95
+    punish_quiet, 21 punish_check.
+
 ## Remaining (in order)
 
 1. ~~Fresh puzzles from the full analysis~~: done 2026-10-31. `puzzles prune` removed 83

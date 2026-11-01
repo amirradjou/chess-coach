@@ -125,7 +125,10 @@ table for opening names. The web coach is FastAPI with plain JavaScript and pyth
 
 **v0–v7 done.** Import, analyse, find your patterns, turn your own mistakes into puzzles, drill
 them on a schedule, learn and fix your openings, and watch the numbers move, in the terminal or in
-the browser (`chess-coach serve`).
+the browser (`chess-coach serve`). New: *When they blunder* (`punish`), how often you punish your
+opponents' blunders against how often they punish yours. On the author's games, bullet moves
+1-10: missed 44.0% against their 36.3% (+7.7 points, 95% interval +2.1 to +13.4); blitz and
+rapid: level, 36.0% against 35.6%.
 
 **Bullet is not taken seriously.** In a 1-minute game only your first 10 moves count: after
 that the clock decides the game, so later moves are left out of everything (patterns, mistake
@@ -161,6 +164,16 @@ across 8+ games.
   openrouter --model …` uses any OpenAI-compatible server with `OPENROUTER_API_KEY`. The model
   only explains: any sentence that cites a move outside the evidence is removed. It checks moves,
   not every word, so read it as a gloss on the counted patterns above it.
+- `punish` (and a *When they blunder* section in the digest and on What you get wrong): when your
+  opponent blunders (loses 20+ points of win probability), how often your reply misses the
+  punishment (the `missed_tactic` tag), next to how often your opponents miss it after your
+  blunders: players at your level with the same kind of chance. Bullet (moves 1-10, on both
+  sides) and blitz + rapid are compared apart, each with a 95% interval for the gap; you're only
+  called worse or better when that interval leaves out zero. Then the same by the kind of
+  punishing move (capture, check, quiet; a lesson only when you miss a kind more than your
+  opponents do), the trend in stretches of 150 chances, the openings where the gap comes from and
+  your costliest misses on boards, with what the blunder allowed in chess terms. Puzzles from a
+  missed punishment are tagged `punish_capture`, `punish_check` or `punish_quiet` to drill apart.
 - `puzzles make` re-checks your costliest moves (20+ points of win probability lost) at depth 18
   with three lines, and keeps a position only when one move is the only mate or beats the next
   best by 150 centipawns, so there is one answer to find. `puzzles list` shows them with their
@@ -176,7 +189,8 @@ across 8+ games.
   - **What you get wrong**: the mistakes you repeat (which piece and kind of move, captures or
     checks you keep missing, motifs) and the situations where your mistake rate jumps, each with
     a *what to learn* note and your own positions on boards: red arrow your move, green the
-    engine's. "Practise these positions" opens the matching drills.
+    engine's. "Practise these positions" opens the matching drills. *When they blunder* is
+    `punish` on the page.
   - **Practice**: due puzzles on a board you click (piece, then square), filtered by theme. A
     wrong move shows their best reply, what it costs in material and score, and lets you try
     again (only the first answer counts for the schedule). Once it's solved or shown you get the
@@ -262,6 +276,7 @@ uv run chess-coach analyze --depth 12 --threads 4
 uv run chess-coach stats
 uv run chess-coach digest -o digest.md                           # patterns across your games
 uv run chess-coach digest --since 7d                             # this week vs before
+uv run chess-coach punish                                        # when they blunder: you vs them
 uv run chess-coach puzzles make --limit 50                       # your mistakes as puzzles
 uv run chess-coach drill                                         # practise what is due
 uv run chess-coach progress --by week
