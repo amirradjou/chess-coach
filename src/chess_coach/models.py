@@ -138,6 +138,27 @@ class MoveFact:
 
 
 @dataclass(slots=True)
+class ThreatFact:
+    """What the opponent threatened before one counted mistake or blunder (see engine.threats).
+
+    `label` is "ignored_threat", "unsafe_move" or "" (neither, or not looked at: in check, or a
+    recapture pending). `threat` is their threat (what they would play if the mover passed) for
+    an ignored or a met threat, or the winning reply the move allowed for an unsafe move."""
+
+    game_id: str
+    ply: int
+    label: str = ""
+    threat: str = ""  # UCI
+    threat_san: str = ""
+    gain: int | None = None  # what it wins, in centipawns
+    mate: int | None = None  # moves to mate, when it mates
+    depth: int = 0
+    # Joined at read time from the moves table: their move just before (ply - 1).
+    last_san: str = ""
+    last_uci: str = ""
+
+
+@dataclass(slots=True)
 class Puzzle:
     """A position from the user's own game where one move clearly stood out and they missed it."""
 

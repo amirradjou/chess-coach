@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 from chess_coach.db import Store
-from chess_coach.models import Color, Game, Judgement, MoveFact, Phase, Speed
+from chess_coach.models import Color, Game, Judgement, MoveFact, Phase, Speed, ThreatFact
 
 
 def make_game(game_id: str = "pgn:1", **overrides: object) -> Game:
@@ -126,6 +126,7 @@ def test_lichess_games_stored_under_a_hash_get_their_lichess_id_back(tmp_path) -
         puzzle = Puzzle(f"{old}:1", old, 1, "fen", "e2e4", "e4", "d4", "", 200, 18)
         store.add_puzzle(puzzle)
         store.record_check(f"{old}:1", True)
+        store.save_threats([ThreatFact(old, 2, "unsafe_move", "e2e4", "e4", 300, None, 12)])
         review = store.review(puzzle.id)
         assert review is not None
         store.save_attempt(review, "d2d4", False, datetime(2026, 10, 31, tzinfo=UTC))
@@ -143,4 +144,36 @@ def test_lichess_games_stored_under_a_hash_get_their_lichess_id_back(tmp_path) -
         assert store.review(f"{new}:1") is not None
         assert store.attempts()[0][0] == f"{new}:1"
         assert store.checked_moves() == {f"{new}:1"}
+        assert list(store.threats()) == [(new, 2)]
         assert store.conn.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_moves_by_judgement() -> None:
+    with Store(":memory:") as store:
+        store.upsert_game(make_game())
+        moves = [make_move("pgn:1", 1), make_move("pgn:1", 2, judgement=Judgement.BLUNDER)]
+        moves.append(make_move("pgn:1", 3, judgement=Judgement.MISTAKE))
+        store.replace_moves("pgn:1", moves, depth=10)
+        errors = (Judgement.MISTAKE, Judgement.BLUNDER)
+        assert [m.ply for m in store.iter_moves(judgements=errors)] == [2, 3]
+        assert [m.ply for m in store.iter_moves(judgements=errors, user_only=True)] == [3]
+
+
+def test_threat_checks_round_trip_with_the_move_before_them() -> None:
+    with Store(":memory:") as store:
+        store.upsert_game(make_game())
+        moves = [make_move("pgn:1", 1), make_move("pgn:1", 2, san="Nf6", uci="g8f6")]
+        store.replace_moves("pgn:1", moves, depth=10)
+        ignored = ThreatFact("pgn:1", 2, "ignored_threat", "e4e5", "e5", 250, None, 12)
+        store.save_threats([ignored, ThreatFact("pgn:1", 1, depth=12)])
+        assert store.count_threats() == 2
+        loaded = store.threat("pgn:1", 2)
+        assert loaded is not None and (loaded.last_san, loaded.last_uci) == ("e4", "e2e4")
+        loaded.last_san = loaded.last_uci = ""
+        assert loaded == ignored
+        assert store.threat("pgn:1", 1).last_san == ""  # type: ignore[union-attr]  # no move 0
+        assert store.threat("pgn:1", 3) is None
+        assert set(store.threats()) == {("pgn:1", 1), ("pgn:1", 2)}
+        # analysing the game again drops the checks made from the old analysis
+        store.replace_moves("pgn:1", moves, depth=14)
+        assert store.threats() == {}

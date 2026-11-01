@@ -19,6 +19,7 @@ from chess_coach.models import (
     Puzzle,
     Review,
     Speed,
+    ThreatFact,
 )
 
 SCHEMA = """
@@ -128,6 +129,21 @@ CREATE TABLE IF NOT EXISTS coach_cards (
     lapses   INTEGER NOT NULL
 );
 
+-- What the opponent threatened before each counted mistake or blunder (engine.threats). Its own
+-- table, joined at read time: moves.motifs is rewritten whenever a game is analysed again.
+CREATE TABLE IF NOT EXISTS threats (
+    game_id    TEXT NOT NULL REFERENCES games (id) ON DELETE CASCADE,
+    ply        INTEGER NOT NULL,
+    label      TEXT NOT NULL DEFAULT '',  -- "ignored_threat", "unsafe_move" or ""
+    threat     TEXT NOT NULL DEFAULT '',  -- UCI: their threat, or the winning reply allowed
+    threat_san TEXT NOT NULL DEFAULT '',
+    gain       INTEGER,                   -- centipawns
+    mate       INTEGER,
+    depth      INTEGER NOT NULL,
+    checked_at TEXT NOT NULL,
+    PRIMARY KEY (game_id, ply)
+);
+
 CREATE TABLE IF NOT EXISTS coach_attempts (
     card_id TEXT NOT NULL REFERENCES coach_cards (id) ON DELETE CASCADE,
     at      TEXT NOT NULL,
@@ -138,6 +154,11 @@ CREATE TABLE IF NOT EXISTS coach_attempts (
 
 
 _HEADER = re.compile(r'^\[(\w+) "(.*)"\]\s*$', re.MULTILINE)
+# Threat checks with the opponent's move just before each (for the explanation).
+_THREATS = (
+    "SELECT t.*, p.san AS last_san, p.uci AS last_uci FROM threats t "
+    "LEFT JOIN moves p ON p.game_id = t.game_id AND p.ply = t.ply - 1"
+)
 
 
 def _iso(dt: datetime | None) -> str | None:
@@ -190,7 +211,10 @@ class Store:
                     "UPDATE games SET id = ?, source_id = ?, url = ? WHERE id = ?",
                     (new, source_id, f"https://lichess.org/{source_id}", old),
                 )
-                self.conn.execute("UPDATE moves SET game_id = ? WHERE game_id = ?", (new, old))
+                for table in ("moves", "threats"):
+                    self.conn.execute(
+                        f"UPDATE {table} SET game_id = ? WHERE game_id = ?", (new, old)
+                    )
                 # Puzzle and candidate ids are "<game id>:<ply>"
                 for table, column in (
                     ("puzzles", "id"),
@@ -294,9 +318,11 @@ class Store:
     # -- moves -----------------------------------------------------------------
 
     def replace_moves(self, game_id: str, moves: Iterable[MoveFact], depth: int) -> None:
-        """Store a full analysis of one game atomically and mark the game analyzed."""
+        """Store a full analysis of one game atomically and mark the game analyzed. Its threat
+        checks are dropped with the old analysis they were read from."""
         with self.conn:
             self.conn.execute("DELETE FROM moves WHERE game_id = ?", (game_id,))
+            self.conn.execute("DELETE FROM threats WHERE game_id = ?", (game_id,))
             self.conn.executemany(
                 """
                 INSERT INTO moves (
@@ -344,6 +370,7 @@ class Store:
         *,
         user_only: bool = False,
         max_ply: int | None = None,
+        judgements: Iterable[Judgement] | None = None,
     ) -> Iterator[MoveFact]:
         clauses: list[str] = []
         params: list[object] = []
@@ -355,6 +382,10 @@ class Store:
         if max_ply is not None:
             clauses.append("ply <= ?")
             params.append(max_ply)
+        if judgements is not None:
+            values = [j.value for j in judgements]
+            clauses.append(f"judgement IN ({', '.join('?' * len(values))})")
+            params.extend(values)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self.conn.execute(f"SELECT * FROM moves {where} ORDER BY game_id, ply", params)
         for row in rows:
@@ -362,6 +393,44 @@ class Store:
 
     def count_moves(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM moves").fetchone()[0]
+
+    # -- threats ---------------------------------------------------------------
+
+    def threats(self) -> dict[tuple[str, int], ThreatFact]:
+        """Every threat check, by (game id, ply), with the opponent's move just before it."""
+        rows = self.conn.execute(_THREATS)
+        return {(r["game_id"], r["ply"]): _row_to_threat(r) for r in rows}
+
+    def threat(self, game_id: str, ply: int) -> ThreatFact | None:
+        row = self.conn.execute(
+            f"{_THREATS} WHERE t.game_id = ? AND t.ply = ?", (game_id, ply)
+        ).fetchone()
+        return _row_to_threat(row) if row else None
+
+    def count_threats(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM threats").fetchone()[0]
+
+    def save_threats(self, rows: Iterable[ThreatFact]) -> None:
+        with self.conn:
+            self.conn.executemany(
+                "INSERT OR REPLACE INTO threats "
+                "(game_id, ply, label, threat, threat_san, gain, mate, depth, checked_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        t.game_id,
+                        t.ply,
+                        t.label,
+                        t.threat,
+                        t.threat_san,
+                        t.gain,
+                        t.mate,
+                        t.depth,
+                        datetime.now(UTC).isoformat(),
+                    )
+                    for t in rows
+                ],
+            )
 
     # -- puzzles -----------------------------------------------------------------
 
@@ -595,6 +664,21 @@ def _row_to_move(row: sqlite3.Row) -> MoveFact:
         pv=row["pv"],
         clock_after=row["clock_after"],
         motifs=json.loads(row["motifs"]),
+    )
+
+
+def _row_to_threat(row: sqlite3.Row) -> ThreatFact:
+    return ThreatFact(
+        game_id=row["game_id"],
+        ply=row["ply"],
+        label=row["label"],
+        threat=row["threat"],
+        threat_san=row["threat_san"],
+        gain=row["gain"],
+        mate=row["mate"],
+        depth=row["depth"],
+        last_san=row["last_san"] or "",
+        last_uci=row["last_uci"] or "",
     )
 
 
