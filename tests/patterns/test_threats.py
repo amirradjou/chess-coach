@@ -2,13 +2,15 @@ from dataclasses import replace
 from pathlib import Path
 
 import chess
+from fastapi.testclient import TestClient
 
 from chess_coach.coach.digest import build, render
 from chess_coach.coach.threats import check, gap, pending, percent, report
 from chess_coach.db import Store
 from chess_coach.engine.stockfish import LineEval
 from chess_coach.engine.threats import IGNORED, UNSAFE, passed
-from chess_coach.models import Color, Judgement, MoveFact, Phase, Speed, ThreatFact
+from chess_coach.models import Color, Judgement, MoveFact, Phase, Puzzle, Speed, ThreatFact
+from chess_coach.web.app import THREAT, create_app
 
 from .test_patterns import game, move
 
@@ -222,3 +224,72 @@ def test_check_stores_a_row_per_error_and_resumes(tmp_path):
         # one search per position: the two games share 16.Nc4's
         assert len(engine.asked) == len(set(engine.asked)) == 3
         assert check(store, engine) == 0 and len(engine.asked) == 3  # nothing left to do
+
+
+# -- the web coach --------------------------------------------------------------------------
+
+
+def threat_app(tmp_path: Path) -> tuple[TestClient, Path]:
+    """Your 14...Ne7? (you have Black) ignoring 14.a5's threat, as a puzzle."""
+    db = tmp_path / "coach.db"
+    g = game(1, pgn="*")
+    g.user_color = Color.BLACK
+    with Store(db) as store:
+        store.upsert_game(g)
+        moves = [
+            fact(g.id, 27, BEFORE_A5, "a4a5", "b3d2", is_user=False),
+            fact(g.id, 28, AFTER_A5, "g8e7", "b6b5", is_user=True),
+            fact(g.id, 29, AFTER_NE7, "b3d2", "a5b6", is_user=False, judgement=Judgement.GOOD),
+        ]
+        store.replace_moves(g.id, moves, depth=12)
+        store.add_puzzle(Puzzle(f"{g.id}:28", g.id, 28, AFTER_A5, "b6b5", "b5", "Ne7", "", 300, 18))
+    return TestClient(create_app(db, lambda: None)), db
+
+
+def test_the_overview_has_a_threat_section_once_checked(tmp_path):
+    client, db = threat_app(tmp_path)
+    assert client.get("/api/overview").json()["threats"] is None
+    with Store(db) as store:
+        store.save_threats(
+            [
+                ThreatFact("lichess:g1", 28, IGNORED, "a5b6", "axb6", 426, None, 12),
+                ThreatFact("lichess:g1", 27, "", depth=12),
+            ]
+        )
+    t = client.get("/api/overview").json()["threats"]
+    assert (t["you"], t["them"], t["unchecked"]) == (1, 1, 0)
+    ignored = t["steps"][0]
+    assert (ignored["title"], ignored["you"]["rate"], ignored["them"]["rate"]) == (
+        "Ignored their threat",
+        100,
+        0,
+    )
+    assert ignored["verdict"] == "same as your opponents"  # one move each proves nothing
+    (e,) = ignored["examples"]
+    assert e["threat"] == "axb6" and THREAT in e["svg"]
+    assert e["reasons"][0] == "Their a5 attacked your pawn on b6, and your Ne7 left it there."
+
+
+def test_practice_asks_what_they_threaten_first(tmp_path):
+    client, db = threat_app(tmp_path)
+    p = client.get("/api/drill/next").json()
+    assert p["ask_threat"] is None  # not checked yet
+    assert client.post("/api/drill/threat", json={"id": p["id"], "uci": "a5b6"}).status_code == 404
+    with Store(db) as store:
+        store.save_threats([ThreatFact("lichess:g1", 28, IGNORED, "a5b6", "axb6", 426, None, 12)])
+    p = client.get("/api/drill/next").json()
+    assert p["ask_threat"] == {"last": "14.a5", "last_uci": "a4a5"}
+    right = client.post("/api/drill/threat", json={"id": p["id"], "uci": "a5b6"}).json()
+    assert right == {
+        "right": True,
+        "guess": "axb6",
+        "threat": {"uci": "a5b6", "san": "axb6"},
+        "why": "Their a5 attacked your pawn on b6.",
+    }
+    wrong = client.post("/api/drill/threat", json={"id": p["id"], "uci": "c3b5"}).json()
+    assert (wrong["right"], wrong["guess"]) == (False, "Nb5")
+    assert client.post("/api/drill/threat", json={"id": p["id"], "uci": "a5a7"}).status_code == 400
+    # the question isn't recorded: the puzzle is still due, with no attempt
+    assert client.get("/api/progress").json()["puzzles"]["attempts"] == 0
+    board = client.get("/api/board", params={"fen": AFTER_A5, "arrow": "a5b6", "color": "threat"})
+    assert board.status_code == 200 and THREAT in board.text

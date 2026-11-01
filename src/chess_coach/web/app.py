@@ -30,7 +30,7 @@ from chess_coach.coach.habits import (
     from_pressure,
     missed_kinds,
 )
-from chess_coach.coach.principles import Reasons, allows, explain, opening_idea
+from chess_coach.coach.principles import Reasons, allows, explain, opening_idea, their_threat
 from chess_coach.coach.progress import (
     periods,
     practice_effect,
@@ -39,11 +39,15 @@ from chess_coach.coach.progress import (
     weekly,
 )
 from chess_coach.coach.repertoire import Favorite, Fix, favorites
+from chess_coach.coach.threats import Report as ThreatReport
+from chess_coach.coach.threats import Share, Step
+from chess_coach.coach.threats import reason as threat_reason
 from chess_coach.db import Store
 from chess_coach.engine.stockfish import Engine, EngineNotFoundError, LineEval
-from chess_coach.models import Puzzle, card_id
+from chess_coach.engine.threats import IGNORED, passed, same_threat
+from chess_coach.models import Puzzle, ThreatFact, card_id
 from chess_coach.openings import opening_table
-from chess_coach.patterns.features import move_rows, result_of
+from chess_coach.patterns.features import ERRORS, move_rows, result_of
 from chess_coach.patterns.mining import Evidence
 from chess_coach.puzzles import review
 from chess_coach.puzzles.srs import schedule
@@ -51,7 +55,8 @@ from chess_coach.puzzles.srs import schedule
 PLAYED = "#d1495b"  # your move
 BETTER = "#2a9d8f"  # the engine's move
 TRIED = "#3d5a80"  # your answer in practice
-ARROWS = {"best": BETTER, "played": PLAYED, "tried": TRIED}
+THREAT = "#e07a1f"  # their threat, or the reply your move allowed
+ARROWS = {"best": BETTER, "played": PLAYED, "tried": TRIED, "threat": THREAT}
 OPENING_NOTE_MOVES = 15  # puzzles this early get a note on what their opening is about
 COACH_MARGIN_CP = 30  # in opening training, a move this close to the engine's best counts
 EXPLORE_DEPTH = 16  # quick enough to answer while you click through a line
@@ -124,18 +129,26 @@ class Analyst:
             self._close()
 
 
-def _example(e: Evidence) -> dict:
+def _example(e: Evidence, threat: ThreatFact | None = None) -> dict:
+    """A position before your move: your move in red, the engine's in green and, when the move
+    is an ignored threat or an unsafe move, their threat (or the reply it allowed) in orange."""
+    why = threat_reason(e.fen, e.uci, threat) if threat is not None else None
+    arrows = [(e.uci, PLAYED), (e.best_uci, BETTER)]
+    if why and threat is not None:
+        arrows.append((threat.threat, THREAT))
+    reasons = explain(e.fen, e.uci, e.best_uci).all() if e.fen and e.uci else []
     return {
-        "svg": board_svg(e.fen, [(e.uci, PLAYED), (e.best_uci, BETTER)]) if e.fen else "",
+        "svg": board_svg(e.fen, arrows) if e.fen else "",
         "move": e.move,
         "best": e.best_san,
         "loss": round(e.wp_loss),
         "url": e.url,
-        "reasons": explain(e.fen, e.uci, e.best_uci).all()[:3] if e.fen and e.uci else [],
+        "threat": threat.threat_san if why and threat is not None else None,
+        "reasons": [*([why] if why else []), *reasons][:3],
     }
 
 
-def _habit(h: Habit) -> dict:
+def _habit(h: Habit, threats: dict[tuple[str, int], ThreatFact]) -> dict:
     return {
         "title": h.title,
         "detail": h.detail,
@@ -143,8 +156,40 @@ def _habit(h: Habit) -> dict:
         "mistakes": h.mistakes,
         "games": h.games,
         "practice": h.practice,
-        "examples": [_example(e) for e in h.examples],
+        "examples": [_example(e, threats.get((e.game_id, e.ply))) for e in h.examples],
     }
+
+
+def _share(x: Share) -> dict:
+    low, high = x.interval
+    return {"hits": x.hits, "n": x.n, "rate": _pct(x.rate), "low": _pct(low), "high": _pct(high)}
+
+
+def _step(s: Step) -> dict:
+    low, high = s.diff
+    return {
+        "label": s.label,
+        "title": s.title,
+        "what": s.what,
+        "tip": s.tip,
+        "you": _share(s.you),
+        "them": _share(s.them),
+        "diff": {
+            "points": round(100 * (s.you.rate - s.them.rate), 1),
+            "low": round(100 * low, 1),
+            "high": round(100 * high, 1),
+        },
+        "verdict": s.verdict,
+        "yours": s.yours,
+        "examples": [_example(e.evidence, e.threat) for e in s.examples],
+    }
+
+
+def _threats(r: ThreatReport | None) -> dict | None:
+    if r is None or not r.you:
+        return None
+    steps = [_step(s) for s in r.steps]
+    return {"you": r.you, "them": r.them, "unchecked": r.unchecked, "steps": steps}
 
 
 def _fix(f: Fix) -> dict:
@@ -199,6 +244,11 @@ class Answer(BaseModel):
     record: bool = True  # only the first answer to a puzzle counts; tries after it pass False
 
 
+class ThreatGuess(BaseModel):
+    id: str
+    uci: str  # a move of theirs from the puzzle position, as if you passed
+
+
 class Explore(BaseModel):
     fen: str
     moves: list[str]
@@ -226,6 +276,13 @@ def _number(board: chess.Board) -> str:
     return f"{board.fullmove_number}{'.' if board.turn == chess.WHITE else '...'}"
 
 
+def _last_number(board: chess.Board) -> str:
+    """The number of the move that led to `board`: "12..." when White is to move, else "13."."""
+    if board.turn == chess.WHITE:
+        return f"{board.fullmove_number - 1}..."
+    return f"{board.fullmove_number}."
+
+
 def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
     analyst = Analyst(engine)
 
@@ -248,7 +305,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
         moves = list(store.iter_moves(user_only=True))
         return games, moves, (sum(1 for g in games if g.analyzed_depth), len(moves))
 
-    def cached(name: str, key: tuple[int, int], make) -> dict:
+    def cached(name: str, key: tuple[int, ...], make) -> dict:
         if name in cache and cache[name][0] == key:
             return cache[name][1]
         value = make()
@@ -274,9 +331,13 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
     def overview() -> dict:
         with Store(db_path) as store:
             games, moves, key = data(store)
+            checks = store.count_threats()
 
         def make() -> dict:
-            d = build(games, moves)
+            with Store(db_path) as store:
+                threats = store.threats()
+                errors = list(store.iter_moves(judgements=ERRORS)) if threats else []
+            d = build(games, moves, threats=threats, errors=errors)
             analysed = [g for g in games if g.analyzed_depth]
             rows = move_rows(analysed, moves)
             return {
@@ -290,13 +351,14 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
                 "losses": d.losses,
                 "decided": d.decided,
                 "bullet_games": d.bullet_games,
-                "habits": [_habit(h) for h in missed_kinds(rows) + from_motifs(d.motifs)],
-                "situations": [_habit(h) for h in from_patterns(d.move_patterns)],
-                "pressure": [_habit(h) for h in from_pressure(d.pressure)],
+                "habits": [_habit(h, threats) for h in missed_kinds(rows) + from_motifs(d.motifs)],
+                "situations": [_habit(h, threats) for h in from_patterns(d.move_patterns)],
+                "pressure": [_habit(h, threats) for h in from_pressure(d.pressure)],
                 "rushed_moves": d.rushed_moves,
+                "threats": _threats(d.threats),
             }
 
-        return cached("overview", key, make)
+        return cached("overview", (*key, checks), make)
 
     @app.get("/api/openings")
     def openings() -> dict:
@@ -318,7 +380,12 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
                 return {"done": True, "puzzles": len(store.puzzles(tag))}
             p = due[0]
             game = store.get_game(p.game_id)
+            threat = None if "opening-fix" in p.tags else store.threat(p.game_id, p.ply)
         board = chess.Board(p.fen)
+        ask = None
+        if threat is not None and threat.label == IGNORED and threat.last_uci:
+            # First question: what does their last move threaten? (see /api/drill/threat)
+            ask = {"last": f"{_last_number(board)}{threat.last_san}", "last_uci": threat.last_uci}
         family = p.tags[1] if "opening-fix" in p.tags else (game.opening_family if game else None)
         early = board.fullmove_number <= OPENING_NOTE_MOVES
         return {
@@ -334,6 +401,32 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             "opening": family,
             "opening_idea": opening_idea(family) if early else None,
             "game": game.move_url(p.ply) if game else None,
+            "ask_threat": ask,
+        }
+
+    @app.post("/api/drill/threat")
+    def drill_threat(g: ThreatGuess) -> dict:
+        """Practice's first question on a puzzle from an ignored threat: what do they threaten?
+        Graded leniently (engine.threats.same_threat) and not recorded: the puzzle is."""
+        with Store(db_path) as store:
+            puzzle = puzzle_or_404(store, g.id)
+            t = store.threat(puzzle.game_id, puzzle.ply)
+        if t is None or t.label != IGNORED or "opening-fix" in puzzle.tags:
+            raise HTTPException(404, "no threat question for this puzzle")
+        theirs = passed(chess.Board(puzzle.fen))
+        try:
+            guess = review.legal(theirs, g.uci)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        threat = chess.Move.from_uci(t.threat)
+        why = their_threat(
+            puzzle.fen, t.threat, last_san=t.last_san, last_uci=t.last_uci, mate=t.mate
+        )
+        return {
+            "right": same_threat(theirs, guess, threat),
+            "guess": theirs.san(guess),
+            "threat": {"uci": t.threat, "san": theirs.san(threat)},
+            "why": f"{why}." if why else None,
         }
 
     @app.post("/api/drill/answer")

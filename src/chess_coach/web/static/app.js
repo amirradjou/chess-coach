@@ -52,9 +52,10 @@ function show(tab, arg) {
 for (const b of document.querySelectorAll("nav button")) b.addEventListener("click", () => show(b.dataset.tab));
 
 // -- what you get wrong --------------------------------------------------------------------
-function example(e) {
+function example(e, label) {
   return el(
     "div", { class: "example" },
+    label ? el("div", { class: "threat small" }, label) : null,
     boardNode(e.svg),
     el("div", {}, "You played ", el("span", { class: "played" }, e.move),
       " · better ", el("span", { class: "better" }, e.best),
@@ -71,10 +72,36 @@ function habitCard(h, tags) {
     el("h3", {}, h.title),
     el("div", { class: "muted" }, h.detail),
     h.lesson ? el("div", { class: "lesson" }, el("b", {}, "What to learn: "), h.lesson) : null,
-    el("div", { class: "examples" }, h.examples.map(example)),
+    el("div", { class: "examples" }, h.examples.map((e) => example(e))),
     canPractise ? el("p", {}, el("button", { class: "primary", onclick: () => show("practice", h.practice) },
       "Practise these positions")) : null,
   );
+}
+
+// Ignored threats and unsafe moves: their share of your mistakes next to your opponents'. A step
+// is only called yours to work on when the difference's interval is above zero.
+function threatSection(t) {
+  const share = (x) => [`${x.rate}%`, el("div", { class: "muted small" }, `${x.low}–${x.high}%`)];
+  const signed = (n) => `${n > 0 ? "+" : ""}${n}`;
+  const mine = t.steps.filter((s) => s.yours);
+  return [
+    el("h2", {}, "Their threats and your blunder check"),
+    el("p", { class: "muted" },
+      `Before each counted mistake or blunder the engine let the mover pass, to see what the other side threatened: ${t.you} of your mistakes and blunders, and ${t.them} of your opponents' as the comparison.` +
+      (t.unchecked ? ` ${t.unchecked} aren't checked yet (run chess-coach threats).` : "") +
+      " Orange on the boards is their threat, or the reply your move allowed."),
+    el("table", {},
+      el("tr", {}, ["what happened", "you", "your opponents", "compared"].map((h) => el("th", {}, h))),
+      t.steps.map((s) => el("tr", {},
+        el("td", {}, el("b", {}, s.title), el("div", { class: "muted small" }, s.what)),
+        el("td", {}, share(s.you)),
+        el("td", {}, share(s.them)),
+        el("td", {}, s.verdict, el("div", { class: "muted small" }, `${signed(s.diff.points)} points (${signed(s.diff.low)} to ${signed(s.diff.high)})`))))),
+    mine.length
+      ? mine.map((s) => el("div", { class: "lesson" }, el("b", {}, `${s.title}: `), `a step to work on, it's in more of your mistakes than of your opponents'. Practise: ${s.tip}.`))
+      : el("p", { class: "small" }, "Neither is more common in your mistakes than in your opponents': this is how mistakes happen at your level, not a weakness of yours."),
+    el("div", { class: "examples" }, t.steps.flatMap((s) => s.examples.map((e) => example(e, s.title)))),
+  ];
 }
 
 async function loadMistakes() {
@@ -88,11 +115,12 @@ async function loadMistakes() {
   const root = $("#mistakes");
   fill(root,
     el("h2", {}, "Mistakes you repeat"),
-    el("p", { class: "muted" }, "Counted from Stockfish's verdict on your own moves. Red is what you played, green what to play."),
+    el("p", { class: "muted" }, "Counted from Stockfish's verdict on your own moves. Red is what you played, green what to play, orange their threat."),
     o.habits.length ? o.habits.map((h) => habitCard(h, tags)) : el("p", {}, "Nothing stands out yet."),
     el("h2", {}, "When it happens"),
     el("p", { class: "muted" }, "Situations where your mistake rate is clearly above your own average."),
     o.situations.length ? o.situations.map((h) => habitCard(h, tags)) : el("p", {}, "No situation stands out yet: analyse more games."),
+    o.threats ? threatSection(o.threats) : null,
     o.pressure.length ? [
       el("h2", {}, "Short on time, but it keeps happening"),
       el("p", { class: "muted" }, "Fast moves are reflexes, so they only count here when the same mistake shows up again and again (15+ times across 8+ games)."),
@@ -112,7 +140,7 @@ let drill = null;
 let drawn = 0;
 
 function fresh(puzzle) {
-  return { puzzle, solving: true, tries: [], result: null, lines: [], line: 0, ply: 0, from: null };
+  return { puzzle, solving: true, tries: [], result: null, lines: [], line: 0, ply: 0, from: null, asking: false, threat: null };
 }
 
 function squareAt(svg, evt, side) {
@@ -158,7 +186,8 @@ async function openPractice(tag) {
 }
 $("#tag").addEventListener("change", nextPuzzle);
 
-function buttons({ retry = false, giveup = false, next = false }) {
+function buttons({ retry = false, giveup = false, next = false, skip = false }) {
+  $("#skip").hidden = !skip;
   $("#retry").hidden = !retry;
   $("#giveup").hidden = !giveup;
   $("#next").hidden = !next;
@@ -183,6 +212,11 @@ async function nextPuzzle() {
   }
   drill = fresh(p);
   $("#due").textContent = `${p.due} due`;
+  if (p.ask_threat) return askThreat(p);
+  await startPuzzle();
+}
+
+function puzzlePrompt(p) {
   fill($("#prompt"),
     p.opening_fix
       ? el("span", {}, `Your opening (${p.tags[1] || ""}): here you usually play `, el("span", { class: "played" }, p.played), ". Find a better move.")
@@ -190,8 +224,43 @@ async function nextPuzzle() {
     el("br"), el("span", { class: "muted small" }, `${p.side === "white" ? "White" : "Black"} to move · ${p.tags.join(", ").replaceAll("_", " ")}`),
     p.opening_idea ? el("span", { class: "idea" }, el("b", {}, `${p.opening}: `), p.opening_idea) : null,
   );
+}
+
+async function startPuzzle() {
+  drill.asking = false;
+  puzzlePrompt(drill.puzzle);
   buttons({ giveup: true });
   await draw();
+}
+
+// A puzzle from a threat you ignored starts with a question: what does their last move threaten?
+// Graded leniently and not recorded; then the puzzle, with their threat drawn in orange.
+async function askThreat(p) {
+  drill.asking = true;
+  fill($("#prompt"),
+    el("span", {}, "They just played ", el("b", {}, p.ask_threat.last), ". What do they threaten?"),
+    el("br"), el("span", { class: "muted small" }, "Click their piece, then the square it would go to. Then find your move."));
+  buttons({ skip: true });
+  await draw();
+}
+
+async function guessThreat(uci) {
+  let r;
+  try {
+    r = await api("/api/drill/threat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: drill.puzzle.id, uci }),
+    });
+  } catch (err) {
+    fill($("#feedback"), "That isn't a move they can play here. Try again, or skip the question.");
+    return;
+  }
+  drill.threat = r.threat.uci;
+  fill($("#feedback"),
+    r.right ? el("b", { class: "better" }, "Yes. ") : [el("b", { class: "played" }, `Not ${r.guess}`), ": they threaten ", el("b", { class: "threat" }, r.threat.san), ". "],
+    r.why);
+  await startPuzzle();
 }
 
 // The position on show: the puzzle itself (ply 0) or the position after `ply` moves of a line,
@@ -199,6 +268,10 @@ async function nextPuzzle() {
 function shown() {
   const line = drill.lines[drill.line];
   const before = drill.ply > 0 ? line.plies[drill.ply - 1] : null;
+  if (!line && drill.puzzle.ask_threat) {
+    // Their last move, and once the question is answered, their threat.
+    return { fen: drill.puzzle.fen, last: drill.puzzle.ask_threat.last_uci, next: drill.threat, color: "threat" };
+  }
   return {
     fen: before ? before.fen : drill.puzzle.fen,
     last: before?.uci,
@@ -277,6 +350,7 @@ async function onBoard(evt) {
   drill.from = null;
   mark(svg, null);
   if (uci.slice(0, 2) === uci.slice(2)) return;
+  if (drill.asking) return guessThreat(uci);
   if (!drill.solving) return explore(uci);
   if (drill.ply !== 0) {
     // While solving, answers are moves from the puzzle position.
@@ -371,6 +445,7 @@ async function explore(uci) {
 }
 
 $("#retry").addEventListener("click", () => { drill.ply = 0; draw(); });
+$("#skip").addEventListener("click", () => { fill($("#feedback")); startPuzzle(); });
 $("#giveup").addEventListener("click", () => (drill.result ? reveal(null) : answer("?")));
 $("#next").addEventListener("click", nextPuzzle);
 
