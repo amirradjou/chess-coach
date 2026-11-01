@@ -78,14 +78,17 @@ def test_what_their_mistake_allows_to_take():
     bh6 = chess.Board()
     for san in "d4 g6 Bh6".split():  # 2.Bh6?? leaves the bishop to the knight and the bishop
         bh6.push_san(san)
-    assert allows(bh6.fen(), "g8h6") == [
+    assert allows(bh6.fen(), "g8h6", captures=True) == [
         "It lets Nxh6 take their bishop on h6, which was hanging (attacked and not defended)."
     ]
     nd5 = "r1bqk2r/pppp1ppp/2n1pn2/3N4/1bB1P3/5N2/PPPP1PPP/R1BQK2R b KQkq - 5 5"  # 5.Nd5?
-    assert allows(nd5, "e6d5") == [
+    assert allows(nd5, "e6d5", captures=True) == [
         "It lets exd5 take their knight on d5, which was attacked by a cheaper piece, and hit "
         "their bishop on c4."
     ]
+    # Without `captures` (the opening tree, where explain() names the hanging piece) as before.
+    assert allows(bh6.fen(), "g8h6") == []
+    assert allows(nd5, "e6d5") == ["It lets exd5 hit their bishop on c4."]
 
 
 def test_pawn_structure_and_the_centre():

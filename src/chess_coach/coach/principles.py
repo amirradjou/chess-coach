@@ -440,9 +440,13 @@ def explain(fen: str, played: str, best: str | None, *, theirs: bool = False) ->
     return reasons
 
 
-def allows(fen: str, punish: str) -> list[str]:
+def allows(fen: str, punish: str, *, captures: bool = False) -> list[str]:
     """What the opponent's mistake lets you do, in chess terms: `fen` is the position after it
-    (you to move) and `punish` the engine's answer (UCI). Empty when there's nothing to name."""
+    (you to move) and `punish` the engine's answer (UCI). Empty when there's nothing to name.
+
+    With `captures` it also names a capture of a piece the mistake left hanging or attacked by a
+    cheaper piece (When they blunder). The opening tree leaves that out: there explain() already
+    says their move left the piece hanging, and the two would say it twice."""
     board = chess.Board(fen)
     move = chess.Move.from_uci(punish)
     if move not in board.legal_moves:
@@ -456,7 +460,7 @@ def allows(fen: str, punish: str) -> list[str]:
     hit = sorted(threatened(after, me) - threatened(board, me), key=lambda ks: -PIECE_VALUES[ks[0]])
     names = [f"{chess.piece_name(kind)} on {chess.square_name(square)}" for kind, square in hit]
     taken = (board.piece_type_at(move.to_square), move.to_square)
-    if board.is_capture(move) and (how := hanging(board, not me).get(taken)):
+    if captures and board.is_capture(move) and (how := hanging(board, not me).get(taken)):
         piece = f"{chess.piece_name(taken[0])} on {chess.square_name(taken[1])}"
         if names:
             return [f"It lets {san} take their {piece}, which was {how}, and hit their {names[0]}."]

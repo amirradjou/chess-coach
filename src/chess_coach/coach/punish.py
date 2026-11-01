@@ -81,10 +81,11 @@ class Gift:
         return self.game.move_url(self.reply.ply)
 
     def reasons(self) -> list[str]:
-        """What the blunder allowed, in chess terms (principles.allows)."""
+        """What the blunder allowed, in chess terms (principles.allows), including taking a piece
+        it left hanging: the commonest punishment."""
         if not self.reply.fen_before or not self.reply.best_move:
             return []
-        return allows(self.reply.fen_before, self.reply.best_move)
+        return allows(self.reply.fen_before, self.reply.best_move, captures=True)
 
 
 def gifts(games: Iterable[Game], pairs: Iterable[tuple[MoveFact, MoveFact]]) -> list[Gift]:
