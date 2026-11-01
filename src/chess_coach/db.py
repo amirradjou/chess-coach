@@ -137,7 +137,7 @@ CREATE TABLE IF NOT EXISTS threats (
     label      TEXT NOT NULL DEFAULT '',  -- "ignored_threat", "unsafe_move" or ""
     threat     TEXT NOT NULL DEFAULT '',  -- UCI: their threat, or the winning reply allowed
     threat_san TEXT NOT NULL DEFAULT '',
-    gain       INTEGER,                   -- centipawns
+    gain       INTEGER,                   -- material its line wins, centipawns (NULL: mate)
     mate       INTEGER,
     depth      INTEGER NOT NULL,
     checked_at TEXT NOT NULL,

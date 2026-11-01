@@ -150,7 +150,7 @@ class ThreatFact:
     label: str = ""
     threat: str = ""  # UCI
     threat_san: str = ""
-    gain: int | None = None  # the material its line wins, in centipawns
+    gain: int | None = None  # the material its line wins, in centipawns (None: it mates)
     mate: int | None = None  # moves to mate, when it mates
     depth: int = 0
     # Joined at read time from the moves table: their move just before (ply - 1).

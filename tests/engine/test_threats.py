@@ -136,7 +136,8 @@ def test_a_free_tempo_is_not_a_threat():
     assert classify(m, previous, quiet, AXB6_AFTER_NE7, 12).label == ""
     # a mate is always a threat, whatever the numbers; met only when they no longer mate
     mate = line(9998, "g1f2", mate=2)
-    assert classify(m, previous, mate, line(9998, "g1f2", mate=2), 12).label == IGNORED
+    row = classify(m, previous, mate, line(9998, "g1f2", mate=2), 12)
+    assert (row.label, row.mate, row.gain) == (IGNORED, 2, None)  # a mate wins no material
     assert classify(m, previous, mate, AXB6_AFTER_NE7, 12).label == ""
 
 

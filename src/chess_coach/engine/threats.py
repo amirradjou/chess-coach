@@ -165,7 +165,8 @@ def classify(
     if is_threat(m, line, theirs):
         assert line.move is not None
         row.threat, row.threat_san = line.move.uci(), theirs.san(line.move)
-        row.gain, row.mate = 100 * won(theirs, line.pv), line.mate
+        row.mate = line.mate
+        row.gain = None if line.mate else 100 * won(theirs, line.pv)
         if is_new(line, previous, theirs) and not met(line, answer, board, after):
             row.label = IGNORED
         return row
@@ -175,7 +176,8 @@ def classify(
         assert answer.move is not None
         row.label = UNSAFE
         row.threat, row.threat_san = answer.move.uci(), after.san(answer.move)
-        row.gain, row.mate = 100 * answered(board, after, answer), answer.mate
+        row.mate = answer.mate
+        row.gain = None if answer.mate else 100 * answered(board, after, answer)
     return row
 
 
