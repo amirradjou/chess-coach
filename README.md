@@ -148,14 +148,17 @@ across 8+ games.
 - `sync` does import, analyse and `puzzles make` for you: it fetches every game since the newest
   one stored for each Lichess and Chess.com account (all or nothing, so a failed download leaves
   no gap), analyses whatever isn't analysed yet, newest first, makes puzzles, and says what came
-  in and what's due. Bullet results aren't reported, by the rule above.
+  in and what's due. Bullet results aren't reported, by the rule above. When a new game repeats
+  one of your repeated mistakes (see `repeats`) it says so: "You played 3...Bg7 again (12th time);
+  it has a puzzle."
 - `stats` prints a per-game accuracy table and how often each motif shows up in your moves.
 - `digest` slices your moves by phase, colour, speed, opening, move number and clock (and
   pairs of them), and your games by colour, speed, opening, castling and queen trades. It keeps a
   slice only when it has enough moves (30) or games (8), your mistake rate (or loss rate) there
   is well above your own (1.5×, or 1.25× for losses), and the low end of its 95% interval is
   still above it. Each pattern cites its worst moves with links; then a motif table with one
-  thing to practise for each. All counted, no model, so it can't invent a pattern.
+  thing to practise for each, and the mistakes you repeat from the same position. All counted, no
+  model, so it can't invent a pattern.
 - `digest --since 7d` is the weekly digest: only those games, compared with the ones before.
   `digest --narrate ollama` adds a short summary from a local model (free); `--narrate
   openrouter --model …` uses any OpenAI-compatible server with `OPENROUTER_API_KEY`. The model
@@ -171,12 +174,20 @@ across 8+ games.
 - `progress --by month|week [--speed blitz]` shows your games, score, mistake rate and centipawn
   loss over time, and your puzzle solve rate overall and per tag.
 - `openings` lists the openings you score worst in (by your colour), the book line for the one
-  you play most, and the opening mistakes you have repeated in more than one game.
+  you play most, and the opening mistakes you have repeated in more than one game. Then every
+  opening by the **engine eval after your 10th move (not results)**, so bullet games count too:
+  the median eval, the share of games at -1 or worse and your mistake rate on moves 1-10 (each
+  with its 95% interval), and what you lost since the game left the opening table, so a gambit's
+  pawn isn't put down to you. Worst first by the mistake rate's interval, then that loss.
+- `repeats` lists the same mistake from the same position in 3 or more games (inaccuracies or
+  worse; named book moves left out): the better move, their best answer and how often they found
+  it, the reasons in chess terms, links to the games, and whether a puzzle drills it.
 - `serve` opens the coach on http://127.0.0.1:8765 (localhost only, no account or key):
   - **What you get wrong**: the mistakes you repeat (which piece and kind of move, captures or
     checks you keep missing, motifs) and the situations where your mistake rate jumps, each with
     a *what to learn* note and your own positions on boards: red arrow your move, green the
-    engine's. "Practise these positions" opens the matching drills.
+    engine's. "Practise these positions" opens the matching drills. Then the same mistake in the
+    same position (as `repeats`), each on a board with their best answer.
   - **Practice**: due puzzles on a board you click (piece, then square), filtered by theme. A
     wrong move shows their best reply, what it costs in material and score, and lets you try
     again (only the first answer counts for the schedule). Once it's solved or shown you get the
@@ -191,7 +202,8 @@ across 8+ games.
     short note on what they are about.
   - **Your openings**: your most-played openings with each colour, score, your usual line, the
     book line, and the fixes: positions you reached in several games where your habitual move
-    loses ground (named book moves are never flagged), with "Drill these fixes".
+    loses ground (named book moves are never flagged), with "Drill these fixes"; and how each
+    opening comes out by the engine after your 10th move, as in `openings`.
   - **Learn openings**: your most-played openings with each colour as a tree of the moves
     actually played in your games (first 8 moves each), with how often each came up, how you
     scored after it and the stored engine verdict. Where your opponent went wrong, it shows the
@@ -203,12 +215,16 @@ across 8+ games.
     time. Your practice is remembered: each position you answer becomes a card scheduled like a
     puzzle (only your first answer of the day counts; showing the move counts as a miss). Due
     punishments come first in the deck, training steers their replies towards positions that are
-    due, and each opening shows "you've found 3 of 7 punishments" and how many are due.
+    due, and each opening shows "you've found 3 of 7 punishments" and how many are due. Each
+    position and move also shows where the games through it stand after your 10th move.
   - **Progress**: month by month, your rating and practice week by week (pick the speed), and
     your puzzle solve rate per theme.
 - `puzzles make --openings` turns those opening fixes into drills; any move within 30 cp of the
   best counts, since openings often have several good moves. `puzzles prune` drops untried
-  puzzles that no longer count (bullet after move 10, moves made short on time).
+  puzzles that no longer count (bullet after move 10, moves made short on time). A position is
+  drilled once: a slip repeated from the same position, or a fix two openings share, adds its
+  tags to the puzzle already there. `puzzles dedupe` merges the copies made before that (keeping
+  the one you've tried, else the oldest; a tried puzzle is never deleted).
 
 Motif tags are computed in code from the board and the engine's facts, never by a model:
 
@@ -265,8 +281,10 @@ uv run chess-coach digest --since 7d                             # this week vs 
 uv run chess-coach puzzles make --limit 50                       # your mistakes as puzzles
 uv run chess-coach drill                                         # practise what is due
 uv run chess-coach progress --by week
-uv run chess-coach openings
+uv run chess-coach openings                                      # incl. the eval after move 10
+uv run chess-coach repeats                                       # the same mistake, same position
 uv run chess-coach puzzles make --openings                      # drills for your opening fixes
+uv run chess-coach puzzles dedupe                                # merge puzzles stored twice
 uv run chess-coach serve --open                                  # the coach in your browser
 ```
 
