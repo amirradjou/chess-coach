@@ -295,7 +295,7 @@ def after_ten(
             evals.append(clamp(mine[-1].eval_after))
             book = book_eval(mine)
             since.append(evals[-1] - clamp(book if book is not None else mine[-1].eval_after))
-        if len(evals) < min_games:
+        if not evals or len(evals) < min_games:  # none got there: nothing to say, whatever the min
             continue
         out[color].append(
             AfterTen(

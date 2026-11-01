@@ -108,6 +108,15 @@ def test_after_ten_counts_bullet_by_the_engine_and_skips_short_games():
     assert after_ten(games, moves, min_games=6) == {"white": [], "black": []}
 
 
+def test_an_opening_without_a_game_at_move_ten_is_left_out_even_with_no_minimum():
+    games, moves = bullet_italians()
+    g = game(20)
+    g.opening = "Scotch Game"
+    games.append(g)
+    moves += line(g.id, KF1[:11])  # resigned after your 6th move
+    assert [a.family for a in after_ten(games, moves, min_games=0)["white"]] == ["Italian Game"]
+
+
 def test_openings_are_ranked_by_the_mistake_interval_not_the_eval():
     games, moves = bullet_italians()
     for i in range(10, 15):  # far worse by the eval, but no mistakes
