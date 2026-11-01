@@ -4,9 +4,12 @@ from chess_coach.coach.principles import (
     allows,
     doubled,
     explain,
+    ignored_threat,
     isolated,
     opening_idea,
     passed,
+    their_threat,
+    unsafe_move,
 )
 
 AFTER_NF3_NC6 = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3"
@@ -124,3 +127,46 @@ def test_opening_ideas():
     assert opening_idea("Blackmar-Diemer Gambit Accepted").startswith("White gives a pawn")
     assert opening_idea("Sicilian Defense").startswith("Black trades the c-pawn")
     assert opening_idea("Bongcloud Attack") is None and opening_idea(None) is None
+
+
+AFTER_A5 = "r5nr/2p2kpp/pp1bbp2/P1p5/4P3/1NN1BP2/1PP3PP/R2R2K1 b - - 0 14"
+SCHOLAR = "r1bqkbnr/pppp1ppp/2n5/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 3 3"  # after 3.Qh5
+
+
+def test_what_they_threatened():
+    assert their_threat(AFTER_A5, "a5b6", last_san="a5", last_uci="a4a5") == (
+        "Their a5 attacked your pawn on b6"
+    )
+    # the piece that would take isn't the one that moved, or there is no last move to name
+    assert their_threat(AFTER_A5, "a5b6", last_san="Nd2", last_uci="b3d2") == (
+        "Their Nd2 threatened axb6, taking your pawn on b6"
+    )
+    assert their_threat(SCHOLAR, "h5f7", last_san="Qh5", last_uci="d1h5") == (
+        "Their Qh5 threatened Qxf7#, checkmate"
+    )
+    fork = "4k3/2q1r3/8/8/8/2N5/8/6K1 b - - 0 1"
+    assert their_threat(fork, "c3d5") == (
+        "They threatened Nd5, hitting your queen on c7 and rook on e7 at once"
+    )
+    check = "r3k3/8/8/1N6/8/8/8/4K3 b - - 0 1"
+    assert (
+        their_threat(check, "b5c7")
+        == "They threatened Nc7+, a check that also hits your rook on a8"
+    )
+    assert their_threat(check, "b5c7", mate=3) == "They threatened Nc7+, with mate in 3"
+    assert their_threat(AFTER_A5, "a5a7") is None  # not a move they can make
+
+
+def test_an_ignored_threat_and_an_unsafe_move_in_words():
+    assert ignored_threat(AFTER_A5, "g8e7", "a5b6", last_san="a5", last_uci="a4a5") == (
+        "Their a5 attacked your pawn on b6, and your Ne7 left it there."
+    )
+    assert ignored_threat(SCHOLAR, "g8f6", "h5f7", last_san="Qh5", last_uci="d1h5") == (
+        "Their Qh5 threatened Qxf7#, checkmate, and your Nf6 didn't stop it."
+    )
+    before_nc4 = "r2r4/2p1nkpp/pp1bbp2/P1p5/4P3/2N1BP2/1PPN2PP/R2R2K1 w - - 3 16"
+    assert unsafe_move(before_nc4, "d2c4", "e6c4") == (
+        "Nothing was threatened, but your Nc4 allows Bxc4, taking your knight on c4."
+    )
+    assert unsafe_move(before_nc4, "d2c4", "e6e5") is None  # not their move after it
+    assert unsafe_move(before_nc4, "d2d8", "e6c4") is None  # not yours

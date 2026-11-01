@@ -462,6 +462,96 @@ def allows(fen: str, punish: str) -> list[str]:
     return [f"It lets {san} hit their {names[0]}."]
 
 
+def _does(board: chess.Board, move: chess.Move, mate: int | None = None) -> str:
+    """What `move` (legal in `board`) does to the side not moving, said to that side: "Nxd6,
+    taking your queen on d6", "Qxf7#, checkmate", "Nd5, hitting your queen on c7"."""
+    me, san = board.turn, board.san(move)
+    after = _after(board, move)
+    if after.is_checkmate():
+        return f"{san}, checkmate"
+    if mate is not None and mate > 0:
+        return f"{san}, with mate in {mate}"
+    if board.is_capture(move):
+        kind = chess.PAWN if board.is_en_passant(move) else board.piece_type_at(move.to_square)
+        square = move.to_square
+        if board.is_en_passant(move):
+            square += -8 if me == chess.WHITE else 8
+        check = " with check" if after.is_check() else ""
+        return f"{san}, taking your {chess.piece_name(kind)} on {chess.square_name(square)}{check}"
+    hit = sorted(threatened(after, me) - threatened(board, me), key=lambda ks: -PIECE_VALUES[ks[0]])
+    names = [f"{chess.piece_name(kind)} on {chess.square_name(square)}" for kind, square in hit]
+    if after.is_check():
+        return f"{san}, a check that also hits your {names[0]}" if names else f"{san}, with check"
+    if len(names) > 1:
+        return f"{san}, hitting your {names[0]} and {names[1]} at once"
+    return f"{san}, hitting your {names[0]}" if names else san
+
+
+def their_threat(
+    fen: str, threat: str, *, last_san: str = "", last_uci: str = "", mate: int | None = None
+) -> str | None:
+    """What they threatened in `fen` (you to move), in chess terms: `threat` is the move they
+    would play if you passed (UCI), `last_*` their move that made it. "Their Nf5 attacked your
+    queen on d6". None when the threat isn't a legal move for them."""
+    board = _null(chess.Board(fen))
+    move = chess.Move.from_uci(threat)
+    if move not in board.legal_moves:
+        return None
+    who = f"Their {last_san}" if last_san else "They"
+    moved_to = chess.Move.from_uci(last_uci).to_square if last_uci else None
+    taking = board.is_capture(move) and not board.is_en_passant(move)
+    if taking and move.from_square == moved_to and not _after(board, move).is_checkmate():
+        # The piece they just moved is the one attacking.
+        name = chess.piece_name(board.piece_type_at(move.to_square))
+        return f"{who} attacked your {name} on {chess.square_name(move.to_square)}"
+    return f"{who} threatened {_does(board, move, mate)}"
+
+
+def ignored_threat(
+    fen: str,
+    played: str,
+    threat: str,
+    *,
+    last_san: str = "",
+    last_uci: str = "",
+    mate: int | None = None,
+) -> str | None:
+    """Why your move fell short when they had just made a threat: "Their Nf5 attacked your queen
+    on d6, and your Rd8 left it there." `fen` is before your move, `played` your move and
+    `threat` theirs had you passed (UCI)."""
+    head = their_threat(fen, threat, last_san=last_san, last_uci=last_uci, mate=mate)
+    board = chess.Board(fen)
+    move = chess.Move.from_uci(played)
+    if head is None or move not in board.legal_moves:
+        return None
+    taken = chess.Move.from_uci(threat)
+    piece = board.piece_at(taken.to_square)
+    left = (
+        piece is not None
+        and piece.color == board.turn
+        and not _after(_null(board), taken).is_checkmate()
+        and _after(board, move).piece_at(taken.to_square) == piece
+    )
+    tail = "left it there" if left else "didn't stop it"
+    return f"{head}, and your {board.san(move)} {tail}."
+
+
+def unsafe_move(fen: str, played: str, reply: str, *, mate: int | None = None) -> str | None:
+    """Why your move fell short when nothing was threatened: "Nothing was threatened, but your
+    Ng5 allows Qxg5, taking your knight on g5." `reply` is their best answer (UCI)."""
+    board = chess.Board(fen)
+    move = chess.Move.from_uci(played)
+    if move not in board.legal_moves:
+        return None
+    after = _after(board, move)
+    answer = chess.Move.from_uci(reply)
+    if answer not in after.legal_moves:
+        return None
+    return (
+        f"Nothing was threatened, but your {board.san(move)} allows {_does(after, answer, mate)}."
+    )
+
+
 def _null(board: chess.Board) -> chess.Board:
     """The position with the other side to move, to compare against when there's no best move."""
     passed_turn = board.copy(stack=False)
