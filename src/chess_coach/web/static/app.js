@@ -79,6 +79,7 @@ function habitCard(h, tags) {
 
 // The same mistake from the very same position in 3+ games, with their best answer to it.
 function repeatCard(r) {
+  const drill = r.puzzle ? "it has a puzzle" : "no puzzle for it yet";
   return el(
     "div", { class: "example" },
     boardNode(r.svg),
@@ -87,7 +88,8 @@ function repeatCard(r) {
     r.punish ? el("div", { class: "small" }, "Their best answer: ", el("b", {}, r.punish),
       ` (they found it ${r.punished} of ${r.replies} times)`) : null,
     reasons(r.reasons),
-    el("div", { class: "muted small" }, `Last on ${r.last} · `, r.puzzle ? "it has a puzzle" : "no puzzle for it yet"),
+    // Games imported from a PGN without a date have none (last: null)
+    el("div", { class: "muted small" }, r.last ? `Last on ${r.last} · ${drill}` : drill[0].toUpperCase() + drill.slice(1)),
     el("div", { class: "small" }, r.urls.flatMap((url, i) => [i ? " · " : "",
       el("a", { href: url, target: "_blank", rel: "noopener" }, `game ${i + 1}`)])),
   );

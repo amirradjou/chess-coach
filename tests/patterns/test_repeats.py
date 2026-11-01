@@ -169,6 +169,19 @@ def test_the_web_shows_repeats_without_stockfish(tmp_path: Path):
     assert r["svg"].startswith("<svg") and r["last"] == "2026-10-05" and r["reasons"]
 
 
+def test_repeats_from_undated_games_have_no_last_date(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(cli, "console", Console(width=200))
+    db = tmp_path / "c.db"
+    store_games(db)
+    with Store(db) as store:  # a PGN with Date "????.??.??"
+        store.conn.execute("UPDATE games SET played_at = NULL")
+        store.conn.commit()
+    (r,) = TestClient(create_app(db, no_engine)).get("/api/repeats").json()
+    assert r["last"] is None  # the page then leaves "Last on" out
+    result = CliRunner().invoke(cli.app, ["--db", str(db), "repeats"])
+    assert "5.Nf3 (Danish Gambit Accepted) in 4 games." in result.output
+
+
 def test_sync_says_when_a_new_game_repeats_one(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(cli, "console", Console(width=200))
     db = tmp_path / "c.db"
