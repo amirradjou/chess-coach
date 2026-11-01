@@ -185,56 +185,78 @@ move 10).
 - `engine/threats.py`: before each counted (`features.counted`), non-rushed (`features.rushed`)
   mistake or blunder, **the user's and the opponents'** (the opponents are the peer baseline),
   the mover passes and Stockfish (depth 12) gives the opponent's best line on that board
-  (`passed`: rebuilt from the FEN, so no null move is ever sent to the engine; the
-  `chess.engine` logger is silenced in the commands anyway). It is a **threat** when it mates, or
-  wins 200 cp over the mover's own evaluation and is a capture or a check, or is a quiet move
-  whose line wins 2+ points of material within 4 plies (longer while captures and checks go on);
-  it is **new** when they were not already 200 cp better off before their last move (the stored
-  evaluation of the previous ply's position, which has them to move like the null-move board).
-  In check, or when their last move captured and the mover can take back on that square, no
-  label. `ignored_threat`: a new threat, and the move didn't meet it (their best reply is the
-  threat, a capture on its square that still costs 200 cp, or a mate after a mate threat).
-  `unsafe_move`: no threat at all, and after the move their best is 200 cp better than it was had
-  the mover passed (or mates). Everything else: no label.
+  (`motifs.pass_turn`: rebuilt from the FEN, so no null move is ever sent to the engine; the
+  `chess.engine` logger is silenced in the commands anyway), and a second search gives their best
+  answer to the move played. A line **wins** when it mates or wins 2+ points of material, counted
+  along the engine's line for at least 4 plies and on while captures and checks continue or a
+  capture comes next (so pending recaptures count; at most 12 plies). It is a **threat** when
+  their line on the null-move board wins and the free move is worth 200 cp to them (the mover's
+  evaluation before plus theirs after passing); it is **new** when they were not already 200 cp
+  better off before their last move (the stored evaluation of the previous ply's position, which
+  has them to move like the null-move board) and it wasn't already there behind a check they had
+  to answer (the same piece, move and target before their move). In check, or when their last
+  move captured and the mover can take back on that square, no label. `ignored_threat`: a new
+  threat the move didn't meet: a mate threat after which they still mate, or their answer is the
+  threat itself and still wins material, or another capture on its square that still wins 2+,
+  counted from before the move (what the move took is paid back first). `unsafe_move`: no threat
+  at all, and their answer mates, or is 200 cp better for them than passing would have been and
+  wins 2+ points, counted from before the move. Everything else: no label.
 - Table `threats` keyed by (game id, ply): label, threat UCI and SAN (for an unsafe move, the
-  winning reply it allowed), gain, mate, depth; `Store.threats()` joins the opponent's previous
-  move at read time. Nothing is written into `moves.motifs`; `replace_moves` drops a game's checks
-  with its old analysis, and `_fix_lichess_ids` renames them.
+  winning reply it allowed), gain (the material its line wins, in cp; empty for a mate), mate,
+  depth; `Store.threats()` joins the opponent's previous move at read time. Nothing is written
+  into `moves.motifs`; `replace_moves` drops a game's checks with its old analysis, and
+  `_fix_lichess_ids` renames them.
 - `coach/threats.py`: `check` (newest games first, a FEN cache per run, stored game by game, so
   it resumes) and `report`: each label's share of your checked mistakes and blunders and of your
-  opponents', Wilson 95% intervals (`mining.wilson`) and Newcombe's interval for the difference
-  (`mining.difference`). "Same as your opponents" when that interval includes zero; a step is
-  only called yours to work on when its low end is above zero.
+  opponents', Wilson 95% intervals (`mining.wilson`, clamped to 0-100%) and Newcombe's interval
+  for the difference (`mining.difference`). "Same as your opponents" when that interval includes
+  zero; a step is only called yours to work on when its low end is above zero, and with no gap
+  the summary says only that (never "not a weakness").
 - Chess terms from code (`principles.their_threat`, `ignored_threat`, `unsafe_move`): "Their a5
   attacked your pawn on b6, and your Ne7 left it there.", "Nothing was threatened, but your Nc4
   allows Bxc4, taking your knight on c4.", mates, checks and pieces hit by a quiet threat.
 - Surfaces: `chess-coach threats [--depth 12 --threads N --limit N]` (summary table and examples;
-  needs no engine when nothing is left to check), `sync` runs it for new games, the digest's
-  "Their threats and your blunder check" section, and the "What you get wrong" tab (a small
-  section; every example board whose move is labelled gets the threat as an orange arrow and the
-  sentence first). Practice: a puzzle whose source move is an ignored threat first asks "What do
-  they threaten?" (`POST /api/drill/threat`, not recorded; right if it is the threat, any move to
-  the same square, or another mate when it mates; skippable), then the normal puzzle with the
-  threat drawn in orange.
+  needs no engine when nothing is left to check, and says what is left when it stopped early),
+  `sync` checks every mistake not checked yet with the same progress bar (the first time, the
+  whole backlog), the digest's "Their threats and your blunder check" section, and the "What you
+  get wrong" tab (a small section; every example board whose move is labelled gets the threat as
+  an orange arrow and the sentence first). Practice: a puzzle whose source move is an ignored
+  threat first asks "What do they threaten?" (`POST /api/drill/threat`, not recorded; right if it
+  is the threat, any move to the same square, or another mate when it mates; skippable), then
+  the normal puzzle with the threat drawn in orange.
 - Decisions, from the spec and its reviews: the loose rule (gain >= 150 cp on the null-move
   board) labelled most errors as threats. Prototyping on 300 + 300 sampled errors: a gain-only
   rule still found a "threat" in 69%, often a quiet free tempo (castling, a retreat) that only
-  looked strong because the opponent got two moves in a row; the capture/check/material test
-  removes those. The spec's (c) asked for "one extra null search on the previous ply's position,
-  from the same side's perspective": that position already has them to move, so its stored
-  depth-12 evaluation is the search, and no extra one is made. Unsafe moves are measured against
-  passing, not by centipawn loss, so a quiet move that misses your own win is not "unsafe" (the
-  sample game's 15.Nd2, which missed axb6, gets no label). One engine thread: two runs give
-  identical rows and it is no slower (31 s) than 2-3 threads, whose nondeterminism moved the
-  ignored-threat gap between +2.2 and about +3 points and once tipped it to "more often".
-- On a copy of the owner's database (2,099 games, depth 12, 1 thread, 31 s for 2,526 moves):
-  1,269 of the user's counted mistakes and blunders and 1,257 of the opponents'.
-  Ignored their threat: 230 (18.1%, 16-20%) vs 193 (15.4%, 13-17%), +2.8 points (-0.1 to
-  +5.7): same as your opponents, just. Unsafe move: 207 (16.3%, 14-18%) vs 212 (16.9%, 15-19%),
-  -0.6 points (-3.5 to +2.3): same. Unsafe moves are 47% of the user's labelled errors (207 of
-  437). Unlabelled: in check 38 / 34, recapture pending 111 / 113, a threat that was old or met
-  341 / 334. 61 puzzles get the threat question; 12 of the 36 example boards in "What you get
-  wrong" carry an orange threat.
+  looked strong because the opponent got two moves in a row. The spec's (c) asked for "one extra
+  null search on the previous ply's position, from the same side's perspective": that position
+  already has them to move, so its stored depth-12 evaluation is the search. Unsafe moves are
+  measured against passing, not by centipawn loss, so a quiet move that misses your own win is
+  not "unsafe" (the sample game's 15.Nd2, which missed axb6, gets no label). One engine thread:
+  two runs give identical rows.
+- The review (2026-11-01) found the first version counting the mover's own edge as their threat:
+  the free move also lets them dodge a shot the mover had pending, so missed shots and escaping
+  pieces became "Their g5 attacked your pawn on h6" (a move that missed mate in one and hung a
+  rook), and moves that only gave back the mover's lasting edge became "unsafe" with a quiet king
+  move as the reply. Capture or check plus a 200 cp evaluation gain is therefore no longer
+  enough: every label needs a line that wins material (or mates), and the evaluations only
+  confirm it. Also from the review: a threat behind a check isn't theirs (the review counted 26
+  labels like "Their Kb6 threatened Bxe6" for an attack your own check left), a threat whose
+  answer no longer wins (a trade now, or the move took as much first) is met, and the answer is
+  searched rather than taken from the next ply, whose stored line is only six plies. Considered
+  and left out: counting one-pawn captures and sacrifices like Bxf7+ as threats by their
+  evaluation gain (it labels more, but about a third of those read wrong: "attacked your knight
+  on c3" for an even trade).
+- On a copy of the owner's database (2,099 games, depth 12, 1 thread, 60 s for 2,526 moves; a
+  second run gives the same rows): 1,269 of the user's counted mistakes and blunders and 1,257
+  of the opponents'. Ignored their threat: 158 (12.5%, 10.7-14.4%) vs 115 (9.1%, 7.7-10.9%),
+  +3.3 points (+0.9 to +5.7): more often than your opponents, so it is shown as a step to work
+  on. Unsafe move: 136 (10.7%, 9.1-12.5%) vs 135 (10.7%, 9.1-12.6%), +0.0 points (-2.4 to
+  +2.4): same. Unsafe moves are 46% of the user's labelled errors (136 of 294). Unlabelled: in
+  check 38 / 34, recapture pending 111 / 113, a threat that was old or met 254 / 259, nothing
+  threatened and no winning reply allowed 572 / 601. 29 puzzles get the threat question; 19 of
+  the 36 example boards in "What you get wrong" carry an orange threat. The ignored-threat gap is
+  borderline: depth 14 gives +3.0 (+0.5 to +5.4), and two 2-thread runs at depth 12 gave +1.5
+  (-0.9 to +3.9, "same") and +2.5 (+0.1 to +4.9), so engine noise alone can flip the verdict.
 
 ## Remaining (in order)
 

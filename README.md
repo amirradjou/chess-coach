@@ -153,13 +153,17 @@ across 8+ games.
   above.
 - `stats` prints a per-game accuracy table and how often each motif shows up in your moves.
 - `threats` asks, before every counted mistake and blunder (yours and your opponents'), what the
-  other side threatened: the mover passes and Stockfish (depth 12) finds their best move. A
-  mistake is an *ignored threat* (their last move threatened mate or material and your move
-  didn't meet it) or an *unsafe move* (nothing was threatened, but your move allowed a reply
-  winning two pawns' worth or more). It shows each share of your mistakes next to your
-  opponents', with 95% intervals, and only calls one yours to work on when you clearly do it more
-  often than they do (on the author's games: neither). About 30 seconds for 2,500 mistakes;
-  resumable, and `sync` runs it on whatever isn't checked yet.
+  other side threatened: the mover passes and Stockfish (depth 12) finds their best line, and a
+  second search finds their best answer to the move played. A mistake is an *ignored threat*
+  (their last move threatened mate or material and your move didn't meet it) or an *unsafe move*
+  (nothing was threatened, but your move allowed a reply that mates or wins two pawns' worth or
+  more). Material is counted along the engine's line until the captures stop, never from the
+  evaluation alone, which would count your own missed chances as their threats. It shows each
+  share of your mistakes next to your opponents', with 95% intervals, and only calls one yours to
+  work on when you clearly do it more often than they do (on the author's games: ignored threats,
+  12% of their mistakes against 9% of their opponents', a gap only just clear of zero). About a
+  minute for 2,500 mistakes; one thread (the default) gives the same labels on every run, more
+  threads make a few vary. Resumable, and `sync` runs it on whatever isn't checked yet.
 - `digest` slices your moves by phase, colour, speed, opening, move number and clock (and
   pairs of them), and your games by colour, speed, opening, castling and queen trades. It keeps a
   slice only when it has enough moves (30) or games (8), your mistake rate (or loss rate) there
