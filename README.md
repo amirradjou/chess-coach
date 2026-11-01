@@ -180,8 +180,9 @@ across 8+ games.
   with its 95% interval), and what you lost since the game left the opening table, so a gambit's
   pawn isn't put down to you. Worst first by the mistake rate's interval, then that loss.
 - `repeats` lists the same mistake from the same position in 3 or more games (inaccuracies or
-  worse; named book moves left out): the better move, their best answer and how often they found
-  it, the reasons in chess terms, links to the games, and whether a puzzle drills it.
+  worse; named book moves left out; a position reached by another move order is the same
+  position): the better move, their best answer and how often they found it, the reasons in chess
+  terms, links to the games, and whether a puzzle drills it.
 - `serve` opens the coach on http://127.0.0.1:8765 (localhost only, no account or key):
   - **What you get wrong**: the mistakes you repeat (which piece and kind of move, captures or
     checks you keep missing, motifs) and the situations where your mistake rate jumps, each with
@@ -222,9 +223,10 @@ across 8+ games.
 - `puzzles make --openings` turns those opening fixes into drills; any move within 30 cp of the
   best counts, since openings often have several good moves. `puzzles prune` drops untried
   puzzles that no longer count (bullet after move 10, moves made short on time). A position is
-  drilled once: a slip repeated from the same position, or a fix two openings share, adds its
-  tags to the puzzle already there. `puzzles dedupe` merges the copies made before that (keeping
-  the one you've tried, else the oldest; a tried puzzle is never deleted).
+  drilled once, however the game got there: a slip repeated from the same position, or a fix two
+  openings share, adds its tags to the puzzle already there. `puzzles dedupe` merges the copies
+  made before that (keeping the one you've tried, else the oldest; a tried puzzle is never
+  deleted).
 
 Motif tags are computed in code from the board and the engine's facts, never by a model:
 

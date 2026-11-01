@@ -186,23 +186,26 @@ Built:
 - **Puzzle dedupe.** `make_opening_fixes` read the checked keys once and never added the one it
   had just checked, so a fix two families share (Modern and Pirc, 3...Bg7 after 1.e4 d6 2.Bc4 g6
   3.Qf3) was verified and stored twice: fixed. `make` and `make_opening_fixes` now keep an
-  in-memory index of the stored puzzles by (fen, solution) (`puzzles.make.Stored`): a copy isn't
-  stored, its tags go to the puzzle already there, and a fix already checked for another opening
-  tags that drill with this opening too. `puzzles dedupe` (its own command; `prune` is about the
-  counting rules) merges older copies: keeps the copy with attempts, else the oldest, unions the
-  tags, deletes the rest; when 2+ copies have attempts they all stay and it says so.
+  in-memory index of the stored puzzles by (position, solution) (`puzzles.make.Stored`): a copy
+  isn't stored, its tags go to the puzzle already there, and a fix already checked for another
+  opening tags that drill with this opening too. A position is its EPD (`openings.epd`: the FEN
+  without the halfmove clock and move number), so a drill reached by another move order is the
+  same drill; the fix check key is the EPD too, and keys recorded with the whole FEN are read as
+  their position's, so nothing is checked again. `puzzles dedupe` (its own command; `prune` is
+  about the counting rules) merges older copies: keeps the copy with attempts, else the oldest,
+  unions the tags, deletes the rest; when 2+ copies have attempts they all stay and it says so.
   "opening-fix" is a kind of drill (prompt, accepted moves), not a theme, so it is never carried
   over to an ordinary puzzle; its opening's tag is.
 - **Repeats** (`coach/repeats.py`): the user's counted errors (inaccuracy or worse; bullet only to
-  move 10; nothing played short on time) grouped by (fen_before, move), kept when played in 3+
-  games. Each has the better move, their best answer (the next ply's stored best move, from
-  `Store.replies_to_errors`) and how often they found it, reasons from `principles.allows`
-  (`yours=True`: "hit your knight") and `explain`, links (`Game.move_url`), and whether a puzzle
-  drills the position (a puzzle there whose answer isn't the move). Shown by `chess-coach
-  repeats`, a digest section (with `--since`: the ones played again since, still counted over all
-  games), `/api/repeats` and a section on "What you get wrong", and `sync` prints "You played
-  3...Bg7 again (12th time); it has a puzzle." (or the better move) for each repeat a new game
-  is part of.
+  move 10; nothing played short on time) grouped by (position, move), the position being the EPD
+  as above, kept when played in 3+ games. Each has the better move, their best answer (the next
+  ply's stored best move, from `Store.replies_to_errors`) and how often they found it, reasons
+  from `principles.allows` (`yours=True`: "hit your knight") and `explain`, links
+  (`Game.move_url`), and whether a puzzle drills the position (a puzzle there whose answer isn't
+  the move). Shown by `chess-coach repeats`, a digest section (with `--since`: the ones played
+  again since, still counted over all games), `/api/repeats` and a section on "What you get
+  wrong", and `sync` prints "You played 3...Bg7 again (12th time); it has a puzzle." (or the
+  better move) for each repeat a new game is part of.
 - **The opening after move 10** (`repertoire.after_ten`), per family and colour, by the engine
   only, so bullet counts: the median eval after your 10th move (clamped at +-10 like Lichess's
   ACPL; median because blowouts skew a mean), the share of games at -1 or worse and the mistake
@@ -224,24 +227,54 @@ Decisions:
 - The book position is the *last* one named (the spec's wording), not where the game first left
   the table: in the Modern and Pirc, games often leave the table on White's second move and come
   back to a named line two moves later.
+- A position is its EPD, not its full FEN, wherever a repeat or a drill is matched: the FEN's
+  halfmove clock and move number differ when another move order got there (the Scotch and the
+  Danish Gambit Accepted meet at 7.O-O with clocks 3 and 5), and that is one mistake and one
+  drill.
+- A fix two openings share is one drill carrying both openings' tags; Practice names it after
+  the opening being drilled (the tag asked for, when it is one of the table's families), else
+  its first.
+- "Since book" is shown as a bare median. For the conclusions below its 95% interval was worked
+  out separately (distribution-free, from the order statistics of the per-game values): it is
+  wide for most families, so a small since-book value means no clear change, not "no loss".
+
+Fixed after review (2026-11-01): repeats, make-time dedupe, `puzzles dedupe` and the fix check
+key matched the full FEN (see the decision above); `openings --min-games 0` crashed
+(`StatisticsError`) on a family whose games all ended before move 10; Wilson bounds came out a
+hair below 0 (708 of the n under 3,000 for 0 hits), printed as "-0%"; `openings` printed the
+after-ten heading with no table when no family qualified; a shared fix drill was labelled with
+its first opening in the other opening's "Drill these fixes"; a repeat card read "Last on null"
+for undated PGN games. The sync alert's filter and `allows(yours=True)` now have tests.
 
 On the owner's games (a copy, 2,099 Lichess games at depth 12):
-- `puzzles dedupe`: 13 positions were stored more than once; removed 17 copies, 544 -> 527
+- `puzzles dedupe`: 14 positions were stored more than once; removed 19 copies, 544 -> 525
   puzzles, the 5 attempts untouched (no group had a tried copy). The Modern/Pirc 3...Nf6 drill now
-  has both tags; 6...Qxd1+ (an own-mistake puzzle) took the Pirc fix's family tag. Make-time
-  check on another copy with those 17 copies and their checks removed: `puzzles make --openings`
-  re-checked 21 positions at depth 18 and made 0, leaving the same 527.
-- `repeats`: 30 repeats over 167 games, 19 already drilled by a puzzle (37 over 324 with book
+  has both tags, and so does the Scotch/Danish Gambit Accepted 7.e5 drill (one position, two move
+  orders); 6...Qxd1+ (an own-mistake puzzle) took the Pirc fix's family tag. By the full FEN it
+  was 13 positions and 17 copies: the 7.e5 pair and a third 7.Ng5 copy survived. On the copy
+  already deduped that way (527), the new `puzzles dedupe` merged those 2 and left 525. Make-time
+  check on another copy with the 19 copies and their 26 check keys removed: `puzzles make
+  --openings` re-checked 21 moves at depth 18 and made 0, leaving the same 525. Deleting only the
+  Danish 7.O-O drill and its check key, the same command checks nothing and tags the Scotch's
+  drill with the Danish Gambit Accepted.
+- `repeats`: 35 repeats over 200 games, 22 already drilled by a puzzle (42 over 357 with book
   moves). Top: 3.c3 in the Center Game, 3.c3 in the Sicilian and 5.Nf3 in the Danish Gambit
   Accepted (19 games each), then 3...Bg7 in the Modern (11 games, last 2026-09-22; 4.Qxf7+ found
-  9 of 11 times; has a puzzle). The 3.c3 Center Game one has no puzzle.
+  9 of 11 times; has a puzzle). The 3.c3 Center Game one has no puzzle. By the full FEN it was 30
+  over 167: 7.O-O in the Scotch and the Danish was two repeats of 3 games (one of 6), seven were
+  undercounted (a 5...O-O shown in 4 games was played in 7, and has a puzzle that went unseen)
+  and six with 3+ games were missing.
 - After move 10: 1,693 bullet games get there (mean -0.43, 31% at -1 or worse); 23 families with
   White and 14 with Black have 5+ such games. Worst with White: the Blackmar-Diemer, 79 games,
-  median -0.9, 49% (39-60%) at -1 or worse, mistakes on 7.8% (6.1-9.8%) of moves 1-10, but only
-  -0.2 since book: the deficit is mostly the gambit's. With Black the Modern (417 games, -0.4,
-  33% at -1 or worse, 3.3%), Queen's Pawn Game (175, -0.5 median vs -0.8 mean) and Pirc (177,
-  -0.3) are all *up* since book (+0.3, +0.1, +0.2): the engine dislikes Black's book positions;
-  the user doesn't lose ground after them.
+  median -0.9, 49% (39-60%) at -1 or worse, mistakes on 7.8% (6.1-9.8%) of moves 1-10, and -0.2
+  since book, but that median's 95% interval runs from -85 to +48 cp (38 games up since book, 41
+  down): how much of the -0.9 is the gambit's and how much the user loses after it is not
+  settled. With Black the Modern (417 games, -0.4, 33% at -1 or worse, 3.3%) and the Pirc (177,
+  -0.3) are *up* since book, +0.3 (95% interval +3 to +40 cp; 234 games up, 183 down) and +0.2
+  (+8 to +39 cp; 107 up, 69 down): the engine dislikes Black's book positions there, and the user
+  doesn't lose ground after them. The Queen's Pawn Game (175, -0.5 median vs -0.8 mean) is +0.1
+  since book, but its interval (-1 to +32 cp; 99 up, 75 down, sign test p = 0.08) includes no
+  change, so it isn't shown to be up.
 - `/api/repeats` takes 1.1 s and `/api/openings` 1.6 s the first time (both cached after).
 - `sync` was not run for real (no network in this work); its alert is tested with a faked fetch.
 
