@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import chess
+import pytest
 from rich.console import Console
 from typer.testing import CliRunner
 
@@ -11,11 +12,22 @@ from chess_coach import cli
 from chess_coach.db import Store
 from chess_coach.engine.stockfish import LineEval
 from chess_coach.models import Puzzle
-from chess_coach.puzzles.make import Merge, dedupe, make_opening_fixes
+from chess_coach.puzzles.make import Merge, Stored, dedupe, make_opening_fixes
 
 from .test_coach_web import AFTER_ITALIAN, italian_games, kf1
 
 O_O, D3 = chess.Move.from_uci("e1g1"), chess.Move.from_uci("d2d3")
+
+
+def _fen(sans: str) -> str:
+    board = chess.Board()
+    for san in sans.split():
+        board.push_san(san)
+    return board.fen()
+
+
+# AFTER_ITALIAN by another move order: the same position, its halfmove clock 2 instead of 4
+ITALIAN_BY_NF3 = _fen("Nf3 Nc6 e4 e5 Bc4 Bc5")
 
 
 class CountingEngine:
@@ -28,20 +40,25 @@ class CountingEngine:
         return self.lines
 
 
-def two_openings_one_fix(db: Path) -> None:
-    """Ten Italian-position games in two opening families, each with the habitual 4.Kf1 twice."""
+def two_openings_one_fix(db: Path, transposed: bool = False) -> None:
+    """Ten Italian-position games in two opening families, each with the habitual 4.Kf1 twice;
+    `transposed`: the second family gets there by another move order."""
     games = italian_games(10)
     for g in games[5:]:
         g.opening = "Two Knights Defense"
     with Store(db) as store:
-        for g in games:
+        for i, g in enumerate(games):
             store.upsert_game(g)
-            store.replace_moves(g.id, [kf1(g.id)] if int(g.source_id[1:]) % 5 < 2 else [], 12)
+            facts = [kf1(g.id)] if i % 5 < 2 else []
+            for m in facts:
+                m.fen_before = ITALIAN_BY_NF3 if transposed and i >= 5 else AFTER_ITALIAN
+            store.replace_moves(g.id, facts, 12)
 
 
-def test_a_fix_shared_by_two_openings_is_checked_and_stored_once(tmp_path: Path):
+@pytest.mark.parametrize("transposed", [False, True])
+def test_a_fix_shared_by_two_openings_is_checked_and_stored_once(tmp_path: Path, transposed):
     db = tmp_path / "c.db"
-    two_openings_one_fix(db)
+    two_openings_one_fix(db, transposed)
     engine = CountingEngine([LineEval(40, None, O_O), LineEval(-10, None, D3)])
     with Store(db) as store:
         result = make_opening_fixes(store, engine)
@@ -50,6 +67,15 @@ def test_a_fix_shared_by_two_openings_is_checked_and_stored_once(tmp_path: Path)
         # one drill, practised from either opening
         assert p.tags == ["opening-fix", "Italian Game", "Two Knights Defense"]
         assert make_opening_fixes(store, engine).checked == 0
+
+
+def test_a_fix_checked_before_fixes_were_keyed_by_position_is_not_checked_again(tmp_path: Path):
+    db = tmp_path / "c.db"
+    two_openings_one_fix(db)
+    engine = CountingEngine([LineEval(40, None, O_O), LineEval(-10, None, D3)])
+    with Store(db) as store:
+        store.record_check(f"fix:{AFTER_ITALIAN}:e1f1", False)  # the old key: the whole FEN
+        assert (make_opening_fixes(store, engine).checked, engine.calls) == (0, 0)
 
 
 def test_a_fix_that_is_already_a_puzzle_only_adds_its_opening(tmp_path: Path):
@@ -100,6 +126,31 @@ def italian_games_stored(db: Path, n: int) -> None:
     with Store(db) as store:
         for g in italian_games(n):
             store.upsert_game(g)
+
+
+def test_a_drill_reached_by_another_move_order_is_not_stored_again(tmp_path: Path):
+    db = tmp_path / "c.db"
+    italian_games_stored(db, 2)
+    with Store(db) as store:
+        stored = Stored(store)
+        assert stored.add(copy(0))
+        assert not stored.add(copy(1, fen=ITALIAN_BY_NF3, tags=("missed_tactic",)))
+        (p,) = store.puzzles()
+        assert (p.id, p.tags) == ("lichess:g0:7", ["opening", "missed_tactic"])
+        assert stored.at(ITALIAN_BY_NF3, "e1f1").id == "lichess:g0:7"
+
+
+def test_dedupe_merges_copies_reached_by_another_move_order(tmp_path: Path):
+    db = tmp_path / "c.db"
+    italian_games_stored(db, 2)
+    with Store(db) as store:
+        store.add_puzzle(copy(0, tags=("opening-fix", "Italian Game")))
+        store.add_puzzle(copy(1, fen=ITALIAN_BY_NF3, tags=("opening-fix", "Two Knights Defense")))
+        (m,) = dedupe(store)
+        assert ([k.id for k in m.kept], m.removed) == (["lichess:g0:7"], ["lichess:g1:7"])
+        assert [p.tags for p in store.puzzles()] == [
+            ["opening-fix", "Italian Game", "Two Knights Defense"]
+        ]
 
 
 def _tried(store: Store, puzzle_id: str) -> None:
