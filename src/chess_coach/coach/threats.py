@@ -232,5 +232,10 @@ def gap(step: Step) -> str:
     """Your share minus theirs in percentage points and its 95% interval, as in "+3.4 points,
     +0.2 to +6.5"."""
     low, high = step.diff
-    d = step.you.rate - step.them.rate
-    return f"{100 * d:+.1f} points, {100 * low:+.1f} to {100 * high:+.1f}"
+    return f"{_points(step.you.rate - step.them.rate)} points, {_points(low)} to {_points(high)}"
+
+
+def _points(rate: float) -> str:
+    """A signed rate in percentage points, one decimal: "+3.4". Never "-0.0" (adding 0.0 turns
+    the -0.0 that rounding a tiny negative gives into 0.0)."""
+    return f"{round(100 * rate, 1) + 0.0:+.1f}"
