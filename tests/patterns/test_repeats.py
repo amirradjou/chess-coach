@@ -98,6 +98,28 @@ def test_the_same_position_by_another_move_order_is_the_same_repeat(tmp_path: Pa
     assert found_in(db, [drill])[0].puzzle == "lichess:g2:7"
 
 
+# 3.Nf3?! in the Caro-Kann (3.e5 is better): 3...dxe4 hits the knight
+CARO_KANN = "e4 c6 d4 d5 Nf3 dxe4".split()
+
+
+def store_caro_kanns(db: Path, first: int = 10) -> None:
+    """Three more games, each with 3.Nf3 and 3...dxe4: a second repeat."""
+    with Store(db) as store:
+        for i in range(first, first + 3):
+            g = game(i)
+            g.opening = "Caro-Kann Defense"
+            store.upsert_game(g)
+            store.replace_moves(g.id, facts(g.id, CARO_KANN, {5: 12.0}, {5: "e5"}), depth=12)
+
+
+def test_their_answer_hits_your_pieces(tmp_path: Path):
+    db = tmp_path / "c.db"
+    store_caro_kanns(db)
+    (r,) = found_in(db)
+    assert (r.move, r.better, r.punish, r.punished) == ("3.Nf3", "3.e5", "3...dxe4", 3)
+    assert r.reasons[0] == "It lets dxe4 hit your knight on f3."  # yours, not theirs
+
+
 def test_fewer_than_three_games_is_not_a_repeat(tmp_path: Path):
     db = tmp_path / "c.db"
     store_games(db)
@@ -186,6 +208,8 @@ def test_sync_says_when_a_new_game_repeats_one(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(cli, "console", Console(width=200))
     db = tmp_path / "c.db"
     store_games(db)
+    store_caro_kanns(db)  # a repeat the new game doesn't play
+    assert [r.move for r in found_in(db)] == ["5.Nf3", "3.Nf3"]
     new = game(9)
     new.opening, new.analyzed_depth = "Danish Gambit Accepted", None
     line = [*DANISH, "Nf6", "Nf3", "Nxe4"]
@@ -205,3 +229,4 @@ def test_sync_says_when_a_new_game_repeats_one(tmp_path: Path, monkeypatch):
     result = CliRunner().invoke(cli.app, ["--db", str(db), "sync"])
     assert result.exit_code == 0, result.output
     assert "You played 5.Nf3 again (5th time); the better move is 5.e5." in result.output
+    assert "3.Nf3" not in result.output  # only what the new games played again
