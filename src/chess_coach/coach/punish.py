@@ -223,7 +223,8 @@ def _span(stretch: Sequence[Gift]) -> str:
 
 @dataclass(slots=True)
 class Family:
-    """An opening where you miss more than your opponents do, with your costliest misses there."""
+    """An opening where you clearly miss more than your opponents do (its own 95% interval leaves
+    out zero), with your costliest misses there."""
 
     compare: Compare
     examples: list[Gift] = field(default_factory=list)
@@ -234,8 +235,9 @@ class Report:
     groups: list[Compare]  # bullet (moves 1-10), then blitz and rapid
     kinds: list[Compare]  # by the punishing move: capture, check, quiet (labels are KINDS keys)
     trend: list[Compare]
-    # Where the gap comes from: openings and costliest misses in the groups where you miss more
-    # than your opponents (`focus`, their labels), or in all of them when there is none.
+    # Where the gap comes from, inside the groups where you miss more than your opponents
+    # (`focus`, their labels): the openings where you clearly miss more too. None without such a
+    # group. Your costliest misses come from those groups, or from all of them when there is none.
     focus: list[str]
     families: list[Family]
     worst: list[Gift]
@@ -258,20 +260,22 @@ def report(
     examples: int = 2,
     worst: int = 3,
 ) -> Report:
-    """Everything above over `games`. Openings are ranked by `Compare.excess`, so the ones listed
-    are where the gap comes from, not just where you play most."""
+    """Everything above over `games`. Openings are only looked at inside a group where you miss
+    more than your opponents, and one is listed only when its own gap clears zero as well: a
+    raw excess would list 1-of-1 samples. They are ranked by `Compare.excess`, so the first are
+    where most of the gap comes from, not just where you play most."""
     found = gifts(games, pairs)
     groups = {
         key: compare(name, (g for g in found if g.group == key)) for key, name in GROUPS.items()
     }
     worse = [key for key, c in groups.items() if c.verdict == "worse"]
-    pool = [g for g in found if g.group in worse] if worse else found
-    misses = [g for g in pool if g.yours and g.missed]
+    focused = [g for g in found if g.group in worse]
     by_family: dict[str, list[Gift]] = {}
-    for g in pool:
+    for g in focused:
         if family := g.game.opening_family:
             by_family.setdefault(family, []).append(g)
-    ranked = sorted((compare(f, gs) for f, gs in by_family.items()), key=lambda c: -c.excess)
+    clear = [c for c in (compare(f, gs) for f, gs in by_family.items()) if c.verdict == "worse"]
+    misses = [g for g in (focused if worse else found) if g.yours and g.missed]
     return Report(
         groups=list(groups.values()),
         kinds=[compare(kind, (g for g in found if g.kind == kind)) for kind in KINDS],
@@ -279,8 +283,7 @@ def report(
         focus=[GROUPS[key] for key in worse],
         families=[
             Family(c, costliest((g for g in misses if g.game.opening_family == c.label), examples))
-            for c in ranked[:families]
-            if c.excess > 0
+            for c in sorted(clear, key=lambda c: -c.excess)[:families]
         ],
         worst=costliest(misses, worst),
     )

@@ -452,20 +452,26 @@ def punish(
         "may hold fewer)"
     )
     console.print(_rates_table(title, "games played", r.trend))
+    # Openings only where you clearly miss more (inside a group where you do); otherwise your
+    # costliest misses are the evidence.
+    shown = r.worst
     if r.families:
-        where = f" ({', '.join(r.focus)})" if r.focus else ""
-        title = f"Openings where you miss more than your opponents{where}"
+        title = f"Openings where you miss more than your opponents ({', '.join(r.focus)})"
         console.print(_rates_table(title, "opening", [f.compare for f in r.families]))
-    for f in r.families:
-        for g in f.examples:
-            best = label(g.reply, g.reply.best_san)
-            parts = [
-                f"{f.compare.label}: after {label(g.blunder)} you played {label(g.reply)}; "
-                f"{best} would have punished it.",
-                *g.reasons(),
-                f"[dim]{g.url}[/dim]" if g.url else "",
-            ]
-            console.print(" ".join(p for p in parts if p))
+        shown = [g for f in r.families for g in f.examples]
+    elif r.worst:
+        where = f" in {' and '.join(r.focus).lower()}" if r.focus else ""
+        console.print(f"\n[bold]Your costliest misses{where}[/bold]")
+    for g in shown:
+        text = f"after {label(g.blunder)} you played {label(g.reply)}; "
+        text += f"{label(g.reply, g.reply.best_san)} would have punished it."
+        family = g.game.opening_family
+        parts = [
+            f"{family}: {text}" if family else text[0].upper() + text[1:],
+            *g.reasons(),
+            f"[dim]{g.url}[/dim]" if g.url else "",
+        ]
+        console.print(" ".join(p for p in parts if p))
     console.print(
         "Drill your missed punishments: `chess-coach drill --tag punish_capture` (or "
         "punish_check, punish_quiet; missed_tactic for all of them)."

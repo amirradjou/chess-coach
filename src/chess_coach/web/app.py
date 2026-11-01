@@ -369,6 +369,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
                     {**_compare(f.compare), "examples": [_miss(g) for g in f.examples]}
                     for f in r.families
                 ],
+                "worst": [_miss(g) for g in r.worst],  # shown when no opening stands out
             }
 
         return cached("punish", key, make)

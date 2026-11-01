@@ -258,16 +258,17 @@ def _punish_lines(r: Report) -> list[str]:
     if kinds:
         verdict = " ".join(r.lessons) or "No kind stands out against your opponents."
         out += ["", f"Missed, by the move that punishes: {kinds}. {verdict}"]
-    if r.families:
+    focus = " and ".join(r.focus).lower()  # the groups where you miss more, if any
+    if r.families:  # only inside those groups, each with its own gap clear of zero
         where = ", ".join(
             f"the {c.label} (you missed {c.yours.missed} of {c.yours.n}, they missed "
             f"{c.theirs.missed} of {c.theirs.n})"
             for c in (f.compare for f in r.families)
         )
-        focus = f"In {' and '.join(r.focus).lower()}, you" if r.focus else "You"
-        out += ["", f"{focus} miss more than your opponents most in {where}."]
+        out += ["", f"In {focus}, you miss more than your opponents most in {where}."]
     if r.worst:
-        out += ["", "Your costliest misses:", "", *(f"- {_miss(g)}" for g in r.worst)]
+        title = f"Your costliest misses in {focus}:" if focus else "Your costliest misses:"
+        out += ["", title, "", *(f"- {_miss(g)}" for g in r.worst)]
     out.append("")
     return out
 
@@ -364,4 +365,13 @@ def render(d: Digest, top: int = 5) -> str:
         "the low end of its 95% interval is still above your usual rate. They are ranked by how "
         "many extra mistakes they cost you. Links open the game at the move on Lichess.",
     ]
+    if d.punish is not None and d.punish.gifts:
+        out += [
+            "",
+            "When they blunder is the exception: it also counts your opponents' replies to your "
+            "blunders, as the yardstick for yours. There you are only called worse or better than "
+            "your opponents (in a group of games, for a kind of punishing move, or in an opening) "
+            "when the 95% interval of the gap leaves out zero, and openings are only looked at in "
+            "a group where you are worse.",
+        ]
     return "\n".join(out).rstrip() + "\n"

@@ -223,6 +223,48 @@ def test_openings_and_examples_come_from_where_the_gap_is():
     assert len(r.worst) == 3 and all(g.yours and g.missed for g in r.worst)
 
 
+def test_an_opening_is_listed_only_when_its_own_gap_clears_zero():
+    games, pairs = _season()
+    sicilian = [bullet(40), bullet(41)]
+    for g in sicilian:
+        g.opening = "Sicilian Defense"
+    # You missed your one chance there and they didn't: an excess, but 1 of 1 against 0 of 1.
+    pairs += [chance(sicilian[0], 2, missed=True), chance(sicilian[1], 2, yours=False)]
+    r = report(games + sicilian, pairs)
+    assert r.focus == ["Bullet, moves 1-10"]
+    # Ranked by excess: 23 of 40 against their 25%, then 25 of 40 against their 35%.
+    assert [f.compare.label for f in r.families] == ["Queen's Pawn Game", "Danish Gambit Accepted"]
+    assert all(f.compare.verdict == "worse" for f in r.families)
+
+
+def _level():
+    """Blitz only, level overall: you miss 8 of 20 and so do they. In the Sicilian you missed 6 of
+    10 against their 4 of 10, more than they did but nowhere near a real gap."""
+    games = [game(i) for i in range(20)]
+    for i, g in enumerate(games):
+        g.opening = "Sicilian Defense" if i % 2 else "French Defense"
+    sicilian, french = games[1::2], games[::2]
+    pairs = (
+        chances(sicilian[:5], 10, 6)
+        + chances(french[:5], 10, 2)
+        + chances(sicilian[5:], 10, 4, yours=False)
+        + chances(french[5:], 10, 4, yours=False)
+    )
+    return games, pairs
+
+
+def test_no_opening_is_listed_without_a_gap_to_explain():
+    games, pairs = _level()
+    r = report(games, pairs)
+    assert [c.verdict for c in r.groups] == ["same", "same"]
+    assert (r.focus, r.families) == ([], [])
+    # Your costliest misses are still the evidence, from all the games.
+    assert len(r.worst) == 3 and all(g.yours and g.missed for g in r.worst)
+    text = render(build(games, [x for _, x in pairs if x.is_user], gifts=pairs))
+    assert "miss more than your opponents most in" not in text
+    assert "\nYour costliest misses:\n" in text
+
+
 def test_a_kind_lesson_needs_you_to_miss_it_more_than_your_opponents():
     g = [game(i) for i in range(10)]
     # Everyone misses quiet punishments more than captures: that alone is no lesson.
@@ -309,12 +351,14 @@ def test_the_digest_has_a_section_only_with_both_sides_moves():
     assert kinds + LESSONS["capture"] in text
     assert "a check, you" not in text and "a quiet move, you" not in text
     assert "In bullet, moves 1-10, you miss more than your opponents most in the" in text
-    assert "Your costliest misses:" in text and "(https://lichess.org/g" in text
+    assert "Your costliest misses in bullet, moves 1-10:" in text
+    assert "(https://lichess.org/g" in text
+    assert "When they blunder is the exception: it also counts your opponents' replies" in text
     assert "When they blunder" not in render(build(games, moves))
 
 
-def _store(db: Path) -> None:
-    games, pairs = _season()
+def _store(db: Path, season=_season) -> None:
+    games, pairs = season()
     with Store(db) as store:
         for g in games:
             store.upsert_game(g)
@@ -341,6 +385,12 @@ def test_punish_command(tmp_path):
     assert "punished it.  " not in result.output
     empty = CliRunner().invoke(app, ["--db", str(tmp_path / "empty.db"), "punish"])
     assert "No blunders to compare yet" in empty.output
+    level = tmp_path / "level.db"
+    _store(level, _level)
+    result = CliRunner().invoke(app, ["--db", str(level), "punish"], env={"COLUMNS": "200"})
+    assert "Openings where you miss more" not in result.output
+    assert "Your costliest misses\n" in result.output
+    assert "Sicilian Defense: after 1...Qh5 you played 2.Qh5" in result.output
 
 
 def test_the_web_page_needs_no_engine(tmp_path):
@@ -359,5 +409,12 @@ def test_the_web_page_needs_no_engine(tmp_path):
     check = p["kinds"][1]  # no checking punishments on either side: no gap to show
     assert (check["yours"]["n"], check["gap"], check["interval"]) == (0, None, None)
     assert p["focus"] == ["Bullet, moves 1-10"] and p["trend"]
-    example = p["families"][0]["examples"][0]
+    family = p["families"][0]
+    assert (family["label"], family["verdict"], family["gap"]) == (
+        "Queen's Pawn Game",
+        "worse",
+        32.5,
+    )
+    example = family["examples"][0]
     assert example["url"].startswith("https://lichess.org/g") and "move" in example
+    assert len(p["worst"]) == 3  # shown on the page when no opening stands out

@@ -167,12 +167,17 @@ function punishSection(p, tagList) {
       el("p", { class: "muted small" }, "Each row is a stretch of games holding about 150 of their blunders you could punish (the oldest may hold fewer); both rates in a row come from the same games."),
       rateTable("games played", p.trend),
     ] : null,
+    // Openings only where you clearly miss more (inside a group where you do); otherwise your
+    // costliest misses are the evidence.
     p.families.length ? [
       el("h3", {}, `Where you miss more than your opponents${focus}`),
       p.families.map((f) => el("div", { class: "card" },
         el("h3", {}, f.label),
-        el("div", { class: "muted" }, `You missed ${f.yours.missed} of ${f.yours.n} (${f.yours.rate.toFixed(1)}%); they missed ${f.theirs.missed} of ${f.theirs.n} (${f.theirs.rate.toFixed(1)}%).`),
+        el("div", { class: "muted" }, `You missed ${f.yours.missed} of ${f.yours.n} (${f.yours.rate.toFixed(1)}%); they missed ${f.theirs.missed} of ${f.theirs.n} (${f.theirs.rate.toFixed(1)}%): ${points(f.gap)} points (95% interval ${points(f.interval[0])} to ${points(f.interval[1])}).`),
         el("div", { class: "examples" }, f.examples.map(missExample)))),
+    ] : p.worst.length ? [
+      el("h3", {}, `Your costliest misses${focus}`),
+      el("div", { class: "examples" }, p.worst.map(missExample)),
     ] : null,
     el("p", { class: "muted small" }, "Learn openings has a deck of the mistakes your opponents make in your openings' first 8 moves (Punish their mistakes); this counts every move that counts."),
   ];
