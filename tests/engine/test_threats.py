@@ -204,6 +204,15 @@ def test_a_guess_at_their_threat_is_graded_leniently():
         chess.Board("r1bqkbnr/pppp1ppp/2n5/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4")
     )
     assert same_threat(scholar, U("h5f7"), U("h5f7"))
+    # another piece to the same square: their Bg4 and Ne5 both hit your knight on f3
+    pinned = pass_turn(
+        chess.Board("r2qkbnr/ppp2ppp/3p4/4n3/2B1P1b1/5N2/PPP2PPP/RNBQ1RK1 w kq - 0 7")
+    )
+    assert same_threat(pinned, U("e5f3"), U("g4f3"))
+    # another mate when the threat mates (Rb8# for Ra8#), but not a move that doesn't mate
+    back_rank = pass_turn(chess.Board("7k/6pp/8/8/8/8/8/RR4K1 b - - 0 1"))
+    assert same_threat(back_rank, U("b1b8"), U("a1a8"))
+    assert not same_threat(back_rank, U("a1a7"), U("a1a8"))
 
 
 # -- with Stockfish -----------------------------------------------------------------------
