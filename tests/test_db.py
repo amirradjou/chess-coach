@@ -144,3 +144,16 @@ def test_lichess_games_stored_under_a_hash_get_their_lichess_id_back(tmp_path) -
         assert store.attempts()[0][0] == f"{new}:1"
         assert store.checked_moves() == {f"{new}:1"}
         assert store.conn.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_gifts_pair_each_costly_move_with_the_next_one() -> None:
+    with Store(":memory:") as store:
+        store.upsert_game(make_game())
+        losses = {1: 0.5, 2: 30.0, 3: 25.0, 4: 1.0, 5: 19.9, 6: 2.0, 7: 40.0}  # 7 is the last move
+        store.replace_moves(
+            "pgn:1", [make_move("pgn:1", p, wp_loss=w) for p, w in losses.items()], depth=12
+        )
+        pairs = store.gifts(20.0)
+    # 2 and 3 are both costly (3 is the reply to 2 and a gift of its own); 7 has no reply
+    assert [(g.ply, r.ply) for g, r in pairs] == [(2, 3), (3, 4)]
+    assert [(g.is_user, r.is_user) for g, r in pairs] == [(False, True), (True, False)]

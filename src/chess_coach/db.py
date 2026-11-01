@@ -363,6 +363,17 @@ class Store:
     def count_moves(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM moves").fetchone()[0]
 
+    def gifts(self, min_wp_loss: float) -> list[tuple[MoveFact, MoveFact]]:
+        """(move, the next move) for every move of either player that lost at least
+        `min_wp_loss` points of win probability and was answered, in game and ply order."""
+        pair = (
+            "FROM moves g JOIN moves r ON r.game_id = g.game_id AND r.ply = g.ply + 1 "
+            "WHERE g.wp_loss >= ? ORDER BY g.game_id, g.ply"
+        )
+        given = self.conn.execute(f"SELECT g.* {pair}", (min_wp_loss,))
+        replies = self.conn.execute(f"SELECT r.* {pair}", (min_wp_loss,))
+        return [(_row_to_move(g), _row_to_move(r)) for g, r in zip(given, replies, strict=True)]
+
     # -- puzzles -----------------------------------------------------------------
 
     def checked_moves(self) -> set[str]:
