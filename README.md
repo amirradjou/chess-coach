@@ -145,11 +145,19 @@ across 8+ games.
   before and after from the mover's side, the best move and line, centipawn and win-probability
   loss, a Lichess-style judgement (inaccuracy, mistake, blunder), the game phase, the clock, and
   motif tags. It resumes where it stopped and re-runs only at a greater depth (or `--force`).
-- `sync` does import, analyse and `puzzles make` for you: it fetches every game since the newest
-  one stored for each Lichess and Chess.com account (all or nothing, so a failed download leaves
-  no gap), analyses whatever isn't analysed yet, newest first, makes puzzles, and says what came
-  in and what's due. Bullet results aren't reported, by the rule above.
+- `sync` does import, analyse, `puzzles make` and `threats` for you: it fetches every game since
+  the newest one stored for each Lichess and Chess.com account (all or nothing, so a failed
+  download leaves no gap), analyses whatever isn't analysed yet, newest first, makes puzzles,
+  checks the new mistakes for threats, and says what came in and what's due. Bullet results aren't reported, by the rule above.
 - `stats` prints a per-game accuracy table and how often each motif shows up in your moves.
+- `threats` asks, before every counted mistake and blunder (yours and your opponents'), what the
+  other side threatened: the mover passes and Stockfish (depth 12) finds their best move. A
+  mistake is an *ignored threat* (their last move threatened mate or material and your move
+  didn't meet it) or an *unsafe move* (nothing was threatened, but your move allowed a reply
+  winning two pawns' worth or more). It shows each share of your mistakes next to your
+  opponents', with 95% intervals, and only calls one yours to work on when you clearly do it more
+  often than they do (on the author's games: neither). About 30 seconds for 2,500 mistakes;
+  resumable, and `sync` runs it for new games.
 - `digest` slices your moves by phase, colour, speed, opening, move number and clock (and
   pairs of them), and your games by colour, speed, opening, castling and queen trades. It keeps a
   slice only when it has enough moves (30) or games (8), your mistake rate (or loss rate) there
@@ -176,12 +184,16 @@ across 8+ games.
   - **What you get wrong**: the mistakes you repeat (which piece and kind of move, captures or
     checks you keep missing, motifs) and the situations where your mistake rate jumps, each with
     a *what to learn* note and your own positions on boards: red arrow your move, green the
-    engine's. "Practise these positions" opens the matching drills.
+    engine's, orange their threat (from `threats`), said in words. "Practise these positions"
+    opens the matching drills. A small section compares your ignored threats and unsafe moves
+    with your opponents'.
   - **Practice**: due puzzles on a board you click (piece, then square), filtered by theme. A
     wrong move shows their best reply, what it costs in material and score, and lets you try
     again (only the first answer counts for the schedule). Once it's solved or shown you get the
     best line, each of your tries and your game move as lines to step through (◀ ▶ or the arrow
     keys), and any move you play on the board is answered by Stockfish (depth 16, if installed).
+    A puzzle from a threat you ignored first asks "What do they threaten?" (click their move;
+    any move to the same square counts; you can skip), then the puzzle with the threat in orange.
   - Every wrong move, example and opening fix also gets reasons in chess terms, worked out from
     the board by `coach/principles.py` (no model): a piece left hanging, castling given up, the
     pawns in front of your castled king pushed, the queen out early, development skipped, a
@@ -260,6 +272,7 @@ uv run chess-coach sync                                          # later: fetch,
 uv run chess-coach games                                         # what is stored
 uv run chess-coach analyze --depth 12 --threads 4
 uv run chess-coach stats
+uv run chess-coach threats                                       # ignored threats vs unsafe moves
 uv run chess-coach digest -o digest.md                           # patterns across your games
 uv run chess-coach digest --since 7d                             # this week vs before
 uv run chess-coach puzzles make --limit 50                       # your mistakes as puzzles
