@@ -775,6 +775,12 @@ def _pawns(cp: int) -> str:
 def _after_ten_tables(ranked: dict, min_games: int) -> None:
     """Openings by the engine's eval after your 10th move: results don't come into it, so bullet
     games count. Ranked by the mistake rate's interval and what you lost since book."""
+    if not any(ranked.values()):
+        console.print(
+            f"\nNo opening has {min_games} games that got to your 10th move yet, so none is "
+            "judged by the engine there."
+        )
+        return
     console.print(
         "\n[bold]Engine eval after your 10th move (not results)[/bold], so bullet games count "
         f"too; openings with {min_games}+ games that got that far. Worst first: by your mistake "

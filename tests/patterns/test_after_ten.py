@@ -183,3 +183,20 @@ def test_the_openings_command_shows_the_table(tmp_path: Path, monkeypatch):
         "3.4% (1.0%-11.7%)",
         "-2.7",
     ]
+
+
+def test_the_openings_command_says_when_no_opening_has_enough_games_at_move_ten(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr(cli, "console", Console(width=200))
+    # six Italians, but only five got to your 10th move
+    result = CliRunner().invoke(
+        cli.app, ["--db", str(_db(tmp_path)), "openings", "--min-games", "6"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "Italian Game" in result.output  # the favourites part is there
+    assert "Engine eval after your 10th move" not in result.output
+    assert result.output.rstrip().endswith(
+        "No opening has 6 games that got to your 10th move yet, so none is judged by the engine "
+        "there."
+    )
