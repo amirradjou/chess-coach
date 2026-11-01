@@ -405,6 +405,21 @@ def test_punish_command(tmp_path):
     assert "Sicilian Defense: after 1...Qh5 you played 2.Qh5" in result.output
 
 
+def test_the_digest_command_has_the_section(tmp_path):
+    """`chess-coach digest` reads both players' moves (Store.gifts) for When they blunder."""
+    db = tmp_path / "coach.db"
+    _store(db)
+    out = tmp_path / "digest.md"
+    result = CliRunner().invoke(app, ["--db", str(db), "digest", "-o", str(out)])
+    assert result.exit_code == 0, result.output
+    text = out.read_text()
+    assert "## When they blunder" in text
+    assert (
+        "- **Bullet, moves 1-10**: You missed the punishment for 60.0% of your opponents' "
+        "blunders (48 of 80); they missed it for 30.0% of yours (24 of 80)."
+    ) in text
+
+
 def test_the_web_page_needs_no_engine(tmp_path):
     db = tmp_path / "coach.db"
     _store(db)
