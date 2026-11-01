@@ -7,8 +7,9 @@ from fastapi.testclient import TestClient
 from chess_coach.coach.digest import build, render
 from chess_coach.coach.threats import check, gap, pending, percent, report
 from chess_coach.db import Store
+from chess_coach.engine.motifs import pass_turn
 from chess_coach.engine.stockfish import LineEval
-from chess_coach.engine.threats import IGNORED, UNSAFE, passed
+from chess_coach.engine.threats import IGNORED, UNSAFE
 from chess_coach.models import Color, Judgement, MoveFact, Phase, Puzzle, Speed, ThreatFact
 from chess_coach.web.app import THREAT, create_app
 
@@ -208,7 +209,7 @@ def club_store(db: Path) -> Store:
 
 def test_check_stores_a_row_per_error_and_resumes(tmp_path):
     axb6 = LineEval(446, None, chess.Move.from_uci("a5b6"), [chess.Move.from_uci("a5b6")])
-    engine = Lines({passed(chess.Board(AFTER_A5)).fen(): axb6})
+    engine = Lines({pass_turn(chess.Board(AFTER_A5)).fen(): axb6})
     with club_store(tmp_path / "coach.db") as store:
         seen = []
         assert check(store, engine, on_check=lambda i, n: seen.append((i, n))) == 4

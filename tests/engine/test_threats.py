@@ -2,13 +2,13 @@ import chess
 import pytest
 
 from chess_coach.engine.analysis import analyze_game
+from chess_coach.engine.motifs import pass_turn
 from chess_coach.engine.stockfish import Engine, LineEval
 from chess_coach.engine.threats import (
     IGNORED,
     UNSAFE,
     classify,
     look,
-    passed,
     recapture_pending,
     same_threat,
     won,
@@ -61,13 +61,13 @@ AXB6 = LineEval(446, None, U("a5b6"), [U("a5b6")])
 
 def test_passing_hands_the_move_over_without_a_null_move_in_the_history():
     board = chess.Board("rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3")
-    theirs = passed(board)
+    theirs = pass_turn(board)
     assert theirs.turn == chess.BLACK and theirs.move_stack == [] and theirs.ep_square is None
     assert theirs.board_fen() == board.board_fen()
 
 
 def test_material_won_along_the_line():
-    theirs = passed(chess.Board(AFTER_A5))  # White to move
+    theirs = pass_turn(chess.Board(AFTER_A5))  # White to move
     assert won(theirs, [U("a5b6")]) == 1
     assert won(theirs, [U("a5b6"), U("c7b6")]) == 0
     # four quiet moves and the line stops there, before the capture
@@ -146,10 +146,10 @@ def test_the_last_move_of_a_game_gets_its_reply_searched():
 
 
 def test_a_guess_at_their_threat_is_graded_leniently():
-    theirs = passed(chess.Board(AFTER_A5))
+    theirs = pass_turn(chess.Board(AFTER_A5))
     assert same_threat(theirs, U("a5b6"), U("a5b6"))
     assert not same_threat(theirs, U("a5a6"), U("a5b6"))
-    scholar = passed(
+    scholar = pass_turn(
         chess.Board("r1bqkbnr/pppp1ppp/2n5/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4")
     )
     assert same_threat(scholar, U("h5f7"), U("h5f7"))

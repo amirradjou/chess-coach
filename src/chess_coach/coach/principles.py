@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 import chess
 
 from chess_coach.engine.motifs import PIECE_VALUES
+from chess_coach.engine.motifs import after_move as _after
+from chess_coach.engine.motifs import pass_turn as _null
 from chess_coach.engine.phases import phase_of
 from chess_coach.models import Phase
 
@@ -181,12 +183,6 @@ class Reasons:
 
     def all(self) -> list[str]:
         return [*self.faults, *self.ideas]
-
-
-def _after(board: chess.Board, move: chess.Move) -> chess.Board:
-    after = board.copy(stack=False)
-    after.push(move)
-    return after
 
 
 def hanging(board: chess.Board, color: chess.Color) -> dict[tuple[int, int], str]:
@@ -550,13 +546,6 @@ def unsafe_move(fen: str, played: str, reply: str, *, mate: int | None = None) -
     return (
         f"Nothing was threatened, but your {board.san(move)} allows {_does(after, answer, mate)}."
     )
-
-
-def _null(board: chess.Board) -> chess.Board:
-    """The position with the other side to move, to compare against when there's no best move."""
-    passed_turn = board.copy(stack=False)
-    passed_turn.push(chess.Move.null())
-    return passed_turn
 
 
 def _centre_distance(square: chess.Square) -> int:

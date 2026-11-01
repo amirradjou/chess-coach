@@ -181,22 +181,6 @@ class Report:
     steps: list[Step]
 
 
-def _evidence(m: MoveFact, game: Game) -> Evidence:
-    return Evidence(
-        m.game_id,
-        m.ply,
-        m.move_number,
-        m.color.value,
-        m.san,
-        m.best_san,
-        m.wp_loss,
-        game.move_url(m.ply),
-        m.fen_before,
-        m.uci,
-        m.best_move,
-    )
-
-
 def report(
     games: Sequence[Game],
     moves: Iterable[MoveFact],
@@ -226,7 +210,7 @@ def report(
             why = None if m.game_id in seen else reason(m.fen_before, m.uci, t)
             if why is not None:  # the worst ones, one per game
                 seen.add(m.game_id)
-                step.examples.append(Example(_evidence(m, by_id[m.game_id]), t, why))
+                step.examples.append(Example(Evidence.of(m, by_id[m.game_id]), t, why))
         steps.append(step)
     return Report(len(yours), len(theirs), len(found) - len(checked), steps)
 

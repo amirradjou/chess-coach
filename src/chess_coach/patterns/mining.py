@@ -15,6 +15,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from itertools import combinations
 
+from chess_coach.models import Game, MoveFact
 from chess_coach.patterns.features import GameRow, MoveRow
 
 Feature = tuple[str, str]
@@ -63,6 +64,23 @@ class Evidence:
     fen: str = ""
     uci: str = ""
     best_uci: str = ""
+
+    @classmethod
+    def of(cls, fact: MoveFact, game: Game) -> Evidence:
+        """One move of `game` as an example, with its position for the board."""
+        return cls(
+            fact.game_id,
+            fact.ply,
+            fact.move_number,
+            fact.color.value,
+            fact.san,
+            fact.best_san,
+            fact.wp_loss,
+            game.move_url(fact.ply),
+            fact.fen_before,
+            fact.uci,
+            fact.best_move,
+        )
 
     @property
     def move(self) -> str:
@@ -149,22 +167,7 @@ def _mine(
 def _evidence(rows: Sequence[MoveRow], limit: int, errors_only: bool = True) -> list[Evidence]:
     pool = [r for r in rows if r.error] if errors_only else list(rows)
     worst = sorted(pool, key=lambda r: (-r.fact.wp_loss, r.fact.game_id, r.fact.ply))[:limit]
-    return [
-        Evidence(
-            r.fact.game_id,
-            r.fact.ply,
-            r.fact.move_number,
-            r.fact.color.value,
-            r.fact.san,
-            r.fact.best_san,
-            r.fact.wp_loss,
-            r.game.move_url(r.fact.ply),
-            r.fact.fen_before,
-            r.fact.uci,
-            r.fact.best_move,
-        )
-        for r in worst
-    ]
+    return [Evidence.of(r.fact, r.game) for r in worst]
 
 
 def mine_moves(

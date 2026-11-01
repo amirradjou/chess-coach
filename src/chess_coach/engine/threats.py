@@ -22,7 +22,7 @@ from collections.abc import Callable
 
 import chess
 
-from chess_coach.engine.motifs import PIECE_VALUES
+from chess_coach.engine.motifs import after_move, material, pass_turn
 from chess_coach.engine.stockfish import LineEval
 from chess_coach.models import MoveFact, ThreatFact
 
@@ -35,28 +35,6 @@ IGNORED, UNSAFE = "ignored_threat", "unsafe_move"
 LABELS = (IGNORED, UNSAFE)
 
 Search = Callable[[chess.Board], LineEval]  # the engine's best line for the side to move
-
-
-def passed(board: chess.Board) -> chess.Board:
-    """The same position with the other side to move. Rebuilt from the FEN so the engine is
-    never sent a null move in the history (UCI has none; python-chess warns and sends the FEN)."""
-    turn = board.copy(stack=False)
-    turn.push(chess.Move.null())
-    return chess.Board(turn.fen())
-
-
-def _after(board: chess.Board, move: chess.Move) -> chess.Board:
-    after = board.copy(stack=False)
-    after.push(move)
-    return after
-
-
-def material(board: chess.Board, color: chess.Color) -> int:
-    """`color`'s material minus the other side's, in points (pawn 1 ... queen 9)."""
-    return sum(
-        PIECE_VALUES[p.piece_type] * (1 if p.color == color else -1)
-        for p in board.piece_map().values()
-    )
 
 
 def won(board: chess.Board, pv: list[chess.Move]) -> int:
@@ -130,8 +108,8 @@ def classify(
     passed, `reply` their best move after the move played (None when unknown)."""
     row = ThreatFact(m.game_id, m.ply, depth=depth)
     board = chess.Board(m.fen_before)
-    theirs = passed(board)
-    after = _after(board, chess.Move.from_uci(m.uci))
+    theirs = pass_turn(board)
+    after = after_move(board, chess.Move.from_uci(m.uci))
     if is_threat(m, line, theirs):
         assert line.move is not None
         row.threat, row.threat_san = line.move.uci(), theirs.san(line.move)
@@ -161,11 +139,11 @@ def look(
     board = chess.Board(m.fen_before)
     if board.is_check() or recapture_pending(board, previous):
         return ThreatFact(m.game_id, m.ply, depth=depth)
-    line = search(passed(board))
+    line = search(pass_turn(board))
     if following is not None:
         reply = chess.Move.from_uci(following.best_move)
     else:
-        reply = search(_after(board, chess.Move.from_uci(m.uci))).move
+        reply = search(after_move(board, chess.Move.from_uci(m.uci))).move
     return classify(m, previous, line, reply, depth)
 
 
@@ -174,4 +152,4 @@ def same_threat(theirs: chess.Board, guess: chess.Move, threat: chess.Move) -> b
     itself, a move to the same square, or another mate when the threat mates."""
     if guess == threat or guess.to_square == threat.to_square:
         return True
-    return _after(theirs, threat).is_checkmate() and _after(theirs, guess).is_checkmate()
+    return after_move(theirs, threat).is_checkmate() and after_move(theirs, guess).is_checkmate()

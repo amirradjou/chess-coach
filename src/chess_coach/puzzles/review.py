@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 import chess
 
 from chess_coach.coach.principles import explain
-from chess_coach.engine.motifs import PIECE_VALUES
+from chess_coach.engine.motifs import material
 from chess_coach.engine.stockfish import LineEval
 from chess_coach.models import Puzzle
 
@@ -153,14 +153,6 @@ def build(
     plies += _continuation(board, pv)
     score = _score(ev, board, solver) if ev else None
     return Line(kind=kind, label=label, start=fen, plies=plies, score=score)
-
-
-def material(board: chess.Board, color: chess.Color) -> int:
-    """`color`'s material minus the other side's, in the usual points (pawn 1 ... queen 9)."""
-    return sum(
-        PIECE_VALUES[p.piece_type] * (1 if p.color == color else -1)
-        for p in board.piece_map().values()
-    )
 
 
 def material_change(line: Line) -> int:

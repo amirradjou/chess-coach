@@ -43,8 +43,9 @@ from chess_coach.coach.threats import Report as ThreatReport
 from chess_coach.coach.threats import Share, Step
 from chess_coach.coach.threats import reason as threat_reason
 from chess_coach.db import Store
+from chess_coach.engine.motifs import pass_turn
 from chess_coach.engine.stockfish import Engine, EngineNotFoundError, LineEval
-from chess_coach.engine.threats import IGNORED, passed, same_threat
+from chess_coach.engine.threats import IGNORED, same_threat
 from chess_coach.models import Puzzle, ThreatFact, card_id
 from chess_coach.openings import opening_table
 from chess_coach.patterns.features import ERRORS, move_rows, result_of
@@ -413,7 +414,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             t = store.threat(puzzle.game_id, puzzle.ply)
         if t is None or t.label != IGNORED or "opening-fix" in puzzle.tags:
             raise HTTPException(404, "no threat question for this puzzle")
-        theirs = passed(chess.Board(puzzle.fen))
+        theirs = pass_turn(chess.Board(puzzle.fen))
         try:
             guess = review.legal(theirs, g.uci)
         except ValueError as exc:
