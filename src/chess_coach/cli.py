@@ -735,14 +735,15 @@ def openings(
     min_games: Annotated[int, typer.Option(help="Smallest number of games per opening.")] = 5,
     top: Annotated[int, typer.Option(help="How many openings to show.")] = 3,
 ) -> None:
-    """The openings you score worst in, the book line, and the slips you repeat in them."""
+    """The openings you score worst in, the book line, and the slips you repeat in them; then how
+    every opening comes out by the engine after your 10th move (bullet games too)."""
+    from chess_coach.coach.repertoire import after_ten
     from chess_coach.coach.study import openings as opening_stats
 
     settings: Settings = ctx.obj
     with Store(settings.db_path) as store:
-        stats = opening_stats(
-            list(store.iter_games()), list(store.iter_moves(user_only=True)), min_games
-        )
+        games, moves = list(store.iter_games()), list(store.iter_moves(user_only=True))
+    stats = opening_stats(games, moves, min_games)
     if not stats:
         console.print(f"No opening has {min_games} analysed games yet.")
         return
@@ -763,6 +764,41 @@ def openings(
                 f"  You played {slip.move} in {slip.games} games; the engine prefers "
                 f"{slip.best}.{where}"
             )
+    _after_ten_tables(after_ten(games, moves, min_games), min_games)
+
+
+def _pawns(cp: int) -> str:
+    """+1.2, -0.5, and 0.0 rather than -0.0."""
+    return f"{cp / 100:+.1f}" if abs(cp) >= 5 else "0.0"
+
+
+def _after_ten_tables(ranked: dict, min_games: int) -> None:
+    """Openings by the engine's eval after your 10th move: results don't come into it, so bullet
+    games count. Ranked by the mistake rate's interval and what you lost since book."""
+    console.print(
+        "\n[bold]Engine eval after your 10th move (not results)[/bold], so bullet games count "
+        f"too; openings with {min_games}+ games that got that far. Worst first: by your mistake "
+        "rate on moves 1-10 (the low end of its 95% interval), then by what you lost since the "
+        "game left the opening table (a gambit's pawn is the table's, not yours)."
+    )
+    for color, rows in ranked.items():
+        if not rows:
+            continue
+        table = Table(title=f"With {color.capitalize()}")
+        for column in ("opening", "games", "eval (median)", "at -1 or worse", "mistakes 1-10"):
+            table.add_column(column, justify="left" if column == "opening" else "right")
+        table.add_column("since book", justify="right")
+        for a in rows:
+            (bad_low, bad_high), (err_low, err_high) = a.bad_interval, a.error_interval
+            table.add_row(
+                a.family,
+                str(a.games),
+                _pawns(a.median_cp),
+                f"{a.bad_rate:.0%} ({bad_low:.0%}-{bad_high:.0%})",
+                f"{a.error_rate:.1%} ({err_low:.1%}-{err_high:.1%})",
+                _pawns(a.since_book),
+            )
+        console.print(table)
 
 
 @app.command()

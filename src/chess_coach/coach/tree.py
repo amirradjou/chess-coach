@@ -9,8 +9,9 @@ answer there, and how you actually answered in your games. Nothing here runs the
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from statistics import median
 
 import chess
 
@@ -133,6 +134,13 @@ def score(game_ids: Iterable[str], results: dict[str, str]) -> float | None:
 def scored(game_ids: Iterable[str], results: dict[str, str]) -> int:
     """How many of these games have a result that counts (bullet results don't)."""
     return sum(results.get(g) in _POINTS for g in game_ids)
+
+
+def at_move_ten(game_ids: Iterable[str], evals: Mapping[str, int]) -> tuple[int, int] | None:
+    """(how many of these games got to your 10th move, your median eval there), from a {game id:
+    eval} map (repertoire.evals_after_ten); None when none did. The tree itself stops at move 8."""
+    found = [evals[g] for g in game_ids if g in evals]
+    return (len(found), round(median(found))) if found else None
 
 
 @dataclass(slots=True)

@@ -407,6 +407,10 @@ const games = (n) => `${n} game${n === 1 ? "" : "s"}`;
 const scored = (x, sep = " · ", words = "you scored") => (x.score === null ? ""
   : `${sep}${words} ${x.score}%${x.scored < x.games ? ` in the ${games(x.scored)} outside bullet` : ""}`);
 const a = (word) => `${/^[aeiou]/.test(word) ? "an" : "a"} ${word}`;
+// The engine's eval after your 10th move in the games through here (the median; not results).
+const afterTen = (x, long = false) => (!x.after_ten ? ""
+  : long ? ` · engine eval after your 10th move: ${x.after_ten.median} (median of ${games(x.after_ten.games)}; not results)`
+    : ` · ${x.after_ten.median} after move 10`);
 const optionLabel = (x) => `${x.family} (${games(x.games)}${scored(x, ", ", "you score")}${x.due ? `, ${x.due} due` : ""})`;
 
 async function openCoach() {
@@ -532,7 +536,7 @@ async function coachDraw() {
   fill($("#coach-title"),
     el("b", {}, n.name || coach.family), el("br"),
     el("span", { class: "muted small" }, n.games
-      ? `${who} · reached in ${n.games} of your games${scored(n, " · ", "from here you scored")}`
+      ? `${who} · reached in ${n.games} of your games${scored(n, " · ", "from here you scored")}${afterTen(n, true)}`
       : `${who} · none of your games reached this position`),
     coach.mode === "explore" && n.best ? el("div", {}, n.turn === "you" ? "Engine's move: " : "Their best: ", el("b", { class: "better" }, n.best.san), ` (${n.best.score} for you)`) : null);
   fill($("#coach-moves"), coach.mode === "explore" ? coachMoves(n) : null);
@@ -558,7 +562,7 @@ function coachMoves(n) {
       el("div", { class: "line-head" },
         el("span", {},
           el("button", { class: "link", onclick: () => coachGo([...coach.path, m.uci]) }, `${m.number}${m.san}`),
-          el("span", { class: "muted small" }, ` · ${games(m.games)}${scored(m)}`)),
+          el("span", { class: "muted small" }, ` · ${games(m.games)}${scored(m)}${afterTen(m)}`)),
         el("span", { class: `verdict ${m.verdict}` }, m.verdict)),
       m.punish ? el("div", { class: "small" }, "Punish it with ", el("b", { class: "better" }, m.punish.san),
         ` (${m.punish.score} for you). ${answered(m)}`) : null,
@@ -680,10 +684,13 @@ function favoriteCard(f) {
   const result = f.score === null
     ? "only bullet, whose results don't count"
     : `scored ${f.score}% (${f.wins} won, ${f.draws} drawn, ${f.losses} lost${decided < f.games ? " outside bullet" : ""})`;
+  const t = f.after_ten;
   return el(
     "div", { class: "card" },
     el("h3", {}, f.family),
     el("div", { class: "muted" }, `${f.games} games · ${result} · mistakes on ${f.opening_error_rate}% of your opening moves`),
+    t ? el("div", { class: "small" }, `Engine eval after your 10th move (not results): ${t.median} (median of ${games(t.games)}), `,
+      `${t.bad}% of them at −1 or worse; ${t.since_book} since the game left the book.`) : null,
     decided ? el("div", { class: "score" }, el("div", { class: "w", style: `width:${pct(f.wins)}` }),
       el("div", { class: "d", style: `width:${pct(f.draws)}` }), el("div", { class: "l", style: `width:${pct(f.losses)}` })) : null,
     f.idea ? el("p", { class: "idea" }, el("b", {}, "What it's about: "), f.idea) : null,
@@ -703,13 +710,35 @@ function favoriteCard(f) {
   );
 }
 
+// Every opening by the engine's eval after your 10th move: results don't come into it, so bullet
+// games count. Worst first, by the mistake rate's interval and what was lost since book.
+function afterTenTable(rows) {
+  const range = (low, high, unit = "%") => el("span", { class: "muted small" }, ` (${low}–${high}${unit})`);
+  return el("table", {},
+    el("tr", {}, ["opening", "games", "eval", "at −1 or worse", "mistakes, moves 1–10", "since book"].map((h) => el("th", {}, h))),
+    rows.map((a) => el("tr", {},
+      el("td", {}, a.family), el("td", {}, a.games), el("td", {}, a.median),
+      el("td", {}, `${a.bad}%`, range(a.bad_low, a.bad_high)),
+      el("td", {}, `${a.error_rate}%`, range(a.error_low, a.error_high)),
+      el("td", {}, a.since_book))));
+}
+
 async function loadOpenings() {
   const o = await api("/api/openings");
+  const t = o.after_ten;
   fill($("#openings"),
     el("p", { class: "muted" }, "Your most-played openings, how you score, and where your usual move can be improved (named book moves are never flagged)."),
     el("div", { class: "columns" },
       el("div", {}, el("h2", {}, "With White"), o.white.length ? o.white.map(favoriteCard) : el("p", {}, "Not enough games yet.")),
       el("div", {}, el("h2", {}, "With Black"), o.black.length ? o.black.map(favoriteCard) : el("p", {}, "Not enough games yet."))),
+    t.white.length || t.black.length ? [
+      el("h2", {}, "How each opening comes out"),
+      el("p", { class: "muted" }, "Engine eval after your 10th move (not results), so bullet games count too: the median, and how often you stand at −1 or worse. ",
+        "Worst first, by your mistake rate on moves 1–10 (the low end of its 95% interval, in brackets), then by what you lost since the game left the opening table, ",
+        "so a gambit's pawn is the book's, not yours."),
+      t.white.length ? [el("h3", {}, "With White"), afterTenTable(t.white)] : null,
+      t.black.length ? [el("h3", {}, "With Black"), afterTenTable(t.black)] : null,
+    ] : null,
   );
 }
 
