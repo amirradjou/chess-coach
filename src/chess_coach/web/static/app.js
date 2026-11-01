@@ -88,7 +88,7 @@ function repeatCard(r) {
       ` (they found it ${r.punished} of ${r.replies} times)`) : null,
     reasons(r.reasons),
     el("div", { class: "muted small" }, `Last on ${r.last} · `, r.puzzle ? "it has a puzzle" : "no puzzle for it yet"),
-    el("div", { class: "small" }, r.urls.map((url, i) => [i ? " · " : "",
+    el("div", { class: "small" }, r.urls.flatMap((url, i) => [i ? " · " : "",
       el("a", { href: url, target: "_blank", rel: "noopener" }, `game ${i + 1}`)])),
   );
 }

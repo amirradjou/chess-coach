@@ -320,7 +320,8 @@ def render(d: Digest, top: int = 5) -> str:
         out += [
             "## The same mistake in the same position",
             "",
-            f"Your mistakes from the very same position in 3 or more games{when}:",
+            "Your inaccuracies or worse from the very same position in 3 or more games"
+            f"{when} (named book moves left out):",
             "",
         ]
         out += [_repeat_line(i, r) for i, r in enumerate(d.repeats[:top], 1)]
