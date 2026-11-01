@@ -164,7 +164,7 @@ function punishSection(p, tagList) {
       el("button", { class: "chip", onclick: () => show("practice", t.tag) }, `${tagName(t.tag)} (${t.puzzles})`), " "])) : null,
     p.trend.length > 1 ? [
       el("h3", {}, "Over time"),
-      el("p", { class: "muted small" }, "Each row is the games holding 150 of their blunders you could punish; both rates in a row come from the same games."),
+      el("p", { class: "muted small" }, "Each row is a stretch of games holding about 150 of their blunders you could punish (the oldest may hold fewer); both rates in a row come from the same games."),
       rateTable("games played", p.trend),
     ] : null,
     p.families.length ? [

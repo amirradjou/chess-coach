@@ -447,7 +447,10 @@ def punish(
         console.print(f"[green]What to learn:[/green] {lesson}")
     if not r.lessons:
         console.print("No kind of punishing move stands out against your opponents.")
-    title = f"Over time (each row holds {TREND_GIFTS} of their blunders you could punish)"
+    title = (
+        f"Over time (about {TREND_GIFTS} of their blunders you could punish per row; the oldest "
+        "may hold fewer)"
+    )
     console.print(_rates_table(title, "games played", r.trend))
     if r.families:
         where = f" ({', '.join(r.focus)})" if r.focus else ""
@@ -456,10 +459,13 @@ def punish(
     for f in r.families:
         for g in f.examples:
             best = label(g.reply, g.reply.best_san)
-            console.print(
+            parts = [
                 f"{f.compare.label}: after {label(g.blunder)} you played {label(g.reply)}; "
-                f"{best} punished it. {' '.join(g.reasons())} [dim]{g.url or ''}[/dim]"
-            )
+                f"{best} would have punished it.",
+                *g.reasons(),
+                f"[dim]{g.url}[/dim]" if g.url else "",
+            ]
+            console.print(" ".join(p for p in parts if p))
     console.print(
         "Drill your missed punishments: `chess-coach drill --tag punish_capture` (or "
         "punish_check, punish_quiet; missed_tactic for all of them)."

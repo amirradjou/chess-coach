@@ -335,6 +335,10 @@ def test_punish_command(tmp_path):
     assert "By the move that punishes" in result.output
     assert "0.0% of 0" not in result.output and "100.0 to" not in result.output  # no 0 of 0 rate
     assert "Openings where you miss more than your opponents (Bullet, moves 1-10)" in result.output
+    # The engine's move was not played: it would have punished the blunder. No reasons here (the
+    # facts have no positions), and no gap left where they would go.
+    assert "2.Nxe5 would have punished it. https://lichess.org/g" in result.output
+    assert "punished it.  " not in result.output
     empty = CliRunner().invoke(app, ["--db", str(tmp_path / "empty.db"), "punish"])
     assert "No blunders to compare yet" in empty.output
 
