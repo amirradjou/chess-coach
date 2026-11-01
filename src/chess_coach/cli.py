@@ -467,17 +467,23 @@ def punish(
 
 
 def _rates_table(title: str, first: str, rows, names: dict[str, str] | None = None) -> Table:
-    """Your miss rate against your opponents' per row, each with its 95% interval."""
+    """Your miss rate against your opponents' per row, each with its 95% interval; '–' where a
+    side had no chances, so there is no rate and no gap."""
     table = Table(title=title)
     for column in (first, "you missed", "they missed", "gap, points (95%)"):
         table.add_column(column, justify="left" if column == first else "right")
     for c in rows:
-        low, high = c.interval
+        gap = "–"
+        if c.gap is not None and c.interval is not None:
+            low, high = c.interval
+            gap = f"{100 * c.gap:+.1f} ({100 * low:+.1f} to {100 * high:+.1f})"
         table.add_row(
             (names or {}).get(c.label, c.label),
-            f"{c.yours.rate:.1%} of {c.yours.n} ({c.yours.low:.0%}-{c.yours.high:.0%})",
-            f"{c.theirs.rate:.1%} of {c.theirs.n} ({c.theirs.low:.0%}-{c.theirs.high:.0%})",
-            f"{100 * c.gap:+.1f} ({100 * low:+.1f} to {100 * high:+.1f})",
+            *(
+                f"{r.rate:.1%} of {r.n} ({r.low:.0%}-{r.high:.0%})" if r.n else "–"
+                for r in (c.yours, c.theirs)
+            ),
+            gap,
         )
     return table
 

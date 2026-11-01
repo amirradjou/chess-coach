@@ -168,13 +168,14 @@ def _rate(r: Rate) -> dict:
 
 
 def _compare(c: Compare) -> dict:
-    low, high = c.interval
+    """gap and interval are None when a side had no chances: 0 of 0 is no rate to compare."""
+    interval = c.interval
     return {
         "label": c.label,
         "yours": _rate(c.yours),
         "theirs": _rate(c.theirs),
-        "gap": round(c.gap * 100, 1),
-        "interval": [round(low * 100, 1), round(high * 100, 1)],
+        "gap": None if c.gap is None else round(c.gap * 100, 1),
+        "interval": None if interval is None else [round(x * 100, 1) for x in interval],
         "verdict": c.verdict,
     }
 

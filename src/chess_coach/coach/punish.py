@@ -129,19 +129,25 @@ class Compare:
     theirs: Rate  # their replies to yours
 
     @property
-    def gap(self) -> float:
+    def gap(self) -> float | None:
+        """Your rate minus theirs; None when either side had no chances (0 of 0 is no rate)."""
+        if not (self.yours.n and self.theirs.n):
+            return None
         return self.yours.rate - self.theirs.rate
 
     @property
-    def interval(self) -> tuple[float, float]:
+    def interval(self) -> tuple[float, float] | None:
+        """The gap's 95% interval (Newcombe); None with the gap."""
+        if not (self.yours.n and self.theirs.n):
+            return None
         return newcombe(self.yours.missed, self.yours.n, self.theirs.missed, self.theirs.n)
 
     @property
     def verdict(self) -> str:
         """worse, better or same: a gap only counts when its 95% interval leaves out zero."""
-        if not (self.yours.n and self.theirs.n):
+        if (interval := self.interval) is None:
             return "same"
-        low, high = self.interval
+        low, high = interval
         return "worse" if low > 0 else "better" if high < 0 else "same"
 
     @property
@@ -161,7 +167,7 @@ def compare(name: str, found: Iterable[Gift]) -> Compare:
 
 def headline(c: Compare) -> str:
     """Your rate, theirs, and whether the gap between them is real."""
-    if not (c.yours.n and c.theirs.n):
+    if c.gap is None or c.interval is None:
         return "Not enough blunders on both sides to compare yet."
     text = (
         f"You missed the punishment for {c.yours.rate:.1%} of your opponents' blunders "

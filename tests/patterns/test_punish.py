@@ -108,7 +108,9 @@ def test_a_gap_counts_only_when_its_interval_leaves_out_zero():
     assert "includes zero" in headline(level)
     assert "You miss it less often" in headline(better)
     assert headline(Compare("x", Rate(3, 5), Rate(0, 0))).startswith("Not enough")
-    assert Compare("x", Rate(3, 5), Rate(0, 0)).verdict == "same"
+    # 0 of 0 is no rate: no gap and no interval, rather than a made-up -100 points.
+    for empty in (Compare("x", Rate(3, 5), Rate(0, 0)), Compare("x", Rate(0, 0), Rate(3, 3))):
+        assert (empty.gap, empty.interval, empty.verdict) == (None, None, "same")
 
 
 # -- which chances count ----------------------------------------------------------------------
@@ -302,6 +304,10 @@ def test_the_digest_has_a_section_only_with_both_sides_moves():
     assert "## When they blunder" in text
     assert "- **Bullet, moves 1-10**: You missed the punishment for 60.0%" in text
     assert "- **Blitz and rapid**:" in text and "about the same as your opponents" in text
+    # Every punishment here is a capture: checks and quiet moves, 0 of 0 on both sides, stay out.
+    kinds = "Missed, by the move that punishes: a capture, you 50% of 160 and them 35% of 160. "
+    assert kinds + LESSONS["capture"] in text
+    assert "a check, you" not in text and "a quiet move, you" not in text
     assert "In bullet, moves 1-10, you miss more than your opponents most in the" in text
     assert "Your costliest misses:" in text and "(https://lichess.org/g" in text
     assert "When they blunder" not in render(build(games, moves))
@@ -327,6 +333,7 @@ def test_punish_command(tmp_path):
     assert "Bullet, moves 1-10: You missed the punishment for" in result.output
     assert "You miss it more often than your opponents do" in result.output
     assert "By the move that punishes" in result.output
+    assert "0.0% of 0" not in result.output and "100.0 to" not in result.output  # no 0 of 0 rate
     assert "Openings where you miss more than your opponents (Bullet, moves 1-10)" in result.output
     empty = CliRunner().invoke(app, ["--db", str(tmp_path / "empty.db"), "punish"])
     assert "No blunders to compare yet" in empty.output
@@ -345,6 +352,8 @@ def test_the_web_page_needs_no_engine(tmp_path):
     assert bullet_group["yours"] == {"missed": 48, "n": 80, "rate": 60.0, "low": 49.0, "high": 70.0}
     assert bullet_group["headline"].startswith("You missed the punishment for 60.0%")
     assert [k["name"] for k in p["kinds"]] == ["a capture", "a check", "a quiet move"]
+    check = p["kinds"][1]  # no checking punishments on either side: no gap to show
+    assert (check["yours"]["n"], check["gap"], check["interval"]) == (0, None, None)
     assert p["focus"] == ["Bullet, moves 1-10"] and p["trend"]
     example = p["families"][0]["examples"][0]
     assert example["url"].startswith("https://lichess.org/g") and "move" in example

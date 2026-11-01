@@ -123,12 +123,17 @@ function rateCell(r) {
     r.n ? el("div", { class: "muted small" }, `${r.low.toFixed(1)}–${r.high.toFixed(1)}%`) : null);
 }
 
+// No gap when a side had no chances (0 of 0 is no rate).
+function gapCell(c) {
+  if (c.gap == null) return el("td", {}, "–");
+  return el("td", { class: c.verdict === "worse" ? "played" : c.verdict === "better" ? "better" : "" }, points(c.gap),
+    el("div", { class: "muted small" }, `${points(c.interval[0])} to ${points(c.interval[1])}`));
+}
+
 function rateTable(head, rows) {
   return el("table", {},
     el("tr", {}, [head, "you missed", "they missed", "gap (95%)"].map((h) => el("th", {}, h))),
-    rows.map((c) => el("tr", {}, el("td", {}, c.name ?? c.label), rateCell(c.yours), rateCell(c.theirs),
-      el("td", { class: c.verdict === "worse" ? "played" : c.verdict === "better" ? "better" : "" }, points(c.gap),
-        el("div", { class: "muted small" }, `${points(c.interval[0])} to ${points(c.interval[1])}`)))));
+    rows.map((c) => el("tr", {}, el("td", {}, c.name ?? c.label), rateCell(c.yours), rateCell(c.theirs), gapCell(c))));
 }
 
 function missExample(m) {

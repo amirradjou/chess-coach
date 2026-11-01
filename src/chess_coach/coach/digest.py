@@ -248,13 +248,16 @@ def _punish_lines(r: Report) -> list[str]:
         "",
     ]
     out += [f"- **{c.label}**: {headline(c)}" for c in r.groups if c.yours.n or c.theirs.n]
+    # A kind of punishment one side never had to find can't be compared, so it is left out.
     kinds = "; ".join(
         f"{KINDS[c.label]}, you {c.yours.rate:.0%} of {c.yours.n} and them {c.theirs.rate:.0%} "
         f"of {c.theirs.n}"
         for c in r.kinds
+        if c.gap is not None
     )
-    verdict = " ".join(r.lessons) or "No kind stands out against your opponents."
-    out += ["", f"Missed, by the move that punishes: {kinds}. {verdict}"]
+    if kinds:
+        verdict = " ".join(r.lessons) or "No kind stands out against your opponents."
+        out += ["", f"Missed, by the move that punishes: {kinds}. {verdict}"]
     if r.families:
         where = ", ".join(
             f"the {c.label} (you missed {c.yours.missed} of {c.yours.n}, they missed "
