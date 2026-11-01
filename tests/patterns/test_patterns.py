@@ -9,7 +9,14 @@ from chess_coach.coach.digest import build, describe, render
 from chess_coach.db import Store
 from chess_coach.models import Color, Game, Judgement, MoveFact, Phase, Speed
 from chess_coach.patterns.features import castling, clock_bucket, game_rows, move_bucket, move_rows
-from chess_coach.patterns.mining import mine_games, mine_moves, motif_counts, wilson_lower
+from chess_coach.patterns.mining import (
+    mine_games,
+    mine_moves,
+    motif_counts,
+    newcombe,
+    wilson_lower,
+    wilson_upper,
+)
 
 CASTLES = "1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. O-O Nf6 *"
 NO_CASTLE = "1. e4 e5 2. Nf3 Nc6 *"
@@ -97,6 +104,14 @@ def test_wilson_lower():
     assert wilson_lower(0, 0) == 0.0
     assert wilson_lower(5, 10) == pytest.approx(0.2366, abs=1e-4)
     assert wilson_lower(10, 10) < 1.0
+
+
+def test_wilson_upper_and_newcombe():
+    assert wilson_upper(5, 10) == pytest.approx(0.7634, abs=1e-4)
+    assert wilson_upper(0, 0) == 1.0 and wilson_lower(0, 0) == 0.0
+    # Newcombe (1998), example (a): 56/70 against 48/80
+    low, high = newcombe(56, 70, 48, 80)
+    assert (low, high) == (pytest.approx(0.0524, abs=1e-4), pytest.approx(0.3339, abs=1e-4))
 
 
 def test_buckets():
