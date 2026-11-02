@@ -206,7 +206,7 @@ def _miss(g: Gift) -> dict:
         "theirs": label(g.blunder),
         "move": label(r),
         "best": label(r, r.best_san),
-        "loss": round(r.wp_loss, 1),  # one decimal: a partial miss (under 20) never reads as 20
+        "loss": g.given_back,  # one decimal, cut: a partial miss never reads as 20
         "kind": g.kind,
         "url": g.url,
         "reasons": g.reasons(),

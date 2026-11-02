@@ -829,6 +829,31 @@ def test_the_digest_command_has_the_section(tmp_path):
     ) in text
 
 
+def _edge():
+    """One partial miss of yours at 19.97 points, a hair under the clear bar, and a kept reply of
+    theirs: no gap, so it is shown as your costliest miss."""
+    g = game(1)
+    return [g], [chance(g, 2, loss=19.97), chance(g, 3, yours=False)]
+
+
+def test_what_an_example_gave_back_is_cut_to_one_decimal_never_rounded_to_20(tmp_path):
+    """19.97 rounded to one decimal is 20.0, the clear bar, so a partial miss would read as a
+    clear one: it is cut to 19.9 instead, in the digest and on the page."""
+    games, pairs = _edge()
+    mine = gifts(games, pairs)[0]
+    assert (mine.outcome, mine.given_back) == ("partial", 19.9)
+    text = render(build(games, [r for _, r in pairs if r.is_user], gifts=pairs))
+    assert "(best 2.Nxe5, -19.9%)" in text and "-20.0%" not in text
+    db = tmp_path / "edge.db"
+    _store(db, _edge)
+
+    def missing():
+        raise EngineNotFoundError("no engine")
+
+    p = TestClient(create_app(db, missing)).get("/api/punish").json()
+    assert [m["loss"] for m in p["worst"]] == [19.9]
+
+
 def test_the_web_page_needs_no_engine(tmp_path):
     db = tmp_path / "coach.db"
     _store(db)

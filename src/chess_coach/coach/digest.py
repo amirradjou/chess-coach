@@ -241,9 +241,11 @@ def _games_line(i: int, p: Pattern) -> str:
 
 def _miss(g: Gift) -> str:
     """'[13.Bd3 after 12...Qd7 (best 13.Nxe5, -45.2%)](link): It lets Nxe5 take ...'. One
-    decimal, so a partial miss (under 20) never reads as 20."""
+    decimal, cut rather than rounded (Gift.given_back), so a partial miss never reads as 20."""
     r = g.reply
-    text = f"{label(r)} after {label(g.blunder)} (best {label(r, r.best_san)}, -{r.wp_loss:.1f}%)"
+    text = (
+        f"{label(r)} after {label(g.blunder)} (best {label(r, r.best_san)}, -{g.given_back:.1f}%)"
+    )
     linked = f"[{text}]({g.url})" if g.url else text
     reasons = g.reasons()
     return f"{linked}: {reasons[0]}" if reasons else linked

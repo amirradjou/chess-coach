@@ -142,7 +142,7 @@ function missExample(m) {
     boardNode(m.svg),
     el("div", {}, "They played ", el("b", {}, m.theirs), " · you ", el("span", { class: "played" }, m.move),
       " · punish with ", el("span", { class: "better" }, m.best),
-      el("span", { class: "muted small" }, ` · win chance −${m.loss}%`)),
+      el("span", { class: "muted small" }, ` · win chance −${m.loss.toFixed(1)}%`)),
     reasons(m.reasons),
     m.url ? el("a", { href: m.url, target: "_blank", rel: "noopener" }, "open the game") : null,
   );

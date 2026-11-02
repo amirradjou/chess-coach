@@ -22,6 +22,7 @@ unknown-speed games count with blitz and rapid, and then the group's label names
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from statistics import NormalDist
@@ -109,6 +110,13 @@ class Gift:
         20: it took only part of it) or clear (20 or more: it missed it)."""
         loss = self.reply.wp_loss
         return "kept" if loss < PARTIAL_WP_LOSS else "partial" if loss < CLEAR_WP_LOSS else "clear"
+
+    @property
+    def given_back(self) -> float:
+        """What the reply gave back, cut (not rounded) to one decimal: 19.97 reads 19.9, so a
+        partial miss never reads as 20.0, the clear bar. wp_loss is stored to two decimals; the
+        inner round only clears float noise (19.6 * 10 is 196.00000000000003)."""
+        return math.floor(round(self.reply.wp_loss * 10, 6)) / 10
 
     @property
     def kind(self) -> str:
