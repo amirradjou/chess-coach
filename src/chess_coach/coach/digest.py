@@ -10,7 +10,17 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from chess_coach.coach.punish import KINDS, Compare, Gift, Report, headline, label, report
+from chess_coach.coach.punish import (
+    KINDS,
+    Compare,
+    Gift,
+    Report,
+    headline,
+    label,
+    part_note,
+    report,
+    worst_title,
+)
 from chess_coach.models import Game, MoveFact
 from chess_coach.patterns.features import (
     BULLET_MOVES,
@@ -289,19 +299,22 @@ def _punish_lines(r: Report) -> list[str]:
         out += ["", f"Missed (partial or clear), by the move that punishes: {kinds}. {verdict}"]
     focus = " and ".join(r.focus).lower()  # the groups where you miss more, if any
     if r.families:  # only inside those groups, each with its own gap clear of zero
-        where = ", ".join(
-            f"the {c.label} (you missed {c.yours.missed} of {c.yours.n}, they missed "
-            f"{c.theirs.missed} of {c.theirs.n})"
-            for c in (f.compare for f in r.families)
-        )
         out += [
             "",
             f"In {focus}, counting partial and clear misses together, you miss more than your "
-            f"opponents most in {where}.",
+            "opponents most in these openings (the examples are of the part behind most of each "
+            "gap):",
+            "",
         ]
-    if r.worst:
-        title = f"Your costliest misses in {focus}:" if focus else "Your costliest misses:"
-        out += ["", title, "", *(f"- {_miss(g)}" for g in r.worst)]
+        for f in r.families:
+            c = f.compare
+            out.append(
+                f"- **{c.label}**: you missed {c.yours.missed} of {c.yours.n}, they missed "
+                f"{c.theirs.missed} of {c.theirs.n}; {part_note(f.part)}."
+            )
+            out += [f"  - {_miss(g)}" for g in f.examples]
+    elif r.worst:  # otherwise examples of the gap, or your costliest misses
+        out += ["", f"{worst_title(r)}:", "", *(f"- {_miss(g)}" for g in r.worst)]
     out.append("")
     return out
 
@@ -406,6 +419,8 @@ def render(d: Digest, top: int = 5) -> str:
             "your opponents (for partial or clear misses in a group of games, for a kind of "
             "punishing move, or in an opening) when the 95% interval of the gap leaves out zero. "
             "Openings are only looked at in a group where you miss more, partial and clear "
-            "together, and partial misses are only shown where your partial gap clears zero.",
+            "together, and partial misses are only shown where your partial gap clears zero. "
+            "Examples stand for a gap, so they are partial or clear misses, whichever is behind "
+            "most of it.",
         ]
     return "\n".join(out).rstrip() + "\n"

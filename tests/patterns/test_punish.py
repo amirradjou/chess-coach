@@ -6,7 +6,7 @@ import chess
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
-from chess_coach.cli import app
+from chess_coach.cli import _gift_line, app
 from chess_coach.coach.digest import build, render
 from chess_coach.coach.punish import (
     LESSONS,
@@ -16,9 +16,11 @@ from chess_coach.coach.punish import (
     gifts,
     headline,
     label,
+    part_note,
     report,
     trend,
     typical,
+    worst_title,
 )
 from chess_coach.db import Store
 from chess_coach.engine.stockfish import EngineNotFoundError
@@ -463,7 +465,80 @@ def test_openings_and_examples_come_from_where_the_gap_is():
     assert {f.compare.label for f in r.families} == {"Danish Gambit Accepted", "Queen's Pawn Game"}
     assert all(g.game.speed is Speed.BULLET for f in r.families for g in f.examples)
     assert all(len(f.examples) == 2 and all(g.missed for g in f.examples) for f in r.families)
-    assert len(r.worst) == 3 and all(g.yours and g.missed for g in r.worst)
+    # Every miss in the season is partial: the openings' examples are too, and the partial
+    # examples above already show the bullet gap, so there are no more examples of it.
+    assert all(f.part.label == "partial" for f in r.families)
+    assert (r.worst, r.worst_part) == ([], "partial")
+
+
+def _openings(danish, queens_pawn):
+    """Bullet games in two openings, from (partial, clear, chances) of yours and of theirs in
+    each, every side in games of its own."""
+    games, pairs = [], []
+    for k, (name, (mine, theirs)) in enumerate(
+        {"Danish Gambit Accepted": danish, "Queen's Pawn Game": queens_pawn}.items()
+    ):
+        for side, (p, c, n) in ((True, mine), (False, theirs)):
+            here = [bullet(100 * k + 50 * (not side) + i) for i in range(12)]
+            for g in here:
+                g.opening = name
+            games += here
+            pairs += mix(here, partial=p, clear=c, kept=n - p - c, yours=side)
+    return games, pairs
+
+
+def test_an_openings_examples_come_from_the_part_behind_its_gap():
+    """The Danish and the Queen's Pawn Game on his games, doubled. In the Danish the whole gap is
+    partial misses (22 of 84 against 0 of 84; clear 24 of 84 each), so its examples are partial
+    misses, not his costliest misses there: clear ones, which his opponents make as often. In
+    the Queen's Pawn Game most of the gap is clear misses, and so are its examples."""
+    games, pairs = _openings(((22, 24, 84), (0, 24, 84)), ((14, 32, 76), (6, 18, 74)))
+    r = report(games, pairs)
+    families = {f.compare.label: f for f in r.families}
+    danish, queens_pawn = families["Danish Gambit Accepted"], families["Queen's Pawn Game"]
+    assert (danish.part.label, danish.part.yours, danish.part.theirs) == (
+        "partial",
+        Rate(22, 84),
+        Rate(0, 84),
+    )
+    assert [g.outcome for g in danish.examples] == ["partial", "partial"]
+    assert (
+        part_note(danish.part)
+        == "most of the gap is in partial misses (you 22 of 84, they 0 of 84)"
+    )
+    assert queens_pawn.part.label == "clear"
+    assert [g.outcome for g in queens_pawn.examples] == ["clear", "clear"]
+
+
+def test_with_no_opening_listed_the_examples_still_follow_the_gap():
+    """Without an opening to list (here the games have none), the examples stand for the gap in
+    the groups where you miss more: of its clear part, or none when it is partial and the partial
+    examples already show it. With no gap anywhere they are just your costliest misses."""
+    mine, others = [game(i) for i in range(40)], [game(i) for i in range(40, 80)]
+    for g in mine + others:
+        g.opening = None
+    # Partial worse, clear level: the partial examples show it, so no more boards.
+    pairs = mix(mine, partial=60, clear=100, kept=240) + mix(
+        others, partial=20, clear=100, kept=280, yours=False
+    )
+    r = report(mine + others, pairs)
+    assert (r.focus, r.partial_focus, r.families) == (["Blitz and rapid"], ["Blitz and rapid"], [])
+    assert (r.worst, r.worst_part) == ([], "partial")
+    # Clear worse, partial level: your costliest clear misses.
+    pairs = mix(mine, partial=20, clear=160, kept=220) + mix(
+        others, partial=20, clear=100, kept=280, yours=False
+    )
+    r = report(mine + others, pairs)
+    assert (r.focus, r.partial_focus) == (["Blitz and rapid"], [])
+    assert r.worst_part == "clear" and [g.outcome for g in r.worst] == ["clear"] * 3
+    assert worst_title(r) == "Your costliest clear misses (20+ points) in blitz and rapid"
+    # Level: no gap to stand for, so just your costliest misses, partial and clear together.
+    pairs = mix(mine, partial=20, clear=100, kept=280) + mix(
+        others, partial=20, clear=100, kept=280, yours=False
+    )
+    r = report(mine + others, pairs)
+    assert (r.focus, r.worst_part, len(r.worst)) == ([], None, 3)
+    assert worst_title(r) == "Your costliest misses, partial and clear together"
 
 
 def test_an_opening_is_listed_only_when_its_own_gap_clears_zero():
@@ -501,11 +576,12 @@ def test_no_opening_is_listed_without_a_gap_to_explain():
     r = report(games, pairs)
     assert [(s.partial.verdict, s.clear.verdict) for s in r.groups] == [("same", "same")] * 2
     assert (r.focus, r.families) == ([], [])
-    # Your costliest misses are still the evidence, from all the games.
+    # Your costliest misses are still shown, from all the games, with no gap to stand for.
     assert len(r.worst) == 3 and all(g.yours and g.missed for g in r.worst)
+    assert r.worst_part is None
     text = render(build(games, [x for _, x in pairs if x.is_user], gifts=pairs))
     assert "miss more than your opponents most in" not in text
-    assert "\nYour costliest misses:\n" in text
+    assert "\nYour costliest misses, partial and clear together:\n" in text
 
 
 def test_a_kind_lesson_needs_you_to_miss_it_more_than_your_opponents():
@@ -620,12 +696,16 @@ def test_the_digest_has_a_section_only_with_both_sides_moves():
     kinds = "by the move that punishes: a capture, you 50% of 160 and them 35% of 160. "
     assert f"Missed (partial or clear), {kinds}{LESSONS['capture']}" in text
     assert "a check, you" not in text and "a quiet move, you" not in text
+    # Each opening with the part behind most of its gap, and examples of that part.
     assert (
         "In bullet, moves 1-10, counting partial and clear misses together, you miss more than "
-        "your opponents most in the"
+        "your opponents most in these openings (the examples are of the part behind most of each "
+        "gap):\n\n- **Queen's Pawn Game**: you missed 23 of 40, they missed 10 of 40; most of "
+        "the gap is in partial misses (you 23 of 40, they 10 of 40).\n"
+        "  - [2.Qh5 after 1...Qh5 (best 2.Nxe5, -15.0%)](https://lichess.org/g9#3)\n"
     ) in text
-    assert "Your costliest misses in bullet, moves 1-10:" in text
-    assert "(https://lichess.org/g" in text
+    # As on the page and in the CLI, the openings' examples are the boards: no costliest misses.
+    assert "Your costliest misses" not in text
     assert "When they blunder is the exception: it also counts your opponents' replies" in text
     assert "When they blunder" not in render(build(games, moves))
 
@@ -661,18 +741,40 @@ def test_punish_command(tmp_path):
     assert "Missed (partial or clear), by the move that punishes" in result.output
     assert "0.0% of 0" not in result.output and "100.0 to" not in result.output  # no 0 of 0 rate
     assert "Openings where you miss more than your opponents, partial and clear" in result.output
-    # The engine's move was not played: it would have punished the blunder. No reasons here (the
-    # facts have no positions), and no gap left where they would go.
-    assert "2.Nxe5 would have punished it. https://lichess.org/g" in result.output
-    assert "punished it.  " not in result.output
+    # Each opening says which part its gap is in, and its examples are of that part: partial
+    # misses here, all of which the engine's move would have taken. No reasons here (the facts
+    # have no positions), and no gap left where they would go.
+    assert (
+        "Queen's Pawn Game: most of the gap is in partial misses (you 23 of 40, they 10 of 40)."
+    ) in result.output
+    assert (
+        "Queen's Pawn Game: after 1...Qh5 you played 2.Qh5; 2.Nxe5 would have taken all of it. "
+        "https://lichess.org/g9#3"
+    ) in result.output
+    assert "all of it.  " not in result.output
+    assert "Your costliest misses" not in result.output
     empty = CliRunner().invoke(app, ["--db", str(tmp_path / "empty.db"), "punish"])
     assert "No blunders to compare yet" in empty.output
     level = tmp_path / "level.db"
     _store(level, _level)
     result = CliRunner().invoke(app, ["--db", str(level), "punish"], env={"COLUMNS": "200"})
     assert "Openings where you miss more" not in result.output
-    assert "Your costliest misses\n" in result.output
+    assert "Your costliest misses, partial and clear together\n" in result.output
     assert "Sicilian Defense: after 1...Qh5 you played 2.Qh5" in result.output
+
+
+def test_a_cli_example_says_what_the_engines_move_would_have_done():
+    """A partial miss took some of the gift: the engine's move would have taken all of it. A
+    clear miss didn't punish it at all."""
+    g = game(1)
+    partial, clear = gifts([g], [chance(g, 2, loss=15.0), chance(g, 3, loss=25.0)])
+    assert _gift_line(partial) == (
+        "Italian Game: after 1...Qh5 you played 2.Qh5; 2.Nxe5 would have taken all of it. "
+        "[dim]https://lichess.org/g1#3[/dim]"
+    )
+    assert _gift_line(clear).endswith(
+        "3.Nxe5 would have punished it. [dim]https://lichess.org/g1#5[/dim]"
+    )
 
 
 def test_the_digest_command_has_the_section(tmp_path):
@@ -732,4 +834,13 @@ def test_the_web_page_needs_no_engine(tmp_path):
     )
     example = family["examples"][0]
     assert example["url"].startswith("https://lichess.org/g") and "move" in example
-    assert len(p["worst"]) == 3  # shown on the page when no opening stands out
+    assert (family["part"]["name"], family["part"]["yours"]["missed"]) == (
+        "partial (10-20 points)",
+        23,
+    )
+    assert (
+        family["part_note"] == "most of the gap is in partial misses (you 23 of 40, they 10 of 40)"
+    )
+    # The partial examples above already show the bullet gap: no more examples of it.
+    assert (p["worst"], p["worst_part"]) == ([], "partial")
+    assert p["worst_title"] == "Your partial misses (10-20 points) in bullet, moves 1-10"

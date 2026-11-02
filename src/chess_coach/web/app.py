@@ -48,7 +48,9 @@ from chess_coach.coach.punish import (
     Split,
     headline,
     label,
+    part_note,
     report,
+    worst_title,
 )
 from chess_coach.coach.repertoire import Favorite, Fix, favorites
 from chess_coach.db import Store
@@ -384,11 +386,20 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
                 "lessons": r.lessons,
                 "trend": [_compare(c) for c in r.trend],
                 "focus": r.focus,
+                # Each with the part behind most of its gap, which its examples come from.
                 "families": [
-                    {**_compare(f.compare), "examples": [_miss(g) for g in f.examples]}
+                    {
+                        **_compare(f.compare),
+                        "part": {**_compare(f.part), "name": OUTCOMES[f.part.label]},
+                        "part_note": part_note(f.part),
+                        "examples": [_miss(g) for g in f.examples],
+                    }
                     for f in r.families
                 ],
-                "worst": [_miss(g) for g in r.worst],  # shown when no opening stands out
+                # Shown when no opening stands out (maybe none: worst_title says what they are).
+                "worst": [_miss(g) for g in r.worst],
+                "worst_part": r.worst_part,
+                "worst_title": worst_title(r),
             }
 
         return cached("punish", key, make)

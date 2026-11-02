@@ -378,12 +378,37 @@ def _span(stretch: Sequence[Gift]) -> str:
     return f"{first:%Y-%m-%d} to {last:%Y-%m-%d}"
 
 
+def main_part(found: Iterable[Gift]) -> Compare:
+    """The part (partial or clear) behind more of your gap over `found`: the one where you miss
+    most above your opponents' rate (`Compare.excess`; the two add up to the gap of partial and
+    clear together), partial on a tie as in the headline. Its label is an OUTCOMES key."""
+    s = split("", found)
+    return s.partial if s.partial.excess >= s.clear.excess else s.clear
+
+
+def part_examples(found: Iterable[Gift], part: str, limit: int) -> list[Gift]:
+    """Your misses of one part over `found`: typical partial ones, or the costliest clear ones."""
+    mine = [g for g in found if g.yours and g.outcome == part]
+    return typical(mine, limit) if part == "partial" else costliest(mine, limit)
+
+
+def part_note(c: Compare) -> str:
+    """'most of the gap is in partial misses (you 11 of 42, they 0 of 42)', for `Family.part`."""
+    return (
+        f"most of the gap is in {c.label} misses (you {c.yours.missed} of {c.yours.n}, they "
+        f"{c.theirs.missed} of {c.theirs.n})"
+    )
+
+
 @dataclass(slots=True)
 class Family:
-    """An opening where you clearly miss more than your opponents do (its own 95% interval leaves
-    out zero), with your costliest misses there."""
+    """An opening where you clearly miss more than your opponents do, partial and clear together
+    (its own 95% interval leaves out zero), with the part behind most of that gap (`part`,
+    labelled partial or clear) and your misses of that part there. Examples stand for the gap, so
+    a clear miss never stands for a gap that is all partial misses."""
 
     compare: Compare
+    part: Compare
     examples: list[Gift] = field(default_factory=list)
 
 
@@ -399,10 +424,13 @@ class Report:
     trend: list[Compare]
     # Where the gap comes from, inside the groups where you miss more than your opponents
     # (`focus`, their labels): the openings where you clearly miss more too. None without such a
-    # group. Your costliest misses come from those groups, or from all of them when there is none.
+    # group. Shown when no opening is: `worst`, examples from those groups of the part behind most
+    # of their gap (`worst_part`; none when the partial examples already show it), or with no such
+    # group your costliest misses, partial and clear together (`worst_part` None): `worst_title`.
     focus: list[str]
     families: list[Family]
     worst: list[Gift]
+    worst_part: str | None
 
     @property
     def gifts(self) -> int:
@@ -432,7 +460,8 @@ def report(
     (partial and clear together) more than your opponents, and one is listed only when its own
     gap clears zero as well: a raw excess would list 1-of-1 samples. They are ranked by
     `Compare.excess`, so the first are where most of the gap comes from, not just where you play
-    most. Partial misses are shown only from a group whose partial gap clears zero."""
+    most. Partial misses are shown only from a group whose partial gap clears zero. Examples
+    stand for a gap, so they come from the part behind most of it (`main_part`)."""
     found = gifts(games, pairs)
     names = group_names(found)
     by_group = {key: [g for g in found if g.group == key] for key in names}
@@ -448,20 +477,42 @@ def report(
     standing_out = [
         c for c in (compare(f, gs) for f, gs in by_family.items()) if c.verdict == "worse"
     ]
-    misses = [g for g in (focused if worse else found) if g.yours and g.missed]
+    listed = []
+    for c in sorted(standing_out, key=lambda c: -c.excess)[:families]:
+        part = main_part(by_family[c.label])
+        listed.append(Family(c, part, part_examples(by_family[c.label], part.label, examples)))
     partial_misses = [
         g for g in found if g.group in taken_part and g.yours and g.outcome == "partial"
     ]
+    shown_partials = typical(partial_misses, partials)
+    if worse:
+        # Examples of the gap in those groups: the partial examples may already show it.
+        worst_part: str | None = main_part(focused).label
+        shown = {(g.game.id, g.reply.ply) for g in shown_partials}
+        unseen = [g for g in focused if (g.game.id, g.reply.ply) not in shown]
+        covered = worst_part == "partial" and all(key in taken_part for key in worse)
+        examples_of_gap = [] if covered else part_examples(unseen, worst_part, worst)
+    else:
+        worst_part = None
+        examples_of_gap = costliest((g for g in found if g.yours and g.missed), worst)
     return Report(
         groups=list(splits.values()),
         partial_focus=[names[key] for key in taken_part],
-        partials=typical(partial_misses, partials),
+        partials=shown_partials,
         kinds=[compare(kind, (g for g in found if g.kind == kind)) for kind in KINDS],
         trend=trend(found),
         focus=[names[key] for key in worse],
-        families=[
-            Family(c, costliest((g for g in misses if g.game.opening_family == c.label), examples))
-            for c in sorted(standing_out, key=lambda c: -c.excess)[:families]
-        ],
-        worst=costliest(misses, worst),
+        families=listed,
+        worst=examples_of_gap,
+        worst_part=worst_part,
     )
+
+
+def worst_title(r: Report) -> str:
+    """What `Report.worst` holds, for its heading."""
+    where = f" in {' and '.join(r.focus).lower()}" if r.focus else ""
+    if r.worst_part == "clear":
+        return f"Your costliest clear misses (20+ points){where}"
+    if r.worst_part == "partial":
+        return f"Your partial misses (10-20 points){where}"
+    return f"Your costliest misses, partial and clear together{where}"

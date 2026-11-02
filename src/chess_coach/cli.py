@@ -434,7 +434,9 @@ def punish(
         OUTCOMES,
         TREND_GIFTS,
         headline,
+        part_note,
         report,
+        worst_title,
     )
 
     settings: Settings = ctx.obj
@@ -464,7 +466,7 @@ def punish(
             f"\n[bold]Where you took only part of it ({', '.join(r.partial_focus)})[/bold]"
         )
         for g in r.partials:
-            console.print(_gift_line(g, "would have taken all of it"))
+            console.print(_gift_line(g))
     title = "Missed (partial or clear), by the move that punishes"
     console.print(_rates_table(title, "punishing move", [(KINDS[c.label], c) for c in r.kinds]))
     for lesson in r.lessons:
@@ -476,9 +478,9 @@ def punish(
         "oldest may hold fewer)"
     )
     console.print(_rates_table(title, "games played", [(c.label, c) for c in r.trend]))
-    # Openings only where you clearly miss more (inside a group where you do); otherwise your
-    # costliest misses are the evidence.
-    shown = r.worst
+    # Openings only where you clearly miss more (inside a group where you do), each with examples
+    # of the part behind most of its gap; otherwise the examples in r.worst (worst_title says
+    # what they are), if any.
     if r.families:
         title = (
             f"Openings where you miss more than your opponents, partial and clear together "
@@ -486,12 +488,14 @@ def punish(
         )
         rows = [(f.compare.label, f.compare) for f in r.families]
         console.print(_rates_table(title, "opening", rows))
-        shown = [g for f in r.families for g in f.examples]
+        for f in r.families:
+            console.print(f"[bold]{f.compare.label}[/bold]: {part_note(f.part)}.")
+            for g in f.examples:
+                console.print(_gift_line(g))
     elif r.worst:
-        where = f" in {' and '.join(r.focus).lower()}" if r.focus else ""
-        console.print(f"\n[bold]Your costliest misses{where}[/bold]")
-    for g in shown:
-        console.print(_gift_line(g, "would have punished it"))
+        console.print(f"\n[bold]{worst_title(r)}[/bold]")
+        for g in r.worst:
+            console.print(_gift_line(g))
     console.print(
         "Drill the punishments you missed outright (puzzles are made from moves losing 20+ "
         "points, so partial misses have none): `chess-coach drill --tag punish_capture` (or "
@@ -499,11 +503,13 @@ def punish(
     )
 
 
-def _gift_line(g, ending: str) -> str:
-    """'Modern Defense: after 2.Bh6 you played 2...Bg7; 2...Nxh6 <ending>.', then what their
-    blunder allowed in chess terms and the link."""
+def _gift_line(g) -> str:
+    """'Modern Defense: after 2.Bh6 you played 2...Bg7; 2...Nxh6 would have punished it.' (a
+    partial miss took some of it: 'would have taken all of it'), then what their blunder allowed
+    in chess terms and the link."""
     from chess_coach.coach.punish import label
 
+    ending = "would have taken all of it" if g.outcome == "partial" else "would have punished it"
     text = f"after {label(g.blunder)} you played {label(g.reply)}; "
     text += f"{label(g.reply, g.reply.best_san)} {ending}."
     family = g.game.opening_family
