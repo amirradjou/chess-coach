@@ -18,6 +18,7 @@ from chess_coach.coach.punish import (
     label,
     report,
     trend,
+    typical,
 )
 from chess_coach.db import Store
 from chess_coach.engine.stockfish import EngineNotFoundError
@@ -294,6 +295,48 @@ def test_partial_misses_get_a_lesson_and_examples_only_where_the_gap_is():
     # Level everywhere: no lesson and no examples for it.
     level = report(blitzes, pairs[200:])
     assert (level.partial_focus, level.partial_lesson, level.partials) == ([], None, [])
+
+
+def _hanging_bishop(g, loss: float):
+    """Your reply giving back `loss` after their 2.Bh6, when 2...Nxh6 takes the bishop: a gift
+    whose blunder has a reason in chess terms."""
+    board = chess.Board()
+    for san in "d4 g6 Bh6".split():
+        board.push_san(san)
+    blunder = fact(g.id, 3, san="Bh6", wp_loss=51.0, is_user=False)
+    reply = fact(
+        g.id,
+        4,
+        san="Bg7",
+        uci="f8g7",
+        fen_before=board.fen(),
+        best_move="g8h6",
+        best_san="Nxh6",
+        wp_loss=loss,
+        motifs=["missed_tactic"],
+        is_user=True,
+    )
+    return blunder, reply
+
+
+def test_partial_examples_are_typical_ones_with_a_reason():
+    """Not the costliest partial misses: those sit just under the clear bar, where another engine
+    depth may call them clear. Ones whose blunder has a reason in chess terms come first, then
+    those nearest the middle of the band (15 points)."""
+    g = game(1)
+    losses = [19.6, 19.4, 15.2, 12.0, 11.0]
+    found = gifts([g], [chance(g, 3 + i, loss=loss) for i, loss in enumerate(losses)])
+    assert [x.reply.wp_loss for x in typical(found, 3)] == [15.2, 12.0, 11.0]
+    (hanging,) = gifts([g], [_hanging_bishop(g, 19.5)])
+    assert hanging.reasons()  # what their 2.Bh6 allowed
+    assert typical([*found, hanging], 2) == [hanging, found[2]]
+    # In the report too: the partial examples of a group whose partial gap is worse.
+    mine, others = [game(i) for i in range(40)], [game(i) for i in range(40, 80)]
+    pairs = [chance(mine[i % 40], 4 + i // 40, loss=x) for i, x in enumerate(losses * 10)]
+    pairs += mix(mine, kept=50) + mix(others, partial=5, kept=95, yours=False)
+    r = report(mine + others, pairs)
+    assert r.partial_focus == ["Blitz and rapid"]
+    assert [x.reply.wp_loss for x in r.partials] == [15.2, 15.2, 15.2]
 
 
 # -- which chances count ----------------------------------------------------------------------

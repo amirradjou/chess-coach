@@ -35,6 +35,7 @@ GIFT_WP_LOSS = 20.0  # the same bar as missed_tactic (engine/motifs.py)
 # What the reply gave back: under 10 points it kept the gift, from 20 it missed it outright.
 PARTIAL_WP_LOSS = INACCURACY_WP_LOSS  # 10, where missed_tactic starts
 CLEAR_WP_LOSS = MISTAKE_WP_LOSS  # 20
+BAND_MIDDLE = (PARTIAL_WP_LOSS + CLEAR_WP_LOSS) / 2  # 15: where typical partial examples sit
 OUTCOMES = {
     "partial": "partial (10-20 points)",
     "clear": "clear (20+ points)",
@@ -338,6 +339,16 @@ def costliest(misses: Iterable[Gift], limit: int) -> list[Gift]:
     return sorted(misses, key=lambda g: (g.reply.wp_loss, _when(g)), reverse=True)[:limit]
 
 
+def typical(misses: Iterable[Gift], limit: int) -> list[Gift]:
+    """Partial misses to show: those whose blunder has a reason in chess terms first, then those
+    nearest the middle of the band (BAND_MIDDLE), newest first among equals. Not the costliest:
+    they sit just under the clear bar, where another engine depth may call them clear."""
+    newest = sorted(misses, key=_when, reverse=True)
+    return sorted(newest, key=lambda g: (not g.reasons(), abs(g.reply.wp_loss - BAND_MIDDLE)))[
+        :limit
+    ]
+
+
 def trend(found: Sequence[Gift], size: int = TREND_GIFTS) -> list[Compare]:
     """Your rate against theirs over time, oldest first: stretches of consecutive games holding
     `size` of your gifts each, counted back from the newest game (the oldest may hold fewer).
@@ -380,7 +391,7 @@ class Family:
 class Report:
     groups: list[Split]  # bullet (moves 1-10), then blitz and rapid (and slower: group_names)
     # The groups where you take only part of their blunders more often than your opponents
-    # (`partial_focus`, their labels), and your partial misses there that gave back the most.
+    # (`partial_focus`, their labels), and typical partial misses of yours there (`typical`).
     partial_focus: list[str]
     partials: list[Gift]
     # The rest count a miss as partial or clear together (Gift.missed).
@@ -444,7 +455,7 @@ def report(
     return Report(
         groups=list(splits.values()),
         partial_focus=[names[key] for key in taken_part],
-        partials=costliest(partial_misses, partials),
+        partials=typical(partial_misses, partials),
         kinds=[compare(kind, (g for g in found if g.kind == kind)) for kind in KINDS],
         trend=trend(found),
         focus=[names[key] for key in worse],
