@@ -5,14 +5,16 @@ A gift is a move that loses at least 20 points of win probability; the reply is 
 player's next move. What the reply gave back sorts it (`Gift.outcome`): under 10 points it kept
 the gift, 10 to under 20 it took only part of it (a partial miss), 20 or more it missed it (a
 clear miss). Partial and clear misses are compared apart because they are different habits: on
-the owner's bullet games the whole gap is in partial misses, and clear ones are level. Your
-opponents' replies to your own gifts are the yardstick: players at your level with the same kind
-of chance (Lichess Insights calls the two rates Opportunism and Luck). A gap only counts when its
-95% interval (Newcombe) leaves out zero.
+the owner's bullet games most of the gap is in partial misses (+6.5 of +7.7 points), and clear
+ones show no clear difference (+1.2, 95% interval -4.0 to +6.5). Your opponents' replies to your
+own gifts are the yardstick: players at your level with the same kind of chance (Lichess Insights
+calls the two rates Opportunism and Luck). A gap only counts when its 95% interval (Newcombe)
+leaves out zero.
 
 `Gift.missed` is partial and clear together: the engine's `missed_tactic` on the reply (an
 inaccuracy or worse right after a gift: engine/motifs.py), the same as a reply losing 10+ points.
 The kinds of punishing move, the trend and the openings use it, so nothing is re-derived there.
+Examples stand for a gap, so they come from the part (partial or clear) behind most of it.
 
 The owner's rules apply to the replying move, on both sides alike: in bullet only moves 1-10
 count (features.counted) and replies made short on time don't (features.rushed). Bullet is
