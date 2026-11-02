@@ -6,7 +6,7 @@ what was built and why; this file is the to-do list until these branches are mer
 ## Branches, in merge order
 
 Each one builds on the one before it, so the PRs go in this order (merge commits, not squash).
-No PRs are open yet.
+No PRs are open yet. Open them in this order once the merge check below is done.
 
 | # | Branch | What it holds | State |
 |---|--------|---------------|-------|
@@ -15,16 +15,30 @@ No PRs are open yet.
 | 3 | `feat/threat-check` | What was their threat: `ignored_threat` / `unsafe_move` from a null-move search, `threats` command, "What do they threaten?" in Practice | Built, reviewed, fixed, pushed |
 | 4 | `feat/next-level` | So far only the public reference ladder (`scripts/level_reference.py`, `src/chess_coach/data/levels.json`) and this file | Card not built |
 
-Still to do before the PRs: stack them. Merge `feat/repeat-mistakes` into `feat/punish-rate`, then
-`feat/punish-rate` into `feat/threat-check`, then `feat/threat-check` into `feat/next-level`
-(`git merge --no-ff`, conflicts named in the merge message). Expect conflicts in
-`patterns/mining.py` (all three clamp the Wilson bound: keep one), `puzzles/make.py`, `db.py`,
-`coach/principles.py` (`allows(yours=True)` and `allows(captures=True)`; threats moved board
-helpers into `engine/motifs.py`), `cli.py` (new commands, the end of `sync`), `coach/digest.py`,
-`web/app.py`, `web/static/*`, README, PLAN and the tests. If `git log` already shows
-`chore: merge feat/repeat-mistakes into feat/punish-rate`, that step is done. After each merge,
-run the full suite, every new command on a copy of the database, and every tab in a browser at
-1280 px and 375 px.
+The branches are stacked (2026-11-02): each one merges the one before it, so each PR's diff is
+only its own work.
+- `92c9787` merges repeat-mistakes into punish-rate (231 tests).
+- `8315494` merges punish-rate into threat-check (261 tests).
+- `8a1ec5a` merges threat-check into next-level, with no conflicts (261 tests).
+
+The merge commits name every conflict and how it was resolved:
+- one Wilson bound and one Newcombe interval in `mining.py`;
+- `allows(captures=, yours=)`;
+- the digest order: threats, then When they blunder, then repeats;
+- `sync`: puzzles, then threats, then the repeat alerts.
+
+After the merges, on a fresh copy of the database, the new commands and the APIs give the same
+numbers as each branch on its own. Threats match with `--threads 1`; 2 threads relabel about
+100 rows. Puzzles are 525 after dedupe.
+
+**Not finished: the independent check of the two merges.** It was stopped partway. Before
+opening the PRs:
+- Diff each merge against both parents. The first pass listed the lines each merge dropped
+  (`lost1.txt`, `lost2.txt` in `~/.cache/chess-coach-research/session-2026-11-01/w1/`); they
+  look like intended resolutions, but nobody has confirmed them.
+- Run the suite at each merge commit.
+- Open a fresh copy twice: every migration runs once and the second open changes nothing.
+- Walk every tab in a browser at 1280 px and 375 px with no console errors.
 
 ## What the research found (two rounds, 2026-10-31 and 2026-11-01)
 
