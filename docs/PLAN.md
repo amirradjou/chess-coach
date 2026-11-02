@@ -180,6 +180,361 @@ move 10).
 - On a copy of the owner's database (2026-10-31): 8 new bullet games since 10-29, analysed,
   4 moves checked, 2 new puzzles.
 
+## Repeated mistakes, the opening after move 10, puzzle dedupe (2026-10-31, branch `feat/repeat-mistakes`)
+
+Built:
+- **Puzzle dedupe.** `make_opening_fixes` read the checked keys once and never added the one it
+  had just checked, so a fix two families share (Modern and Pirc, 3...Bg7 after 1.e4 d6 2.Bc4 g6
+  3.Qf3) was verified and stored twice: fixed. `make` and `make_opening_fixes` now keep an
+  in-memory index of the stored puzzles by (position, solution) (`puzzles.make.Stored`): a copy
+  isn't stored, its tags go to the puzzle already there, and a fix already checked for another
+  opening tags that drill with this opening too. A position is its EPD (`openings.epd`: the FEN
+  without the halfmove clock and move number), so a drill reached by another move order is the
+  same drill; the fix check key is the EPD too, and keys recorded with the whole FEN are read as
+  their position's, so nothing is checked again. `puzzles dedupe` (its own command; `prune` is
+  about the counting rules) merges older copies: keeps the copy with attempts, else the oldest,
+  unions the tags, deletes the rest; when 2+ copies have attempts they all stay and it says so.
+  "opening-fix" is a kind of drill (prompt, accepted moves), not a theme, so it is never carried
+  over to an ordinary puzzle; its opening's tag is.
+- **Repeats** (`coach/repeats.py`): the user's counted errors (inaccuracy or worse; bullet only to
+  move 10; nothing played short on time) grouped by (position, move), the position being the EPD
+  as above, kept when played in 3+ games. Each has the better move, their best answer (the next
+  ply's stored best move, from `Store.replies_to_errors`) and how often they found it, reasons
+  from `principles.allows` (`yours=True`: "hit your knight") and `explain`, links
+  (`Game.move_url`), and whether a puzzle drills the position (a puzzle there whose answer isn't
+  the move). Shown by `chess-coach repeats`, a digest section (with `--since`: the ones played
+  again since, still counted over all games), `/api/repeats` and a section on "What you get
+  wrong", and `sync` prints "You played 3...Bg7 again (12th time); it has a puzzle." (or the
+  better move) for each repeat a new game is part of.
+- **The opening after move 10** (`repertoire.after_ten`), per family and colour, by the engine
+  only, so bullet counts: the median eval after both sides' 10th moves (ply 20, for both colours;
+  clamped at +-10 like Lichess's ACPL; median because blowouts skew a mean; games without a ply 20
+  are left out), the share of games at -1 or worse and the mistake rate (mistakes and blunders,
+  counted moves 1-10) with Wilson intervals (`mining.wilson_upper` is new), and "since book": the
+  eval after ply 20 minus the eval at the book point (`book_ply`), which is the last position up
+  to the user's 10th move that the opening table names (transpositions back into a named line
+  count), moved back to the even ply at or before it so both sides make the same number of moves
+  in between (ply 8, after Black's 4th move, when none matched; ply 0 is the start position, the
+  eval before the first move). One per-game reading (`at_ten`) serves the table and the tree. Ranked
+  by the low end of the mistake-rate interval, then since-book; never by a mean. Shown in
+  `openings` (a table per colour), the Your openings tab (a table, and a line on each card) and
+  Learn openings (each node and move: "engine eval after both sides' 10th moves: +0.1 (median of
+  78 games; not results)") through a {game id: eval after ply 20} map; the tree reads both sides'
+  moves to ply 20 in one query, and `tree.build` keeps its 16-ply filter. `is_book` is now
+  cached.
+
+Decisions:
+- Named book moves are left out of repeats, as `repertoire.fixes` does. Without that the top
+  "repeat" is 2.d4 in the Blackmar-Diemer (123 games): a choice of gambit, which the owner put
+  out of scope, not a slip.
+- The sync alert fires for every repeat (3+ games) a new game is part of, including the game that
+  makes it the third.
+- The book position is the *last* one named (the spec's wording), not where the game first left
+  the table: in the Modern and Pirc, games often leave the table on White's second move and come
+  back to a named line two moves later.
+- The level is read after ply 20, both sides' 10th moves, for both colours (research round 2,
+  confirmed by both of its skeptics). As first built it was read right after the user's own 10th
+  move: for White that is ply 19, so it always held his last slip and never the reply, although
+  the two 10th moves cost about the same (his 90.6 cp on average, median 28, over 2,044 moves;
+  theirs 78.5, median 20, over 2,043). The mean of plies 19 and 20 was rejected: it is half a
+  White move heavy whatever the user's colour (all games as Black: 26.5% at -1 or worse instead of
+  32.6%).
+- Since book starts at an even ply for the same reason. Read right after the book position, its
+  two points could be an unequal number of moves apart: in the Blackmar-Diemer it was +17.5 cp
+  (median) in the 62 games whose book position followed his move and -119 in the 17 where it
+  followed theirs, and the -24 shown, over all 79, mixed the two. The even ply is the one at or
+  before the book position, so when the book ends on a White move, that move is counted too: as
+  White his own last book move (402 of 1,019 games; median -24 cp, mean -32), as Black theirs
+  (240 of 1,020; median +11.5 for him). `openings` and the page say so. Rounding up instead would
+  leave out the first move after book whenever a White move ends it, a Black user's own
+  included; it changes no conclusion below (Blackmar-Diemer +67 instead of +63, Modern +28
+  either way).
+- A position is its EPD, not its full FEN, wherever a repeat or a drill is matched: the FEN's
+  halfmove clock and move number differ when another move order got there (the Scotch and the
+  Danish Gambit Accepted meet at 7.O-O with clocks 3 and 5), and that is one mistake and one
+  drill.
+- A fix two openings share is one drill carrying both openings' tags; Practice names it after
+  the opening being drilled (the tag asked for, when it is one of the table's families), else
+  its first.
+- "Since book" is shown as a bare median. For the conclusions below its 95% interval was worked
+  out separately (distribution-free, from the order statistics of the per-game values): it is
+  wide for most families, so a small since-book value means no clear change, not "no loss".
+
+Fixed after review (2026-11-01): repeats, make-time dedupe, `puzzles dedupe` and the fix check
+key matched the full FEN (see the decision above); `openings --min-games 0` crashed
+(`StatisticsError`) on a family whose games all ended before move 10; Wilson bounds came out a
+hair below 0 (708 of the n under 3,000 for 0 hits), printed as "-0%"; `openings` printed the
+after-ten heading with no table when no family qualified; a shared fix drill was labelled with
+its first opening in the other opening's "Drill these fixes"; a repeat card read "Last on null"
+for undated PGN games. The sync alert's filter and `allows(yours=True)` now have tests.
+
+Fixed after research round 2 (2026-11-01): the level and since book now follow the two
+decisions above (ply 20; an even book point). On the owner's games the level moved for White
+only: all games as White went from -19 cp and 29.0% at -1 or worse (1,024 games) to +26 and 20.1%
+(17.8-22.7%, 1,019 games; the 5 that ended on his 10th move are left out). As Black it stays -44
+and 32.6% (29.8-35.6%, 1,020 games). Since book moved for both colours: all games as White from
+-26.5 to +7 cp, as Black from +5.5 to +9. The ranking rule is untouched, and so is the order of
+the White and Black tables.
+
+Fixed after the second review (2026-11-01): Learn openings' move rows showed "+0.1 after both
+sides' 10th moves" right after a score; they now name the engine eval in full, as each node's
+title does. The since-book notes (`openings`, the Your openings tab, the README) said it runs
+from where the game left the table, after Black's move; they now say it starts just before the
+last named position when a White move reached it, and that this move counts. The README gave the
+ply-19 reason as if it held with Black too. The Blackmar-Diemer split in the decisions above
+mixed two samples: its 61 games and +17 came from the 78 that reach ply 20, the -24 from all 79.
+
+On the owner's games (a copy, 2,099 Lichess games at depth 12):
+- `puzzles dedupe`: 14 positions were stored more than once; removed 19 copies, 544 -> 525
+  puzzles, the 5 attempts untouched (no group had a tried copy). The Modern/Pirc 3...Nf6 drill now
+  has both tags, and so does the Scotch/Danish Gambit Accepted 7.e5 drill (one position, two move
+  orders); 6...Qxd1+ (an own-mistake puzzle) took the Pirc fix's family tag. By the full FEN it
+  was 13 positions and 17 copies: the 7.e5 pair and a third 7.Ng5 copy survived. On the copy
+  already deduped that way (527), the new `puzzles dedupe` merged those 2 and left 525. Make-time
+  check on another copy with the 19 copies and their 26 check keys removed: `puzzles make
+  --openings` re-checked 21 moves at depth 18 and made 0, leaving the same 525. Deleting only the
+  Danish 7.O-O drill and its check key, the same command checks nothing and tags the Scotch's
+  drill with the Danish Gambit Accepted.
+- `repeats`: 35 repeats over 200 games, 22 already drilled by a puzzle (42 over 357 with book
+  moves). Top: 3.c3 in the Center Game, 3.c3 in the Sicilian and 5.Nf3 in the Danish Gambit
+  Accepted (19 games each), then 3...Bg7 in the Modern (11 games, last 2026-09-22; 4.Qxf7+ found
+  9 of 11 times; has a puzzle). The 3.c3 Center Game one has no puzzle. By the full FEN it was 30
+  over 167: 7.O-O in the Scotch and the Danish was two repeats of 3 games (one of 6), seven were
+  undercounted (a 5...O-O shown in 4 games was played in 7, and has a puzzle that went unseen)
+  and six with 3+ games were missing.
+- After both sides' 10th moves: 1,691 bullet games get there (mean +0.02, 27% at -1 or worse);
+  23 families with White and 14 with Black have 5+ such games. Worst with White, by the mistake
+  rate, which this doesn't change: the Blackmar-Diemer, 78 games, median +0.1, 27% (18-38%) at -1
+  or worse, mistakes on 7.8% (6.1-9.8%) of moves 1-10, and +0.6 since book. Read after his own
+  10th move it was -0.9 and 49% (39-60%) over 79 games; on the same 78 games that read gives -95
+  cp and 50%, so most of the -0.9 came from reading before the opponent's 10th move. Its since-book
+  median has a 95% interval of -9 to +204 cp (46 games up, 32 down, sign test p = 0.14), so a
+  gain after book isn't shown either. Since book now counts the same number of moves by each side
+  wherever the book ended, but it still differs between the 61 games whose last named position
+  came after his move (median +104) and the 17 where it came after theirs (-13): in the first
+  the opponent's move leaves the table, in the second his does. The 61 also count his last book
+  move (3.f3 in 58 of them, median -25 cp) and the 17 count none; read from the named position
+  itself, the 61 come to +137. So that one move narrows the gap rather than making it: the gap is
+  a difference between the games. With Black (the levels are unchanged: his 10th move is ply
+  20) the Modern (417 games, -0.4, 33% at -1 or worse, 3.3%) and the Pirc (177, -0.3) are *up*
+  since book, +0.3 (95% interval +9 to +43 cp; 240 games up, 177 down) and +0.2 (+8 to +39 cp;
+  108 up, 68 down): the engine dislikes Black's book positions there, and the user doesn't lose
+  ground after them. The Queen's Pawn Game (175, -0.5 median vs -0.8 mean) is +0.1 since book,
+  but its interval (-1 to +32 cp; 99 up, 75 down, sign test p = 0.08) includes no change, so it
+  isn't shown to be up.
+- `/api/repeats` took 1.1 s the first time; `/api/openings` takes 2.3 s (1.9 s before it read
+  both sides' moves to ply 20, measured the same way on 2026-11-01); both are cached after.
+- `sync` was not run for real (no network in this work); its alert is tested with a faked fetch.
+
+## When they blunder: punish rate against your opponents (2026-11-01, branch `feat/punish-rate`)
+
+- `coach/punish.py`: a gift is any move losing 20+ points of win probability (`Store.gifts`, a
+  self-join that pairs it with the next move, either side); the reply missed the punishment when
+  it carries `missed_tactic`, which the engine already sets for exactly that (an inaccuracy or
+  worse right after a 20+ move), so nothing is re-derived. That is partial and clear misses
+  together: the group headlines split them (next section). The mirror ("Luck") is the same over
+  your gifts and your opponents' replies, and is the yardstick: players at your level with the
+  same kind of chance. `features.counted` and `features.rushed` are applied to the replying move
+  on both sides (in bullet, opponents' replies after move 10 are out too).
+- Groups: bullet (moves 1-10) and everything slower together ("Blitz and rapid"; rapid alone is
+  too small; classical, correspondence or unknown-speed games count there too, and then the label
+  names them: `punish.group_names`). Each rate has a Wilson interval (`mining.wilson_lower` and
+  `wilson_upper`, clamped to 0-100%), the gap a Newcombe hybrid-score interval
+  (`mining.newcombe`); the sentence says
+  worse or better only when that interval leaves out zero, otherwise no clear difference, or too
+  few to tell (next section). A side with no chances has no rate, gap or interval ('–', `null` in
+  the API), never 0 of 0 read as 0%.
+- Kind of punishment from the reply's `best_san` (`features.punish_kind`: capture, check, quiet;
+  castling is quiet). A kind's lesson (`punish.LESSONS`) fires only when you miss that kind more
+  than your opponents do with the interval clear of zero; your quiet rate against your own
+  capture rate is never compared (everyone misses quiet punishments more).
+- Trend: stretches of games holding about 150 of your chances each, counted back from the newest
+  game; a stretch closes at the end of the game that brings it to 150 or more, and the oldest
+  holds what is left. Both rates in a stretch come from the same games. No month column (2026
+  months have 4-50 chances each).
+- Evidence: openings only inside the groups where you're worse, only with 10+ chances on each
+  side (`OPENING_CHANCES`), and only those whose own gap clears zero at 95% across all the
+  openings looked at (Bonferroni, `_clear_of_chance`), ranked by excess misses (yours minus your
+  n times their rate), each with examples of the part (partial or clear) behind most of its gap.
+  When no opening qualifies, the examples follow the gap of the worse groups the same way (none
+  when the partial examples already show it), or with no worse group they are your costliest
+  misses (next section). Boards show their blunder as the
+  last move, your reply in red and the punishment in green, with `Game.move_url` at the reply's
+  ply and `principles.allows(..., captures=True)`. That also names a capture of a piece that
+  was hanging or attacked by a cheaper piece ("It lets Nxh6 take their bishop on h6, which was
+  hanging ..."), with a new attack it makes, even after a blunder that gave check
+  (`principles.en_prise` is `hanging()` without its in-check guard). Only When they blunder passes
+  `captures`: the opening tree joins `allows` with `explain`, which already says the piece was
+  left hanging, so the tree's reasons are the same as on main.
+- Puzzle sub-tags: a puzzle with `missed_tactic` gets `punish_capture|punish_check|punish_quiet`
+  from its solution SAN (`features.punish_tag`); new ones in `make.verify`, existing ones by a
+  tiny Store migration on open (`Store._tag_punishments`, idempotent: it only touches puzzles
+  with `missed_tactic` and no `punish_` tag yet), not by `puzzles prune`. No new deck: the
+  Practice tag filter (and `drill --tag`) offers them.
+- Surfaces: `chess-coach punish [--since] [--examples]`, a *When they blunder* section in the
+  digest (only when the CLI passes `gifts`; the narrated summary and the eval harness don't get
+  it), and `GET /api/punish` (cached like the overview) rendered on What you get wrong, loaded
+  after the rest of the page, with practice buttons per sub-tag and a note that Learn openings'
+  punish deck covers only the first 8 moves. No engine anywhere.
+- On a copy of the owner's database (2,099 Lichess games, depth 12; 8,493 answered moves losing
+  20+, 2,398 of them with a counted, unhurried reply), about 0.2 s. Missed here is partial and
+  clear together; the split is in the next section:
+  - Bullet, moves 1-10: you missed 44.0% (248 of 563), they missed 36.3% (212 of 584): +7.7
+    points, 95% interval +2.1 to +13.4, the one real gap (most of it partial misses: +6.5 of the
+    +7.7 points; clear misses +1.2, -4.0 to +6.5, not shown to differ).
+  - Blitz and rapid: 36.0% (221 of 614) against 35.6% (227 of 637): +0.4, -4.9 to +5.7, no
+    clear difference.
+  - By kind: capture 33.1% (599) vs 29.1% (670), check 45.6% (68) vs 39.7% (73), quiet 47.1%
+    (510) vs 45.0% (478); no interval clears zero, so no kind lesson.
+  - Trend (8 stretches, 2018-10 to 2026-10): your rate 34.7-45.3%, theirs 30.6-40.6%; no
+    stretch's gap clears zero.
+  - Openings, as first built (each opening's own 95% interval): Danish Gambit Accepted 23/42 vs
+    12/42 (+26.2, 95% interval +5.1 to +44.3), Queen's Pawn Game 23/38 vs 12/37 (+28.1, +5.5 to
+    +47.0), Blackmar-Diemer Gambit 30/48 vs 26/62 (+20.6, +1.8 to +37.4); the Sicilian Defense
+    (22/44 vs 10/32, +18.8, -3.6 to +38.2) was not listed. They were not "where the bullet gap
+    comes from": of his 36.7 excess partial misses in bullet they hold 11.0, 3.9 and 1.6, and the
+    Queen's Pawn Game and the Blackmar-Diemer stand out mostly on clear misses. Since the third
+    review none is listed (13 openings with 10+ chances a side, z = 2.89; see "After the review
+    of the split"). The costliest misses are fianchetto reflexes, 2.Bh6 2...Bg7?? (2...Nxh6 wins
+    the bishop): clear misses, which show no clear difference from his opponents'.
+  - `--since 7d`: bullet 8 of 13 against 8 of 19 (+19.4, -14.4 to +47.5), too few to tell, so no
+    openings: just the three costliest misses.
+  - Puzzles: the migration tagged all 228 `missed_tactic` puzzles: 112 punish_capture, 95
+    punish_quiet, 21 punish_check.
+- After two reviews (2026-11-01), fixed: openings had been listed on a raw excess (1-of-1
+  samples, and from all games when no group was worse) under "where you miss more than your
+  opponents" (the per-opening interval that replaced it still let a 1 of 1 against 0 of 3
+  through: see "After the review of the split" below); `allows`' new capture clause had
+  repeated explain's hanging-piece reason on the opening tree (82 of 940 punishable opponent
+  mistakes there); a side with 0 chances read as 0%
+  (a "-100 points" gap); the capture of a checking piece got no reason (3 of the 469 counted
+  misses); the CLI said the engine's move "punished it" and every trend row held 150; any
+  non-bullet speed was labelled "Blitz and rapid"; and no test covered `digest`'s wiring.
+
+### Partial and clear misses (2026-11-01, after research round 2)
+
+Research round 2 (re-checked by both skeptics at depth 12 and 18) found that "missed" mixes two
+habits: on the owner's bullet games most of the gap is in replies that give back 10-20 points
+(+6.5 of the +7.7 points: he takes only part of the gift); replies that give back 20+ show no
+clear difference from his opponents' (+1.2, -4.0 to +6.5: not shown to differ, not shown to be
+zero). So each group now shows the two apart, and the headline says which one differs.
+
+- `Gift.outcome` from the reply's `wp_loss`: kept (< 10), partial (10 to < 20), clear (>= 20);
+  the bars are `evaluation.INACCURACY_WP_LOSS` and `MISTAKE_WP_LOSS`. `Split` holds one group's
+  partial and clear `Compare`s and the two together (`missed`: `compare` takes the predicate;
+  `missed` is the default), each
+  with Wilson intervals, a Newcombe interval for the gap and the same verdict rule (worse or
+  better only when the interval leaves out zero).
+- Checked first, on the copy: `missed_tactic` on the reply is exactly `wp_loss >= 10`, on all
+  8,493 answered gifts (3,494 tagged, every one 10+; 4,999 untagged, every one under 10) and on
+  the 2,398 counted ones (908 = 235 partial + 673 clear). The stored judgement agrees: partial =
+  inaccuracy (235), clear = mistake (248) or blunder (425). No counted reply sits exactly on 10.0
+  or 20.0; of all 8,493 answered gifts one does, lichess:dsJhaWUI ply 38 (bullet move 19, so not
+  counted) at exactly 20.0, a mistake, sorted as clear like its judgement. It holds by
+  construction too (`motifs.py` tags `missed_tactic` when the move before lost 20+ and this one
+  10+), so `missed` is partial plus clear. The parts below that use it can still stress another
+  part than a group's headline (an opening can stand out on clear misses inside a group whose gap
+  is partial), so examples come from the part behind most of the gap they stand for.
+- `headline(Split)`, a gap first (worse before better, partial before clear) and a gap only
+  when its interval clears zero. A level row keeps its numbers: "Clear misses: no clear
+  difference, 29.3% vs 28.1% (+1.2 points, 95% interval -4.0 to +6.5)", or "too few to tell"
+  while the interval still reaches 10 points either way (`UNSURE_GAP`); never "the same". Both
+  parts level: the two together are named when their interval clears zero ("When they blunder
+  you miss it more often than your opponents, partial and clear misses together: ... Apart,
+  neither is clear."), else "there is no clear difference between you and your opponents" or
+  "there are too few chances yet to tell you apart"; never "you do as well". Partial worse, clear
+  not: "When they blunder you often take only part of it: your reply gave back 10-20 points after
+  14.7% of their blunders (your opponents: 8.2%), +6.5 points (95% interval +2.8 to +10.3). Clear
+  misses: no clear difference, 29.3% vs 28.1% (+1.2 points, 95% interval -4.0 to +6.5)." Clear
+  gaps read "you miss it outright more (less) often".
+- `LESSONS["partial"]` ("After their slip, compare checks, captures and threats before your
+  usual move, and take the one that wins most.") is `Report.partial_lesson`, only when some
+  group's partial gap is worse (`partial_focus`); `Report.lessons` stays the kinds'. Examples:
+  `Report.partials`, typical partial misses in those groups (`typical`: ones whose blunder has a
+  reason in chess terms first, then those nearest the middle of the band, 15 points; the
+  costliest sit just under 20, where another engine depth may call them clear), in the existing
+  format (their blunder, your reply, the engine's move, `principles.allows(captures=True)`, the
+  link). Losses in examples show one decimal, cut rather than rounded (`Gift.given_back`):
+  rounding printed 19.96-19.99 as 20.0, the clear bar.
+- Which definition each part uses:
+  - partial / clear (`outcome`): the group headlines and their rows, the partial lesson, the
+    partial examples, and every example of a gap (`main_part`: the part with the bigger excess
+    over the opponents' rate, partial on a tie);
+  - missed, partial and clear together (`missed_tactic`): each group's third row, the headline
+    when neither part has a gap, the kinds table (and its lessons), the trend, the openings list
+    and its gate (a group where you miss more, then 10+ chances a side and a gap clear of zero
+    across the openings looked at), and the costliest misses shown when no group is worse. Their
+    titles say so ("Missed (partial or clear)", "partial and clear together"; the other example
+    headings name their part, `worst_title`);
+  - puzzle tags (`punish_capture|check|quiet`): every `missed_tactic` puzzle, and puzzles start
+    at 20 points lost (`make.MIN_WP_LOSS`), so all are clear misses: 228 of 228 on the copy. No
+    drill trains partial misses yet; the CLI's drill line says so, and the card's practice line
+    says the puzzles come from moves losing 20+.
+- Surfaces: the CLI prints both headlines and one table with a partial, a clear and a together
+  row per group, then the lesson and the examples; the digest puts the three rows under each
+  group's line, and lists each opening with its examples (no costliest misses next to them, as
+  in the CLI and on the card); `/api/punish` groups are `{label, headline, partial, clear,
+  missed}` (each a compare with `name`), plus `partial_focus`, `partial_lesson` and `partials`;
+  families carry `part` and `part_note`, and `worst_part` and `worst_title` say what `worst`
+  holds; the web card shows each group with its headline and a three-row table, then the lesson
+  and the boards.
+- On a fresh copy of the owner's database (same 2,398 counted chances):
+  - Bullet, moves 1-10: partial 14.7% (83 of 563) against 8.2% (48 of 584), +6.5, 95% interval
+    +2.8 to +10.3, worse; clear 29.3% (165 of 563) against 28.1% (164 of 584), +1.2, -4.0 to
+    +6.5, no clear difference; together 44.0% (248 of 563) against 36.3% (212 of 584), +7.7,
+    +2.1 to +13.4.
+  - Blitz and rapid: partial 8.8% (54 of 614) against 7.8% (50 of 637), +0.9, -2.1 to +4.1;
+    clear 27.2% (167 of 614) against 27.8% (177 of 637), -0.6, -5.5 to +4.4; no clear difference
+    on either (together +0.4, -4.9 to +5.7).
+  - Partial examples (bullet), typical since the third review: 9...Nxf3 after 9.Ngf3 (9...Nxd3
+    hits the bishop on f4; -14.8), 10.Qe1 after 9...Bd6 (10.g4 hits the bishop on h5; -15.4),
+    6...a6 after 6.c5 (6...c6 hits the knight on b5; -15.5). Before: 19.61, 19.57 and 19.38, the
+    edge of the band, the third with no reason.
+  - No opening is listed, and no other examples: the partial examples show the bullet gap.
+- How firm the partial gap is (research round 2): game-clustered +6.5 [+2.7, +10.0] over 681
+  games; at depth 18 (6,567 positions re-scored, game-clustered) +6.6 [+3.3, +10.0], with clear
+  +1.7 [-3.7, +7.1]. Public players' partial rates don't separate rating levels (bands A / B /
+  C: 9.8 / 10.3 / 9.7%), so it is a personal habit, not a level gap, and the wording stays away
+  from levels.
+- Caveats (here, not in the UI):
+  - In the 268 bullet games where both sides gave a counted gift, the partial gap is +2.6, 95%
+    interval -1.8 to +7.1 (39 of 351 against 31 of 365): inside the same games it is not clear.
+  - 11 of his 83 bullet partial misses come from the Danish Gambit Accepted: 11 of his 42
+    chances there, against his opponents' 0 of 42 (clear: 12 of 42 each). With the other two
+    Danish families it is 13 of 83 (Danish Gambit 2 of 7 against 0 of 3; Declined 0 of 1
+    against 0 of 5).
+  - The gap sits in his newer games: older half +3.3 [-1.9, +8.5], newer half +9.8 [+4.5,
+    +15.2]. A second depth-12 run with other engine settings shrinks it to +2.9 [-0.6, +6.6];
+    that run agrees with depth 18 less often (90.7% of reply classes against 94.8% for the
+    stored evals), but the 10-20 band does depend on the engine's settings.
+
+### After the review of the split (2026-11-01)
+
+Fixed, each with a test that fails on the code before it (numbers from a copy of the database):
+- Both parts level, together worse (`--since 90d`, bullet: partial +8.0, -0.0 to +17.8; clear
+  +11.4, -3.2 to +25.8; together 31 of 67 against 22 of 82, +19.4, +4.0 to +33.9): the headline
+  said "you do as well as your opponents" while the same section listed the openings where he
+  misses more. It now names the together gap, and the gate uses the same compare
+  (`Split.missed`).
+- A level row read "the same as theirs" with no interval, even on 3 of 13 against 1 of 19 (the
+  weekly digest: +17.8, -6.6 to +45.3). Now "no clear difference" or "too few to tell", with the
+  interval.
+- Every board under "where you miss more" was a clear miss (9 of 9), including both of the
+  Danish Gambit Accepted's, whose gap is all partial. Examples now come from the part behind
+  most of the gap they stand for, and the digest lists the openings with their examples instead
+  of the costliest misses.
+- The partial examples were the edge of the band (19.61, 19.57, 19.38, the last with no reason):
+  now typical ones with a reason.
+- Rounding printed 19.96-19.99 as 20.0 (there is an answered reply at 19.99, lichess:ur6JHTSf
+  ply 24, not counted): now cut to one decimal; the card printed 81.0 as "81".
+- The openings gate listed 1 of 1 against 0 of 3 (`--since 90d`, the English Opening) and tested
+  about 40 openings at 95% each (16 with 3 or fewer of his chances), so about one listing was
+  expected by chance. Now 10+ chances a side and a Bonferroni interval across the openings
+  looked at; on all his games none of the 13 looked at clears it (z = 2.89), and with `--since
+  90d` the Pirc Defense, the only one looked at, stays.
+- Wording: "the whole gap is in partial misses" is most of it (+6.5 of +7.7); "no reply sits
+  exactly on 10.0 or 20.0" holds for the counted replies, not for all answered ones.
+
 ## What was their threat? Ignored threats vs unsafe moves (2026-10-31, branch `feat/threat-check`)
 
 - `engine/threats.py`: before each counted (`features.counted`), non-rushed (`features.rushed`)
@@ -208,8 +563,10 @@ move 10).
   `_fix_lichess_ids` renames them.
 - `coach/threats.py`: `check` (newest games first, a FEN cache per run, stored game by game, so
   it resumes) and `report`: each label's share of your checked mistakes and blunders and of your
-  opponents', Wilson 95% intervals (`mining.wilson`, clamped to 0-100%) and Newcombe's interval
-  for the difference (`mining.difference`). "Same as your opponents" when that interval includes
+  opponents', Wilson 95% intervals (`mining.wilson`, clamped to 0-100%; `wilson_lower` and
+  `wilson_upper` read from it) and Newcombe's interval for the difference (`mining.newcombe`, the
+  one When they blunder uses; -1 to +1 when a side has no mistakes checked). "Same as your
+  opponents" when that interval includes
   zero; a step is only called yours to work on when its low end is above zero, and with no gap
   the summary says only that (never "not a weakness").
 - Chess terms from code (`principles.their_threat`, `ignored_threat`, `unsafe_move`): "Their a5

@@ -125,7 +125,12 @@ table for opening names. The web coach is FastAPI with plain JavaScript and pyth
 
 **v0–v7 done.** Import, analyse, find your patterns, turn your own mistakes into puzzles, drill
 them on a schedule, learn and fix your openings, and watch the numbers move, in the terminal or in
-the browser (`chess-coach serve`).
+the browser (`chess-coach serve`). New: *When they blunder* (`punish`), what your replies to your
+opponents' blunders give back against what theirs give back after yours. On the author's games,
+bullet moves 1-10: the reply took only part of the gift (gave back 10-20 points) after 14.7% of
+their blunders against their 8.2% (+6.5 points, 95% interval +2.8 to +10.3), while clear misses
+(20+) show no clear difference, 29.3% against 28.1% (+1.2, -4.0 to +6.5); blitz and rapid: no
+clear difference on either.
 
 **Bullet is not taken seriously.** In a 1-minute game only your first 10 moves count: after
 that the clock decides the game, so later moves are left out of everything (patterns, mistake
@@ -150,7 +155,8 @@ across 8+ games.
   download leaves no gap), analyses whatever isn't analysed yet, newest first, makes puzzles,
   looks for their threats before every mistake not checked yet (the first time, the whole
   backlog), and says what came in and what's due. Bullet results aren't reported, by the rule
-  above.
+  above. When a new game repeats one of your repeated mistakes (see `repeats`) it says so: "You
+  played 3...Bg7 again (12th time); it has a puzzle."
 - `stats` prints a per-game accuracy table and how often each motif shows up in your moves.
 - `threats` asks, before every counted mistake and blunder (yours and your opponents'), what the
   other side threatened: the mover passes and Stockfish (depth 12) finds their best line, and a
@@ -169,12 +175,36 @@ across 8+ games.
   slice only when it has enough moves (30) or games (8), your mistake rate (or loss rate) there
   is well above your own (1.5×, or 1.25× for losses), and the low end of its 95% interval is
   still above it. Each pattern cites its worst moves with links; then a motif table with one
-  thing to practise for each. All counted, no model, so it can't invent a pattern.
+  thing to practise for each, and the mistakes you repeat from the same position. All counted, no
+  model, so it can't invent a pattern.
 - `digest --since 7d` is the weekly digest: only those games, compared with the ones before.
   `digest --narrate ollama` adds a short summary from a local model (free); `--narrate
   openrouter --model …` uses any OpenAI-compatible server with `OPENROUTER_API_KEY`. The model
   only explains: any sentence that cites a move outside the evidence is removed. It checks moves,
   not every word, so read it as a gloss on the counted patterns above it.
+- `punish` (and a *When they blunder* section in the digest and on What you get wrong): when your
+  opponent blunders (loses 20+ points of win probability), what your reply gives back: under 10
+  points it kept the gift, 10-20 it took only part of it (a partial miss), 20 or more it missed
+  it (a clear miss). Each is set against your opponents' replies to your blunders: players at
+  your level with the same kind of chance. Bullet (moves 1-10, on both sides) and blitz + rapid
+  (with any slower games, named in the label) are compared apart, with partial misses, clear
+  misses and the two together as three rows, each with a 95% interval for the gap; you're only
+  called worse or better when that interval leaves out zero, and the headline names no other
+  gap (when neither part has one, the two together can). A row without a gap says no clear
+  difference, or too few to tell while the interval still allows 10 points either way, never
+  that you're the same. Where you take only part of it more often than your opponents there is
+  a lesson (compare checks, captures and threats before your usual move, and take the one that
+  wins most) and typical partial misses on boards (with a reason in chess terms, near the middle
+  of the band). The rest counts a miss as partial or clear together (the engine's
+  `missed_tactic`: the reply lost 10+ points): the same by the kind of punishing move (capture,
+  check, quiet; a lesson only when you miss a kind more than your opponents do), the trend in
+  stretches of about 150 chances, and on boards, with what the blunder allowed in chess terms:
+  the openings where you clearly miss more than your opponents (only inside a group where you
+  do, with 10+ chances on each side, and a gap clear of zero even allowing for how many openings
+  were looked at), each with examples of the part (partial or clear) behind most of its gap; or
+  else examples of the gap in those groups, or with no gap your costliest misses. Puzzles from a
+  missed punishment are tagged `punish_capture`, `punish_check` or `punish_quiet` to drill apart;
+  puzzles start at 20 points lost, so these are all clear misses.
 - `puzzles make` re-checks your costliest moves (20+ points of win probability lost) at depth 18
   with three lines, and keeps a position only when one move is the only mate or beats the next
   best by 150 centipawns, so there is one answer to find. `puzzles list` shows them with their
@@ -185,14 +215,28 @@ across 8+ games.
 - `progress --by month|week [--speed blitz]` shows your games, score, mistake rate and centipawn
   loss over time, and your puzzle solve rate overall and per tag.
 - `openings` lists the openings you score worst in (by your colour), the book line for the one
-  you play most, and the opening mistakes you have repeated in more than one game.
+  you play most, and the opening mistakes you have repeated in more than one game. Then every
+  opening by the **engine eval after both sides' 10th moves (not results)**, so bullet games
+  count too: the median eval, the share of games at -1 or worse and your mistake rate on moves
+  1-10 (each with its 95% interval), and what you lost since book, so a gambit's pawn isn't put
+  down to you. The eval is read after Black's 10th move whatever your colour: with Black that is
+  your own 10th move, so a slip there counts; with White, read right after your own 10th move it
+  would always include your last slip and never their reply. Since book counts from the last
+  position the opening table names, or from just before it when a White move reached it (that
+  move then counts too), so both sides make the same number of moves. Worst first by the mistake
+  rate's interval, then that loss.
+- `repeats` lists the same mistake from the same position in 3 or more games (inaccuracies or
+  worse; named book moves left out; a position reached by another move order is the same
+  position): the better move, their best answer and how often they found it, the reasons in chess
+  terms, links to the games, and whether a puzzle drills it.
 - `serve` opens the coach on http://127.0.0.1:8765 (localhost only, no account or key):
   - **What you get wrong**: the mistakes you repeat (which piece and kind of move, captures or
     checks you keep missing, motifs) and the situations where your mistake rate jumps, each with
     a *what to learn* note and your own positions on boards: red arrow your move, green the
     engine's, orange their threat (from `threats`), said in words. "Practise these positions"
-    opens the matching drills. A small section compares your ignored threats and unsafe moves
-    with your opponents'.
+    opens the matching drills. Then the same mistake in the same position (as `repeats`), each on
+    a board with their best answer. A small section compares your ignored threats and unsafe
+    moves with your opponents', and *When they blunder* is `punish` on the page.
   - **Practice**: due puzzles on a board you click (piece, then square), filtered by theme. A
     wrong move shows their best reply, what it costs in material and score, and lets you try
     again (only the first answer counts for the schedule). Once it's solved or shown you get the
@@ -209,7 +253,8 @@ across 8+ games.
     short note on what they are about.
   - **Your openings**: your most-played openings with each colour, score, your usual line, the
     book line, and the fixes: positions you reached in several games where your habitual move
-    loses ground (named book moves are never flagged), with "Drill these fixes".
+    loses ground (named book moves are never flagged), with "Drill these fixes"; and how each
+    opening comes out by the engine after both sides' 10th moves, as in `openings`.
   - **Learn openings**: your most-played openings with each colour as a tree of the moves
     actually played in your games (first 8 moves each), with how often each came up, how you
     scored after it and the stored engine verdict. Where your opponent went wrong, it shows the
@@ -221,12 +266,17 @@ across 8+ games.
     time. Your practice is remembered: each position you answer becomes a card scheduled like a
     puzzle (only your first answer of the day counts; showing the move counts as a miss). Due
     punishments come first in the deck, training steers their replies towards positions that are
-    due, and each opening shows "you've found 3 of 7 punishments" and how many are due.
+    due, and each opening shows "you've found 3 of 7 punishments" and how many are due. Each
+    position and move also shows where the games through it stand after both sides' 10th moves.
   - **Progress**: month by month, your rating and practice week by week (pick the speed), and
     your puzzle solve rate per theme.
 - `puzzles make --openings` turns those opening fixes into drills; any move within 30 cp of the
   best counts, since openings often have several good moves. `puzzles prune` drops untried
-  puzzles that no longer count (bullet after move 10, moves made short on time).
+  puzzles that no longer count (bullet after move 10, moves made short on time). A position is
+  drilled once, however the game got there: a slip repeated from the same position, or a fix two
+  openings share, adds its tags to the puzzle already there. `puzzles dedupe` merges the copies
+  made before that (keeping the one you've tried, else the oldest; a tried puzzle is never
+  deleted).
 
 Motif tags are computed in code from the board and the engine's facts, never by a model:
 
@@ -281,11 +331,14 @@ uv run chess-coach stats
 uv run chess-coach threats                                       # ignored threats vs unsafe moves
 uv run chess-coach digest -o digest.md                           # patterns across your games
 uv run chess-coach digest --since 7d                             # this week vs before
+uv run chess-coach punish                                        # when they blunder: you vs them
 uv run chess-coach puzzles make --limit 50                       # your mistakes as puzzles
 uv run chess-coach drill                                         # practise what is due
 uv run chess-coach progress --by week
-uv run chess-coach openings
+uv run chess-coach openings                                      # incl. the eval after both sides' 10th moves
+uv run chess-coach repeats                                       # the same mistake, same position
 uv run chess-coach puzzles make --openings                      # drills for your opening fixes
+uv run chess-coach puzzles dedupe                                # merge puzzles stored twice
 uv run chess-coach serve --open                                  # the coach in your browser
 ```
 

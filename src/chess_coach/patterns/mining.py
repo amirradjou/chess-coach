@@ -39,17 +39,21 @@ def wilson_lower(hits: int, n: int, z: float = 1.96) -> float:
     return wilson(hits, n, z)[0]
 
 
-def difference(
-    a_hits: int, a_n: int, b_hits: int, b_n: int, z: float = 1.96
-) -> tuple[float, float]:
-    """Interval for the difference of two independent rates, a - b, built from their Wilson
-    intervals (Newcombe's hybrid score method)."""
-    if a_n == 0 or b_n == 0:
+def wilson_upper(hits: int, n: int, z: float = 1.96) -> float:
+    """Upper bound of the Wilson score interval for hits/n."""
+    return wilson(hits, n, z)[1]
+
+
+def newcombe(hits1: int, n1: int, hits2: int, n2: int, z: float = 1.96) -> tuple[float, float]:
+    """95% interval for hits1/n1 - hits2/n2, from the two Wilson intervals (Newcombe's hybrid
+    score method, which behaves near 0% and 100% where the plain normal one doesn't). With no
+    chances on one side there is no rate to compare: (-1, 1)."""
+    if n1 == 0 or n2 == 0:
         return -1.0, 1.0
-    p, q = a_hits / a_n, b_hits / b_n
-    (p_low, p_high), (q_low, q_high) = wilson(a_hits, a_n, z), wilson(b_hits, b_n, z)
-    d = p - q
-    return d - math.hypot(p - p_low, q_high - q), d + math.hypot(p_high - p, q - q_low)
+    p1, p2 = hits1 / n1, hits2 / n2
+    (low1, high1), (low2, high2) = wilson(hits1, n1, z), wilson(hits2, n2, z)
+    d = p1 - p2
+    return d - math.hypot(p1 - low1, high2 - p2), d + math.hypot(high1 - p1, p2 - low2)
 
 
 @dataclass(frozen=True, slots=True)

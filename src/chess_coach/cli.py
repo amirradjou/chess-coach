@@ -284,6 +284,7 @@ def sync(
         today = datetime.now(UTC).date().isoformat()
         due = len(store.due(today))
         cards = sum(c.due <= today for c in store.coach_cards())
+        alerts = _repeat_alerts(store, new) if new else []
     console.print(
         f"Analysed {len(pending)} games. Checked {made.checked + fixes.checked} moves, made "
         f"[green]{made.made + fixes.made}[/green] puzzles ({total} in all)."
@@ -296,6 +297,22 @@ def sync(
         f"Due today: {due} puzzles (`chess-coach drill`) and {cards} opening positions "
         "(Learn openings in `chess-coach serve`)."
     )
+    for line in alerts:
+        console.print(f"[yellow]{line}[/yellow]")
+
+
+def _repeat_alerts(store: Store, new: list[Game]) -> list[str]:
+    """'You played 3...Bg7 again (12th time); it has a puzzle.' for each mistake you repeat from
+    the same position (coach.repeats) that the new games played once more."""
+    from chess_coach.coach.repeats import again, alert, repeats
+
+    found = repeats(
+        list(store.iter_games()),
+        list(store.iter_moves(user_only=True)),
+        store.replies_to_errors(),
+        store.puzzles(),
+    )
+    return [alert(r) for r in again(found, {g.id for g in new})]
 
 
 def _new_games_line(games: list[Game]) -> str:
@@ -396,12 +413,15 @@ def digest(
     With --since (e.g. 7d for a weekly digest) only those games count, compared with the ones
     before."""
     from chess_coach.coach.digest import build, render
+    from chess_coach.coach.punish import GIFT_WP_LOSS
     from chess_coach.patterns.features import ERRORS
 
     settings: Settings = ctx.obj
     with Store(settings.db_path) as store:
         games = list(store.iter_games())
         moves = list(store.iter_moves(user_only=True))
+        gifts = store.gifts(GIFT_WP_LOSS)
+        replies, puzzles = store.replies_to_errors(), store.puzzles()
         threats = store.threats()
         errors = list(store.iter_moves(judgements=ERRORS)) if threats else []
     built = build(
@@ -410,6 +430,9 @@ def digest(
         min_moves=min_moves,
         min_games=min_games,
         since=parse_since(since),
+        gifts=gifts,
+        replies=replies,
+        puzzles=puzzles,
         threats=threats,
         errors=errors,
     )
@@ -428,6 +451,132 @@ def digest(
     else:
         out.write_text(text, encoding="utf-8")
         console.print(f"Wrote the digest -> [dim]{out}[/dim]")
+
+
+@app.command()
+def punish(
+    ctx: typer.Context,
+    since: SinceOption = None,
+    examples: Annotated[int, typer.Option(help="Missed punishments to show per opening.")] = 2,
+) -> None:
+    """When they blunder: what your reply gave back, against what your opponents' replies gave
+    back after your blunders, with partial misses (10-20 points) and clear ones (20+) apart. In
+    bullet only moves 1-10 count; replies short on time don't."""
+    from chess_coach.coach.punish import (
+        GIFT_WP_LOSS,
+        KINDS,
+        OUTCOMES,
+        TREND_GIFTS,
+        headline,
+        part_note,
+        report,
+        worst_title,
+    )
+
+    settings: Settings = ctx.obj
+    with Store(settings.db_path) as store:
+        games = [g for g in store.iter_games(since=parse_since(since)) if g.analyzed_depth]
+        r = report(games, store.gifts(GIFT_WP_LOSS), examples=examples)
+    if not r.gifts:
+        console.print("No blunders to compare yet. Run `chess-coach analyze` first.")
+        return
+    console.print(
+        "[bold]When they blunder[/bold] (a move losing 20+ points of win probability), your reply "
+        "keeps the gift (gives back under 10 points), takes only part of it (10-20: a partial "
+        "miss) or misses it (20 or more: a clear miss). Yours against your opponents' replies to "
+        "your blunders."
+    )
+    for s in r.groups:
+        console.print(f"\n[bold]{s.label}[/bold]: {headline(s)}")
+    rows = [
+        (f"{s.label}: {OUTCOMES[c.label]}", c)
+        for s in r.groups
+        for c in (s.partial, s.clear, s.missed)
+    ]
+    console.print(_rates_table("What your reply gave back", "group", rows, ("you", "they")))
+    if r.partial_lesson:
+        console.print(f"[green]What to learn:[/green] {r.partial_lesson}")
+        console.print(
+            f"\n[bold]Where you took only part of it ({', '.join(r.partial_focus)})[/bold]"
+        )
+        for g in r.partials:
+            console.print(_gift_line(g))
+    title = "Missed (partial or clear), by the move that punishes"
+    console.print(_rates_table(title, "punishing move", [(KINDS[c.label], c) for c in r.kinds]))
+    for lesson in r.lessons:
+        console.print(f"[green]What to learn:[/green] {lesson}")
+    if not r.lessons:
+        console.print("No kind of punishing move stands out against your opponents.")
+    title = (
+        f"Missed over time (about {TREND_GIFTS} of their blunders you could punish per row; the "
+        "oldest may hold fewer)"
+    )
+    console.print(_rates_table(title, "games played", [(c.label, c) for c in r.trend]))
+    # Openings only where you clearly miss more (inside a group where you do), each with examples
+    # of the part behind most of its gap; otherwise the examples in r.worst (worst_title says
+    # what they are), if any.
+    if r.families:
+        title = (
+            f"Openings where you miss more than your opponents, partial and clear together "
+            f"({', '.join(r.focus)})"
+        )
+        rows = [(f.compare.label, f.compare) for f in r.families]
+        console.print(_rates_table(title, "opening", rows))
+        for f in r.families:
+            console.print(f"[bold]{f.compare.label}[/bold]: {part_note(f.part)}.")
+            for g in f.examples:
+                console.print(_gift_line(g))
+    elif r.worst:
+        console.print(f"\n[bold]{worst_title(r)}[/bold]")
+        for g in r.worst:
+            console.print(_gift_line(g))
+    console.print(
+        "Drill the punishments you missed outright (puzzles are made from moves losing 20+ "
+        "points, so partial misses have none): `chess-coach drill --tag punish_capture` (or "
+        "punish_check, punish_quiet; missed_tactic for all of them)."
+    )
+
+
+def _gift_line(g) -> str:
+    """'Modern Defense: after 2.Bh6 you played 2...Bg7; 2...Nxh6 would have punished it.' (a
+    partial miss took some of it: 'would have taken all of it'), then what their blunder allowed
+    in chess terms and the link."""
+    from chess_coach.coach.punish import label
+
+    ending = "would have taken all of it" if g.outcome == "partial" else "would have punished it"
+    text = f"after {label(g.blunder)} you played {label(g.reply)}; "
+    text += f"{label(g.reply, g.reply.best_san)} {ending}."
+    family = g.game.opening_family
+    parts = [
+        f"{family}: {text}" if family else text[0].upper() + text[1:],
+        *g.reasons(),
+        f"[dim]{g.url}[/dim]" if g.url else "",
+    ]
+    return " ".join(p for p in parts if p)
+
+
+def _rates_table(
+    title: str, first: str, rows, columns: tuple[str, str] = ("you missed", "they missed")
+) -> Table:
+    """Your rate against your opponents' per (name, Compare) row, each with its 95% interval;
+    '–' where a side had no chances, so there is no rate and no gap."""
+    table = Table(title=title)
+    for column in (first, *columns, "gap, points (95%)"):
+        table.add_column(column, justify="left" if column == first else "right")
+    for name, c in rows:
+        gap = "–"
+        if c.gap is not None and c.interval is not None:
+            low, high = c.interval
+            gap = f"{100 * c.gap:+.1f} ({100 * low:+.1f} to {100 * high:+.1f})"
+        table.add_row(
+            name,
+            *(
+                f"{r.rate:.1%} of {r.n} ({r.low:.0%}-{r.high:.0%})" if r.n else "–"
+                for r in (c.yours, c.theirs)
+            ),
+            gap,
+        )
+    return table
 
 
 @app.command()
@@ -597,6 +746,47 @@ def puzzles_prune(ctx: typer.Context) -> None:
         removed = prune(store)
         left = len(store.puzzles())
     console.print(f"Removed {len(removed)} puzzles that no longer count; {left} left.")
+
+
+@puzzles_app.command("dedupe")
+def puzzles_dedupe(ctx: typer.Context) -> None:
+    """Merge puzzles stored more than once (same position, same answer): keep the copy you've
+    tried, otherwise the oldest, with every copy's tags. Tried copies are never deleted."""
+    import chess
+
+    from chess_coach.puzzles.make import dedupe
+
+    settings: Settings = ctx.obj
+    with Store(settings.db_path) as store:
+        merges = dedupe(store)
+        left = len(store.puzzles())
+    if not merges:
+        console.print(f"No puzzle is stored twice ({left} puzzles).")
+        return
+    for m in merges:
+        p = m.kept[0]
+        board = chess.Board(p.fen)
+        answer = f"{_number(board)}{p.solution_san}"
+        if len(m.kept) > 1:
+            kept = f"kept all {len(m.kept)} copies you've tried ({', '.join(k.id for k in m.kept)})"
+        else:
+            kept = f"kept {p.id}" + (" (the one you've tried)" if m.tried else "")
+        line = f"{answer} (you played {p.played_san}): {kept}"
+        if m.removed:
+            line += f", removed {', '.join(m.removed)}"
+        if m.added:
+            line += f"; it now also has {', '.join(m.added)}"
+        console.print(line)
+    removed = sum(len(m.removed) for m in merges)
+    console.print(
+        f"{len(merges)} positions were stored more than once: removed {removed} copies, "
+        f"{left} puzzles left."
+    )
+
+
+def _number(board) -> str:
+    """'12.' when White is to move, '12...' when Black is."""
+    return f"{board.fullmove_number}{'.' if board.turn else '...'}"
 
 
 @puzzles_app.command("list")
@@ -790,14 +980,16 @@ def openings(
     min_games: Annotated[int, typer.Option(help="Smallest number of games per opening.")] = 5,
     top: Annotated[int, typer.Option(help="How many openings to show.")] = 3,
 ) -> None:
-    """The openings you score worst in, the book line, and the slips you repeat in them."""
+    """The openings you score worst in, the book line, and the slips you repeat in them; then how
+    every opening comes out by the engine after both sides' 10th moves (bullet games too)."""
+    from chess_coach.coach.repertoire import LEVEL_PLY, after_ten
     from chess_coach.coach.study import openings as opening_stats
 
     settings: Settings = ctx.obj
     with Store(settings.db_path) as store:
-        stats = opening_stats(
-            list(store.iter_games()), list(store.iter_moves(user_only=True)), min_games
-        )
+        games, moves = list(store.iter_games()), list(store.iter_moves(user_only=True))
+        early = list(store.iter_moves(max_ply=LEVEL_PLY))  # both sides': ply 20 is Black's move
+    stats = opening_stats(games, moves, min_games)
     if not stats:
         console.print(f"No opening has {min_games} analysed games yet.")
         return
@@ -818,6 +1010,92 @@ def openings(
                 f"  You played {slip.move} in {slip.games} games; the engine prefers "
                 f"{slip.best}.{where}"
             )
+    _after_ten_tables(after_ten(games, early, min_games), min_games)
+
+
+def _pawns(cp: int) -> str:
+    """+1.2, -0.5, and 0.0 rather than -0.0."""
+    return f"{cp / 100:+.1f}" if abs(cp) >= 5 else "0.0"
+
+
+def _after_ten_tables(ranked: dict, min_games: int) -> None:
+    """Openings by the engine's eval after both sides' 10th moves: results don't come into it, so
+    bullet games count. Ranked by the mistake rate's interval and what you lost since book."""
+    if not any(ranked.values()):
+        console.print(
+            f"\nNo opening has {min_games} games that got to both sides' 10th moves yet, so none "
+            "is judged by the engine there."
+        )
+        return
+    console.print(
+        "\n[bold]Engine eval after both sides' 10th moves (not results)[/bold], so bullet games "
+        f"count too; openings with {min_games}+ games that got that far. Worst first: by your "
+        "mistake rate on moves 1-10 (the low end of its 95% interval), then by what you lost "
+        "since book, so a gambit's pawn is the table's, not yours. Since book counts from the "
+        "last position the opening table names, or from just before it when a White move reached "
+        "it (that move then counts too), so both sides make the same number of moves."
+    )
+    for color, rows in ranked.items():
+        if not rows:
+            continue
+        table = Table(title=f"With {color.capitalize()}")
+        for column in ("opening", "games", "eval (median)", "at -1 or worse", "mistakes 1-10"):
+            table.add_column(column, justify="left" if column == "opening" else "right")
+        table.add_column("since book", justify="right")
+        for a in rows:
+            (bad_low, bad_high), (err_low, err_high) = a.bad_interval, a.error_interval
+            table.add_row(
+                a.family,
+                str(a.games),
+                _pawns(a.median_cp),
+                f"{a.bad_rate:.0%} ({bad_low:.0%}-{bad_high:.0%})",
+                f"{a.error_rate:.1%} ({err_low:.1%}-{err_high:.1%})",
+                _pawns(a.since_book),
+            )
+        console.print(table)
+
+
+@app.command()
+def repeats(
+    ctx: typer.Context,
+    min_games: Annotated[int, typer.Option(help="Smallest number of games it happened in.")] = 3,
+    top: Annotated[int, typer.Option(help="How many to show.")] = 10,
+) -> None:
+    """The same mistake from the same position in several games: what it allows, the better move,
+    and whether a puzzle drills it."""
+    from chess_coach.coach.repeats import repeats as find
+
+    settings: Settings = ctx.obj
+    with Store(settings.db_path) as store:
+        found = find(
+            list(store.iter_games()),
+            list(store.iter_moves(user_only=True)),
+            store.replies_to_errors(),
+            store.puzzles(),
+            min_games,
+        )
+    if not found:
+        console.print(f"No mistake of yours repeats from the same position in {min_games}+ games.")
+        return
+    console.print(
+        f"{len(found)} mistakes you repeat from the same position, in {min_games} or more games "
+        "(inaccuracies or worse; in bullet only your first 10 moves count, and moves made short "
+        "on time don't)."
+    )
+    for r in found[:top]:
+        where = f" ({r.family})" if r.family else ""
+        last = f", last on {r.last:%Y-%m-%d}" if r.last else ""
+        console.print(f"\n[bold]{r.move}[/bold]{where} in {r.games} games{last}.")
+        console.print(f"  Better: {r.better}.")
+        if r.punish:
+            console.print(
+                f"  Their best answer: {r.punish}, found {r.punished} of {r.replies} times."
+            )
+        for reason in r.reasons:
+            console.print(f"  {reason}")
+        console.print(f"  It has a puzzle ({r.puzzle})." if r.puzzle else "  No puzzle for it yet.")
+        for url in r.urls[:3]:
+            console.print(f"  [dim]{url}[/dim]")
 
 
 @app.command()

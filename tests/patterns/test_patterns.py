@@ -10,12 +10,13 @@ from chess_coach.db import Store
 from chess_coach.models import Color, Game, Judgement, MoveFact, Phase, Speed
 from chess_coach.patterns.features import castling, clock_bucket, game_rows, move_bucket, move_rows
 from chess_coach.patterns.mining import (
-    difference,
     mine_games,
     mine_moves,
     motif_counts,
+    newcombe,
     wilson,
     wilson_lower,
+    wilson_upper,
 )
 
 CASTLES = "1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. O-O Nf6 *"
@@ -100,10 +101,22 @@ def planted() -> tuple[list[Game], list[MoveFact]]:
     return games, moves
 
 
-def test_wilson_lower():
-    assert wilson_lower(0, 0) == 0.0
+def test_wilson_interval():
+    assert (wilson_lower(0, 0), wilson_upper(0, 0)) == (0.0, 1.0)
     assert wilson_lower(5, 10) == pytest.approx(0.2366, abs=1e-4)
-    assert wilson_lower(10, 10) < 1.0
+    assert wilson_upper(5, 10) == pytest.approx(1 - 0.2366, abs=1e-4)  # symmetric at 50%
+    assert wilson_lower(10, 10) < 1.0 and wilson_upper(0, 10) > 0.0
+    # rounding never takes a bound outside [0, 1] (0 of 5 printed as "-0%")
+    assert f"{wilson_lower(0, 5):.0%} {wilson_upper(5, 5):.1%}" == "0% 100.0%"
+    assert all(wilson_lower(0, n) >= 0.0 and wilson_upper(n, n) <= 1.0 for n in range(1, 3000))
+
+
+def test_wilson_upper_and_newcombe():
+    assert wilson_upper(5, 10) == pytest.approx(0.7634, abs=1e-4)
+    assert wilson_upper(0, 0) == 1.0 and wilson_lower(0, 0) == 0.0
+    # Newcombe (1998), example (a): 56/70 against 48/80
+    low, high = newcombe(56, 70, 48, 80)
+    assert (low, high) == (pytest.approx(0.0524, abs=1e-4), pytest.approx(0.3339, abs=1e-4))
 
 
 def test_buckets():
@@ -218,9 +231,9 @@ def test_wilson_interval_and_the_difference_of_two_rates():
     for n in range(1, 500):
         assert 0.0 <= wilson(0, n)[0] < 1e-9 and 1 - 1e-9 < wilson(n, n)[1] <= 1.0
     # the same share in both: the difference's interval straddles zero
-    low, high = difference(180, 1000, 180, 1000)
+    low, high = newcombe(180, 1000, 180, 1000)
     assert low < 0 < high and low == pytest.approx(-high)
     # 30% against 15% on a thousand each: clearly more
-    low, high = difference(300, 1000, 150, 1000)
+    low, high = newcombe(300, 1000, 150, 1000)
     assert 0.11 < low < 0.15 < high < 0.19
-    assert difference(1, 0, 1, 10) == (-1.0, 1.0)
+    assert newcombe(1, 0, 1, 10) == (-1.0, 1.0)

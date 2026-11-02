@@ -1,0 +1,908 @@
+"""When they blunder: your punish rate against your opponents' (coach/punish.py)."""
+
+from pathlib import Path
+
+import chess
+from fastapi.testclient import TestClient
+from typer.testing import CliRunner
+
+from chess_coach.cli import _gift_line, app
+from chess_coach.coach.digest import build, render
+from chess_coach.coach.punish import (
+    LESSONS,
+    Compare,
+    Rate,
+    compare,
+    gifts,
+    headline,
+    label,
+    part_note,
+    report,
+    trend,
+    typical,
+    worst_title,
+)
+from chess_coach.db import Store
+from chess_coach.engine.stockfish import EngineNotFoundError
+from chess_coach.models import Color, Judgement, MoveFact, Phase, Speed
+from chess_coach.patterns.features import punish_kind
+from chess_coach.web.app import create_app
+
+from .test_patterns import game
+
+
+def bullet(i: int):
+    g = game(i, speed=Speed.BULLET)
+    g.time_control = "60+0"
+    return g
+
+
+def fact(game_id: str, ply: int, **overrides) -> MoveFact:
+    """A move in a game where the user has White: odd plies are theirs."""
+    fields = dict(
+        game_id=game_id,
+        ply=ply,
+        move_number=(ply + 1) // 2,
+        color=Color.WHITE if ply % 2 else Color.BLACK,
+        is_user=ply % 2 == 1,
+        san="Qh5",
+        uci="d1h5",
+        fen_before="",
+        eval_before=0,
+        eval_after=0,
+        best_move="g1f3",
+        best_san="Nf3",
+        cp_loss=0,
+        wp_before=50.0,
+        wp_after=49.0,
+        wp_loss=1.0,
+        judgement=Judgement.GOOD,
+        phase=Phase.OPENING,
+        depth=12,
+        clock_after=200.0,
+    )
+    fields.update(overrides)
+    return MoveFact(**fields)
+
+
+def chance(
+    g, reply_move: int, *, yours=True, missed=False, best_san="Nxe5", clock=200.0, loss=None
+):
+    """A blunder and the reply on move `reply_move`: theirs and yours, or (yours=False) yours and
+    theirs. The reply gives back `loss` points, by default 15 when missed (a partial miss, so it
+    isn't a gift of its own) and 2 when not; from 10 it carries missed_tactic, as the engine tags
+    it."""
+    ply = 2 * reply_move - 1 if yours else 2 * reply_move
+    if loss is None:
+        loss = 15.0 if missed else 2.0
+    blunder = fact(g.id, ply - 1, wp_loss=30.0, judgement=Judgement.BLUNDER)
+    reply = fact(
+        g.id,
+        ply,
+        wp_loss=loss,
+        judgement=Judgement.MISTAKE if loss >= 10 else Judgement.GOOD,
+        motifs=["missed_tactic"] if loss >= 10 else [],
+        best_san=best_san,
+        clock_after=clock,
+    )
+    return blunder, reply
+
+
+def chances(games, n: int, missed: int, *, yours=True, best_san="Nxe5"):
+    """`n` chances spread over `games`, one a move from move 2 on in each, the first `missed` of
+    them missed."""
+    return [
+        chance(
+            games[i % len(games)],
+            2 + i // len(games),
+            yours=yours,
+            missed=i < missed,
+            best_san=best_san,
+        )
+        for i in range(n)
+    ]
+
+
+def mix(games, *, partial=0, clear=0, kept=0, yours=True):
+    """Chances spread over `games`, one a move from move 2 on in each: `partial` replies giving
+    back 15 points, then `clear` ones giving back 25, then `kept` ones giving back 2."""
+    losses = [15.0] * partial + [25.0] * clear + [2.0] * kept
+    return [
+        chance(games[i % len(games)], 2 + i // len(games), yours=yours, loss=loss)
+        for i, loss in enumerate(losses)
+    ]
+
+
+def blitz_group(yours: tuple[int, int, int], theirs: tuple[int, int, int]):
+    """The blitz and rapid group from (partial, clear, chances) for your replies and for theirs,
+    which are in other games."""
+    mine, others = [game(i) for i in range(40)], [game(i) for i in range(40, 80)]
+    (p1, c1, n1), (p2, c2, n2) = yours, theirs
+    pairs = mix(mine, partial=p1, clear=c1, kept=n1 - p1 - c1) + mix(
+        others, partial=p2, clear=c2, kept=n2 - p2 - c2, yours=False
+    )
+    return report(mine + others, pairs).groups[1]
+
+
+# -- the verdict -----------------------------------------------------------------------------
+
+
+def test_a_gap_counts_only_when_its_interval_leaves_out_zero():
+    worse = Compare("x", Rate(60, 100), Rate(30, 100))
+    level = Compare("x", Rate(40, 100), Rate(38, 100))
+    better = Compare("x", Rate(30, 100), Rate(60, 100))
+    assert [c.verdict for c in (worse, level, better)] == ["worse", "same", "better"]
+    # 0 of 0 is no rate: no gap and no interval, rather than a made-up -100 points.
+    for empty in (Compare("x", Rate(3, 5), Rate(0, 0)), Compare("x", Rate(0, 0), Rate(3, 3))):
+        assert (empty.gap, empty.interval, empty.verdict) == (None, None, "same")
+    g = game(1)
+    only_yours = report([g], [chance(g, 2, missed=True), chance(g, 3)]).groups[1]
+    assert headline(only_yours) == "Not enough blunders on both sides to compare yet."
+
+
+# -- partial and clear misses ----------------------------------------------------------------
+
+
+def test_what_the_reply_gave_back_sorts_each_chance():
+    """Kept under 10 points, partial from 10 to under 20 (it took only part of the gift), clear
+    from 20 (it missed it)."""
+    g = game(1)
+    losses = [5.0, 15.0, 25.0, 9.9, 10.0, 19.9, 20.0]
+    found = gifts([g], [chance(g, 2 + i, loss=loss) for i, loss in enumerate(losses)])
+    assert [x.outcome for x in found] == [
+        "kept",
+        "partial",
+        "clear",
+        "kept",
+        "partial",
+        "partial",
+        "clear",
+    ]
+
+
+def test_the_partial_sentence_needs_its_interval_clear_of_zero():
+    # The owner's bullet numbers (moves 1-10): partial misses well above theirs, clear ones level.
+    owner = headline(blitz_group((83, 165, 563), (48, 164, 584)))
+    assert owner == (
+        "When they blunder you often take only part of it: your reply gave back 10-20 points "
+        "after 14.7% of their blunders (your opponents: 8.2%), +6.5 points (95% interval +2.8 to "
+        "+10.3). Clear misses: no clear difference, 29.3% vs 28.1% (+1.2 points, 95% interval "
+        "-4.0 to +6.5)."
+    )
+    # His blitz and rapid numbers: partial +0.9 (95% interval -2.1 to +4.1), so no gap is named.
+    level = headline(blitz_group((54, 167, 614), (50, 177, 637)))
+    assert level.startswith(
+        "When they blunder there is no clear difference between you and your opponents. Partial "
+        "misses: no clear difference, 8.8% vs 7.8% (+0.9 points, 95% interval -2.1 to +4.1)."
+    )
+    # Fewer partial misses than theirs is a gap too, the other way.
+    fewer = headline(blitz_group((8, 40, 200), (30, 40, 200)))
+    assert fewer.startswith(
+        "When they blunder you take only part of it less often than your opponents: your reply "
+        "gave back 10-20 points after 4.0% of their blunders (your opponents: 15.0%), -11.0 "
+        "points (95% interval -16.9 to -5.3)."
+    )
+
+
+def test_the_clear_sentence_needs_its_interval_clear_of_zero():
+    # Clear misses well above theirs, partial ones level: the clear gap comes first.
+    clear = headline(blitz_group((20, 80, 200), (20, 40, 200)))
+    assert clear.startswith(
+        "When they blunder you miss it outright more often than your opponents: your reply gave "
+        "back 20 or more points after 40.0% of their blunders (your opponents: 20.0%), +20.0 "
+        "points (95% interval +11.1 to +28.5)."
+    )
+    assert clear.endswith(
+        " Partial misses: no clear difference, 10.0% vs 10.0% (+0.0 points, 95% interval -6.0 to "
+        "+6.0)."
+    )
+    # A clear gap whose interval includes zero is never named (his bullet: +1.2, -4.0 to +6.5).
+    owner = headline(blitz_group((83, 165, 563), (48, 164, 584)))
+    assert "outright" not in owner
+    assert owner.endswith(
+        " Clear misses: no clear difference, 29.3% vs 28.1% (+1.2 points, 95% interval -4.0 to "
+        "+6.5)."
+    )
+    # With a partial gap first: more clear misses too, or fewer.
+    both = headline(blitz_group((83, 250, 563), (48, 164, 584)))
+    assert (
+        " You also miss it outright more often: your reply gave back 20 or more points after "
+        in (both)
+    )
+    fewer = headline(blitz_group((83, 40, 563), (48, 164, 584)))
+    assert fewer.startswith("When they blunder you often take only part of it: ")
+    assert " You miss it outright less often than they do: your reply gave back 20 or more " in (
+        fewer
+    )
+
+
+def test_a_level_row_is_no_clear_difference_or_too_few_to_tell_never_the_same():
+    """An interval that includes zero shows no gap, not equal rates: the row keeps its numbers
+    and interval, and says too few to tell while the interval still allows 10 points either
+    way."""
+    # His weekly digest (bullet, 2026-10-26 to 10-30): 3 of 13 against 1 of 19 partial misses.
+    week = headline(blitz_group((3, 5, 13), (1, 7, 19)))
+    assert week == (
+        "When they blunder there are too few chances yet to tell you apart from your opponents. "
+        "Partial misses: too few to tell, 23.1% vs 5.3% (+17.8 points, 95% interval -6.6 to "
+        "+45.3). Clear misses: too few to tell, 38.5% vs 36.8% (+1.6 points, 95% interval -28.7 "
+        "to +33.1)."
+    )
+    # All his bullet games: 563 and 584 chances, a narrow interval around a small gap.
+    owner = headline(blitz_group((83, 165, 563), (48, 164, 584)))
+    assert owner.endswith(
+        " Clear misses: no clear difference, 29.3% vs 28.1% (+1.2 points, 95% interval -4.0 to "
+        "+6.5)."
+    )
+    level = headline(blitz_group((54, 167, 614), (50, 177, 637)))
+    assert level == (
+        "When they blunder there is no clear difference between you and your opponents. Partial "
+        "misses: no clear difference, 8.8% vs 7.8% (+0.9 points, 95% interval -2.1 to +4.1). "
+        "Clear misses: no clear difference, 27.2% vs 27.8% (-0.6 points, 95% interval -5.5 to "
+        "+4.4)."
+    )
+    assert all("the same as" not in text for text in (week, owner, level))
+
+
+def test_both_parts_level_but_together_worse_names_the_gap_together():
+    """Neither part clears zero on its own, but together they do. The headline names that gap,
+    as the openings below (which use it) do, and never says you do as well."""
+    mine, others = [game(i) for i in range(40)], [game(i) for i in range(40, 80)]
+    pairs = mix(mine, partial=55, clear=180, kept=365) + mix(
+        others, partial=40, clear=160, kept=400, yours=False
+    )
+    r = report(mine + others, pairs)
+    s = r.groups[1]
+    assert (s.partial.verdict, s.clear.verdict, s.missed.verdict) == ("same", "same", "worse")
+    text = headline(s)
+    assert text.startswith(
+        "When they blunder you miss it more often than your opponents, partial and clear misses "
+        "together: your reply gave back 10 or more points after 39.2% of their blunders (your "
+        "opponents: 33.3%), +5.8 points (95% interval +0.4 to +11.2). Apart, neither is clear."
+    )
+    assert "as well as" not in text
+    assert r.focus == ["Blitz and rapid"]  # where the openings are looked at: the same gap
+    # Fewer misses together, each part level: the same, the other way.
+    fewer = report(
+        mine + others,
+        mix(mine, partial=40, clear=160, kept=400)
+        + mix(others, partial=55, clear=180, kept=365, yours=False),
+    )
+    assert headline(fewer.groups[1]).startswith(
+        "When they blunder you miss it less often than your opponents, partial and clear misses "
+        "together: "
+    )
+    assert fewer.focus == []
+
+
+def test_partial_misses_get_a_lesson_and_examples_only_where_the_gap_is():
+    bullets = [bullet(i) for i in range(40)]
+    blitzes = [game(i) for i in range(40, 80)]
+    pairs = (
+        mix(bullets[:20], partial=30, clear=20, kept=50)
+        + mix(bullets[20:], partial=5, clear=20, kept=75, yours=False)
+        + mix(blitzes[:20], partial=10, clear=20, kept=70)
+        + mix(blitzes[20:], partial=10, clear=20, kept=70, yours=False)
+    )
+    r = report(bullets + blitzes, pairs)
+    assert [(s.partial.verdict, s.clear.verdict) for s in r.groups] == [
+        ("worse", "same"),
+        ("same", "same"),
+    ]
+    assert r.partial_focus == ["Bullet, moves 1-10"]
+    assert r.partial_lesson == LESSONS["partial"]
+    assert r.partial_lesson not in r.lessons  # kinds have their own lessons
+    assert len(r.partials) == 3
+    assert all(g.yours and g.outcome == "partial" and g.group == "bullet" for g in r.partials)
+    # Level everywhere: no lesson and no examples for it.
+    level = report(blitzes, pairs[200:])
+    assert (level.partial_focus, level.partial_lesson, level.partials) == ([], None, [])
+
+
+def _hanging_bishop(g, loss: float):
+    """Your reply giving back `loss` after their 2.Bh6, when 2...Nxh6 takes the bishop: a gift
+    whose blunder has a reason in chess terms."""
+    board = chess.Board()
+    for san in "d4 g6 Bh6".split():
+        board.push_san(san)
+    blunder = fact(g.id, 3, san="Bh6", wp_loss=51.0, is_user=False)
+    reply = fact(
+        g.id,
+        4,
+        san="Bg7",
+        uci="f8g7",
+        fen_before=board.fen(),
+        best_move="g8h6",
+        best_san="Nxh6",
+        wp_loss=loss,
+        motifs=["missed_tactic"],
+        is_user=True,
+    )
+    return blunder, reply
+
+
+def test_partial_examples_are_typical_ones_with_a_reason():
+    """Not the costliest partial misses: those sit just under the clear bar, where another engine
+    depth may call them clear. Ones whose blunder has a reason in chess terms come first, then
+    those nearest the middle of the band (15 points)."""
+    g = game(1)
+    losses = [19.6, 19.4, 15.2, 12.0, 11.0]
+    found = gifts([g], [chance(g, 3 + i, loss=loss) for i, loss in enumerate(losses)])
+    assert [x.reply.wp_loss for x in typical(found, 3)] == [15.2, 12.0, 11.0]
+    (hanging,) = gifts([g], [_hanging_bishop(g, 19.5)])
+    assert hanging.reasons()  # what their 2.Bh6 allowed
+    assert typical([*found, hanging], 2) == [hanging, found[2]]
+    # In the report too: the partial examples of a group whose partial gap is worse.
+    mine, others = [game(i) for i in range(40)], [game(i) for i in range(40, 80)]
+    pairs = [chance(mine[i % 40], 4 + i // 40, loss=x) for i, x in enumerate(losses * 10)]
+    pairs += mix(mine, kept=50) + mix(others, partial=5, kept=95, yours=False)
+    r = report(mine + others, pairs)
+    assert r.partial_focus == ["Blitz and rapid"]
+    assert [x.reply.wp_loss for x in r.partials] == [15.2, 15.2, 15.2]
+
+
+# -- which chances count ----------------------------------------------------------------------
+
+
+def test_missed_is_the_engine_motif_and_both_sides_are_counted():
+    g = game(1)
+    pairs = [
+        chance(g, 3, missed=True),
+        chance(g, 4),
+        chance(g, 5, yours=False, missed=True),
+        chance(g, 6, yours=False),
+        chance(g, 7, yours=False),
+    ]
+    found = gifts([g], pairs)
+    assert [(x.yours, x.missed) for x in found] == [
+        (True, True),
+        (True, False),
+        (False, True),
+        (False, False),
+        (False, False),
+    ]
+    c = compare("all", found)
+    assert (c.yours, c.theirs) == (Rate(1, 2), Rate(1, 3))
+
+
+def test_bullet_counts_moves_one_to_ten_for_both_sides():
+    b = bullet(1)
+    pairs = [
+        chance(b, 10),
+        chance(b, 11),  # your move 11: the clock decides
+        chance(b, 10, yours=False),
+        chance(b, 11, yours=False),  # their move 11: the same rule
+    ]
+    assert [(x.yours, x.reply.move_number) for x in gifts([b], pairs)] == [(True, 10), (False, 10)]
+
+
+def test_replies_made_short_on_time_dont_count_on_either_side():
+    b = bullet(1)
+    blitz = game(2)
+    blitz.time_control = "300+0"
+    pairs = [
+        chance(b, 5, clock=10.0),  # under 15 s in bullet
+        chance(b, 6, yours=False, clock=10.0),
+        chance(blitz, 30, clock=20.0),  # under a tenth of 5 minutes
+        chance(blitz, 31, clock=200.0),
+    ]
+    assert [x.reply.move_number for x in gifts([b, blitz], pairs)] == [31]
+
+
+def test_small_slips_and_other_games_are_not_gifts():
+    g, other = game(1), game(2)
+    small = chance(g, 5)
+    small[0].wp_loss = 19.0
+    assert gifts([g], [small, chance(other, 5)]) == []
+
+
+def test_the_kind_of_punishment():
+    assert [punish_kind(s) for s in ("Nxe5", "Bxf7+", "Qh5+", "O-O", "Nf3")] == [
+        "capture",
+        "capture",  # a capturing check counts as a capture
+        "check",
+        "quiet",  # castling punishes quietly
+        "quiet",
+    ]
+    g = game(1)
+    (x,) = gifts([g], [chance(g, 5, best_san="Bb5+")])
+    assert x.kind == "check"
+
+
+# -- the report -------------------------------------------------------------------------------
+
+
+def _season():
+    """Bullet: you miss 48 of 80, they miss 24 of 80. Blitz: level at 32 of 80 each. Your chances
+    and theirs are in separate games, so their plies never overlap."""
+    bullets = [bullet(i) for i in range(20)]
+    blitzes = [game(i) for i in range(20, 40)]
+    for i, g in enumerate(bullets):
+        g.opening = "Danish Gambit Accepted" if i % 10 < 5 else "Queen's Pawn Game"
+    for g in blitzes:
+        g.opening = "Modern Defense"
+    pairs = (
+        chances(bullets[:10], 80, 48)
+        + chances(bullets[10:], 80, 24, yours=False)
+        + chances(blitzes[:10], 80, 32)
+        + chances(blitzes[10:], 80, 32, yours=False)
+    )
+    return bullets + blitzes, pairs
+
+
+def test_bullet_and_blitz_are_compared_apart():
+    games, pairs = _season()
+    r = report(games, pairs)
+    # Every miss in the season gives back 15 points: partial ones, and no clear miss anywhere.
+    assert [(s.label, s.partial.yours, s.partial.theirs, s.partial.verdict) for s in r.groups] == [
+        ("Bullet, moves 1-10", Rate(48, 80), Rate(24, 80), "worse"),
+        ("Blitz and rapid", Rate(32, 80), Rate(32, 80), "same"),
+    ]
+    assert [(s.clear.yours, s.clear.theirs, s.clear.verdict) for s in r.groups] == [
+        (Rate(0, 80), Rate(0, 80), "same"),
+        (Rate(0, 80), Rate(0, 80), "same"),
+    ]
+    assert r.gifts == 320
+
+
+def test_slower_games_count_with_blitz_and_rapid_and_the_label_says_so():
+    blitz = game(1)
+    classical, daily = game(2, speed=Speed.CLASSICAL), game(3, speed=Speed.CORRESPONDENCE)
+    pairs = [chance(g, 5) for g in (blitz, classical, daily)]
+    r = report([blitz, classical, daily], pairs)
+    assert [(s.label, s.chances) for s in r.groups] == [
+        ("Bullet, moves 1-10", 0),
+        ("Blitz, rapid, classical and correspondence", 3),
+    ]
+    assert report([blitz], pairs).groups[1].label == "Blitz and rapid"
+
+
+def test_openings_and_examples_come_from_where_the_gap_is():
+    games, pairs = _season()
+    r = report(games, pairs)
+    assert r.focus == ["Bullet, moves 1-10"]
+    # The Modern Defense (blitz) has misses too, but you're level with your opponents there.
+    assert {f.compare.label for f in r.families} == {"Danish Gambit Accepted", "Queen's Pawn Game"}
+    assert all(g.game.speed is Speed.BULLET for f in r.families for g in f.examples)
+    assert all(len(f.examples) == 2 and all(g.missed for g in f.examples) for f in r.families)
+    # Every miss in the season is partial: the openings' examples are too, and the partial
+    # examples above already show the bullet gap, so there are no more examples of it.
+    assert all(f.part.label == "partial" for f in r.families)
+    assert (r.worst, r.worst_part) == ([], "partial")
+
+
+def _openings(danish, queens_pawn):
+    """Bullet games in two openings, from (partial, clear, chances) of yours and of theirs in
+    each, every side in games of its own."""
+    games, pairs = [], []
+    for k, (name, (mine, theirs)) in enumerate(
+        {"Danish Gambit Accepted": danish, "Queen's Pawn Game": queens_pawn}.items()
+    ):
+        for side, (p, c, n) in ((True, mine), (False, theirs)):
+            here = [bullet(100 * k + 50 * (not side) + i) for i in range(12)]
+            for g in here:
+                g.opening = name
+            games += here
+            pairs += mix(here, partial=p, clear=c, kept=n - p - c, yours=side)
+    return games, pairs
+
+
+def test_an_openings_examples_come_from_the_part_behind_its_gap():
+    """The Danish and the Queen's Pawn Game on his games, doubled. In the Danish the whole gap is
+    partial misses (22 of 84 against 0 of 84; clear 24 of 84 each), so its examples are partial
+    misses, not his costliest misses there: clear ones, which his opponents make as often. In
+    the Queen's Pawn Game most of the gap is clear misses, and so are its examples."""
+    games, pairs = _openings(((22, 24, 84), (0, 24, 84)), ((14, 32, 76), (6, 18, 74)))
+    r = report(games, pairs)
+    families = {f.compare.label: f for f in r.families}
+    danish, queens_pawn = families["Danish Gambit Accepted"], families["Queen's Pawn Game"]
+    assert (danish.part.label, danish.part.yours, danish.part.theirs) == (
+        "partial",
+        Rate(22, 84),
+        Rate(0, 84),
+    )
+    assert [g.outcome for g in danish.examples] == ["partial", "partial"]
+    assert (
+        part_note(danish.part)
+        == "most of the gap is in partial misses (you 22 of 84, they 0 of 84)"
+    )
+    assert queens_pawn.part.label == "clear"
+    assert [g.outcome for g in queens_pawn.examples] == ["clear", "clear"]
+
+
+def test_with_no_opening_listed_the_examples_still_follow_the_gap():
+    """Without an opening to list (here the games have none), the examples stand for the gap in
+    the groups where you miss more: of its clear part, or none when it is partial and the partial
+    examples already show it. With no gap anywhere they are just your costliest misses."""
+    mine, others = [game(i) for i in range(40)], [game(i) for i in range(40, 80)]
+    for g in mine + others:
+        g.opening = None
+    # Partial worse, clear level: the partial examples show it, so no more boards.
+    pairs = mix(mine, partial=60, clear=100, kept=240) + mix(
+        others, partial=20, clear=100, kept=280, yours=False
+    )
+    r = report(mine + others, pairs)
+    assert (r.focus, r.partial_focus, r.families) == (["Blitz and rapid"], ["Blitz and rapid"], [])
+    assert (r.worst, r.worst_part) == ([], "partial")
+    # Clear worse, partial level: your costliest clear misses.
+    pairs = mix(mine, partial=20, clear=160, kept=220) + mix(
+        others, partial=20, clear=100, kept=280, yours=False
+    )
+    r = report(mine + others, pairs)
+    assert (r.focus, r.partial_focus) == (["Blitz and rapid"], [])
+    assert r.worst_part == "clear" and [g.outcome for g in r.worst] == ["clear"] * 3
+    assert worst_title(r) == "Your costliest clear misses (20+ points) in blitz and rapid"
+    # Level: no gap to stand for, so just your costliest misses, partial and clear together.
+    pairs = mix(mine, partial=20, clear=100, kept=280) + mix(
+        others, partial=20, clear=100, kept=280, yours=False
+    )
+    r = report(mine + others, pairs)
+    assert (r.focus, r.worst_part, len(r.worst)) == ([], None, 3)
+    assert worst_title(r) == "Your costliest misses, partial and clear together"
+
+
+def test_an_opening_is_listed_only_when_its_own_gap_clears_zero():
+    games, pairs = _season()
+    sicilian = [bullet(40), bullet(41)]
+    for g in sicilian:
+        g.opening = "Sicilian Defense"
+    # You missed your one chance there and they didn't: an excess, but 1 of 1 against 0 of 1.
+    pairs += [chance(sicilian[0], 2, missed=True), chance(sicilian[1], 2, yours=False)]
+    r = report(games + sicilian, pairs)
+    assert r.focus == ["Bullet, moves 1-10"]
+    # Ranked by excess: 23 of 40 against their 25%, then 25 of 40 against their 35%.
+    assert [f.compare.label for f in r.families] == ["Queen's Pawn Game", "Danish Gambit Accepted"]
+    assert all(f.compare.verdict == "worse" for f in r.families)
+
+
+def test_an_opening_needs_ten_chances_a_side_and_a_gap_clear_of_chance():
+    """A 95% interval per opening lets about one opening in 40 clear zero by chance, and a 1 of 1
+    against 0 of 3 did. So an opening is only looked at with 10+ chances on each side, and listed
+    when its gap clears zero at 95% across all the openings looked at at once."""
+    games, pairs = _openings(((22, 24, 84), (0, 24, 84)), ((14, 32, 76), (6, 18, 74)))
+    english = [bullet(300 + i) for i in range(4)]
+    for g in english:
+        g.opening = "English Opening"
+    pairs += [chance(english[0], 2, loss=25.0)] + [chance(g, 2, yours=False) for g in english[1:]]
+    r = report(games + english, pairs)
+    assert [f.compare.label for f in r.families] == ["Danish Gambit Accepted", "Queen's Pawn Game"]
+    # 9 of 9 against 0 of 9 is never looked at; 10 of 10 against 0 of 10 is.
+    for n, listed in ((9, []), (10, ["Sicilian Defense"])):
+        mine, theirs = [bullet(500 + i) for i in range(3)], [bullet(510 + i) for i in range(3)]
+        for g in mine + theirs:
+            g.opening = "Sicilian Defense"
+        few = mix(mine, partial=n) + mix(theirs, kept=n, yours=False)
+        assert [f.compare.label for f in report(mine + theirs, few).families] == listed
+    # Ten openings with 12 of 20 against 5 of 20 in each: one alone clears zero at 95% (+4.6 at
+    # the low end), but not when ten are looked at at once.
+    games, pairs = [], []
+    for k in range(10):
+        for side, (p, n) in ((True, (12, 20)), (False, (5, 20))):
+            here = [bullet(600 + 10 * k + 5 * (not side) + i) for i in range(4)]
+            for g in here:
+                g.opening = f"Opening {k}"
+            games += here
+            pairs += mix(here, partial=p, kept=n - p, yours=side)
+    r = report(games, pairs)
+    assert (r.focus, r.families) == (["Bullet, moves 1-10"], [])
+    first = {g.id for g in games if g.opening == "Opening 0"}
+    alone = report([g for g in games if g.id in first], [x for x in pairs if x[1].game_id in first])
+    assert [f.compare.label for f in alone.families] == ["Opening 0"]
+
+
+def _level():
+    """Blitz only, level overall: you miss 8 of 20 and so do they. In the Sicilian you missed 6 of
+    10 against their 4 of 10, more than they did but nowhere near a real gap."""
+    games = [game(i) for i in range(20)]
+    for i, g in enumerate(games):
+        g.opening = "Sicilian Defense" if i % 2 else "French Defense"
+    sicilian, french = games[1::2], games[::2]
+    pairs = (
+        chances(sicilian[:5], 10, 6)
+        + chances(french[:5], 10, 2)
+        + chances(sicilian[5:], 10, 4, yours=False)
+        + chances(french[5:], 10, 4, yours=False)
+    )
+    return games, pairs
+
+
+def test_no_opening_is_listed_without_a_gap_to_explain():
+    games, pairs = _level()
+    r = report(games, pairs)
+    assert [(s.partial.verdict, s.clear.verdict) for s in r.groups] == [("same", "same")] * 2
+    assert (r.focus, r.families) == ([], [])
+    # Your costliest misses are still shown, from all the games, with no gap to stand for.
+    assert len(r.worst) == 3 and all(g.yours and g.missed for g in r.worst)
+    assert r.worst_part is None
+    text = render(build(games, [x for _, x in pairs if x.is_user], gifts=pairs))
+    assert "miss more than your opponents most in" not in text
+    assert "\nYour costliest misses, partial and clear together:\n" in text
+
+
+def test_a_kind_lesson_needs_you_to_miss_it_more_than_your_opponents():
+    g = [game(i) for i in range(10)]
+    # Everyone misses quiet punishments more than captures: that alone is no lesson.
+    generic = (
+        chances(g, 100, 50, best_san="Nf5")
+        + chances(g, 100, 30, best_san="Nxe5")
+        + chances(g, 100, 50, yours=False, best_san="Nf5")
+        + chances(g, 100, 30, yours=False, best_san="Nxe5")
+    )
+    r = report(g, generic)
+    assert [(c.label, c.verdict) for c in r.kinds] == [
+        ("capture", "same"),
+        ("check", "same"),
+        ("quiet", "same"),
+    ]
+    assert r.lessons == []
+    personal = chances(g, 100, 70, best_san="Nf5") + chances(
+        g, 100, 40, yours=False, best_san="Nf5"
+    )
+    assert report(g, personal).lessons == [LESSONS["quiet"]]
+
+
+def test_the_trend_is_stretches_of_games_oldest_first():
+    g1, g2, g3 = game(1), game(2), game(3)  # played on October 2, 3 and 4
+    pairs = [chance(g, m, missed=m == 2) for g in (g1, g2, g3) for m in (2, 3)]
+    pairs.append(chance(g3, 4, yours=False))
+    by_two = trend(gifts([g1, g2, g3], pairs), size=2)
+    assert [c.label for c in by_two] == [
+        "2026-10-02 to 2026-10-02",
+        "2026-10-03 to 2026-10-03",
+        "2026-10-04 to 2026-10-04",
+    ]
+    assert [(c.yours, c.theirs) for c in by_two][-1] == (Rate(1, 2), Rate(0, 1))
+    # A stretch ends at the end of a game, counted back from the newest; the oldest may be short.
+    by_three = trend(gifts([g1, g2, g3], pairs), size=3)
+    assert [(c.label, c.yours.n) for c in by_three] == [
+        ("2026-10-02 to 2026-10-02", 2),
+        ("2026-10-03 to 2026-10-04", 4),
+    ]
+
+
+def test_examples_say_what_the_blunder_allowed():
+    g = game(1)
+    board = chess.Board()
+    for san in "d4 g6 Bh6".split():
+        board.push_san(san)
+    blunder = fact(g.id, 3, san="Bh6", wp_loss=51.0, is_user=False)
+    reply = fact(
+        g.id,
+        4,
+        san="Bg7",
+        uci="f8g7",
+        fen_before=board.fen(),
+        best_move="g8h6",
+        best_san="Nxh6",
+        wp_loss=92.6,
+        motifs=["missed_tactic"],
+        is_user=True,
+    )
+    (x,) = gifts([g], [(blunder, reply)])
+    assert (label(x.blunder), label(x.reply), label(x.reply, x.reply.best_san)) == (
+        "2.Bh6",
+        "2...Bg7",
+        "2...Nxh6",
+    )
+    assert x.url == "https://lichess.org/g1#4"
+    assert x.reasons() == [
+        "It lets Nxh6 take their bishop on h6, which was hanging (attacked and not defended)."
+    ]
+
+
+# -- where it shows -------------------------------------------------------------------------
+
+
+def test_the_digest_has_a_section_only_with_both_sides_moves():
+    games, pairs = _season()
+    moves = [r for _, r in pairs if r.is_user]
+    text = render(build(games, moves, gifts=pairs))
+    assert "## When they blunder" in text
+    assert (
+        "- **Bullet, moves 1-10**: When they blunder you often take only part of it: your reply "
+        "gave back 10-20 points after 60.0% of their blunders (your opponents: 30.0%), +30.0 points"
+    ) in text
+    # Both rows under each group, the clear one level (0 of 80 each: an interval around zero).
+    assert (
+        "  - Partial (gave back 10-20 points): you 60.0% (48 of 80), them 30.0% (24 of 80): "
+        in (text)
+    )
+    assert (
+        "  - Clear (gave back 20 or more): you 0.0% (0 of 80), them 0.0% (0 of 80): +0.0 points "
+        "(95% interval -4.6 to +4.6, which includes zero)."
+    ) in text
+    # And the two together, what the openings, the kinds and the trend count.
+    assert (
+        "  - Partial and clear together (gave back 10 or more): you 60.0% (48 of 80), them 30.0% "
+        "(24 of 80): +30.0 points (95% interval +14.6 to +43.4)."
+    ) in text
+    # 32 of 80 each: an interval that still allows 15 points either way.
+    assert (
+        "- **Blitz and rapid**: When they blunder there are too few chances yet to tell you apart "
+        "from your opponents. Partial misses: too few to tell, 40.0% vs 40.0% (+0.0 points, 95% "
+        "interval -14.9 to +14.9). Clear misses: no clear difference, 0.0% vs 0.0% (+0.0 points, "
+        "95% interval -4.6 to +4.6)."
+    ) in text
+    assert f"What to learn: {LESSONS['partial']}" in text
+    assert "Where you took only part of it in bullet, moves 1-10:" in text
+    # The newest game first; one decimal, so a partial miss never reads as 20.
+    assert "- [2.Qh5 after 1...Qh5 (best 2.Nxe5, -15.0%)](https://lichess.org/g9#3)\n" in text
+    # Every punishment here is a capture: checks and quiet moves, 0 of 0 on both sides, stay out.
+    kinds = "by the move that punishes: a capture, you 50% of 160 and them 35% of 160. "
+    assert f"Missed (partial or clear), {kinds}{LESSONS['capture']}" in text
+    assert "a check, you" not in text and "a quiet move, you" not in text
+    # Each opening with the part behind most of its gap, and examples of that part.
+    assert (
+        "In bullet, moves 1-10, counting partial and clear misses together, you miss more than "
+        "your opponents most in these openings (the examples are of the part behind most of each "
+        "gap):\n\n- **Queen's Pawn Game**: you missed 23 of 40, they missed 10 of 40; most of "
+        "the gap is in partial misses (you 23 of 40, they 10 of 40).\n"
+        "  - [2.Qh5 after 1...Qh5 (best 2.Nxe5, -15.0%)](https://lichess.org/g9#3)\n"
+    ) in text
+    # As on the page and in the CLI, the openings' examples are the boards: no costliest misses.
+    assert "Your costliest misses" not in text
+    assert "When they blunder is the exception: it also counts your opponents' replies" in text
+    assert "otherwise there is no clear difference, or too few chances to tell." in text
+    assert "with 10+ chances on each side, and an opening's interval allows for how many" in text
+    assert "When they blunder" not in render(build(games, moves))
+
+
+def _store(db: Path, season=_season) -> None:
+    games, pairs = season()
+    with Store(db) as store:
+        for g in games:
+            store.upsert_game(g)
+            own = {}
+            for blunder, reply in pairs:
+                if blunder.game_id == g.id:
+                    own[blunder.ply], own[reply.ply] = blunder, reply
+            store.replace_moves(g.id, list(own.values()), depth=12)
+
+
+def test_punish_command(tmp_path):
+    db = tmp_path / "coach.db"
+    _store(db)
+    result = CliRunner().invoke(app, ["--db", str(db), "punish"], env={"COLUMNS": "200"})
+    assert result.exit_code == 0, result.output
+    assert (
+        "Bullet, moves 1-10: When they blunder you often take only part of it: your reply gave "
+        "back 10-20 points after 60.0% of their blunders"
+    ) in result.output
+    for group in ("Bullet, moves 1-10", "Blitz and rapid"):  # all three rows, for each group
+        assert f"{group}: partial (10-20 points)" in result.output
+        assert f"{group}: clear (20+ points)" in result.output
+        assert f"{group}: partial and clear (10+ points)" in result.output
+    assert f"What to learn: {LESSONS['partial']}" in result.output
+    assert "Where you took only part of it (Bullet, moves 1-10)" in result.output
+    assert "2.Nxe5 would have taken all of it. https://lichess.org/g" in result.output
+    assert "Missed (partial or clear), by the move that punishes" in result.output
+    assert "0.0% of 0" not in result.output and "100.0 to" not in result.output  # no 0 of 0 rate
+    assert "Openings where you miss more than your opponents, partial and clear" in result.output
+    # Each opening says which part its gap is in, and its examples are of that part: partial
+    # misses here, all of which the engine's move would have taken. No reasons here (the facts
+    # have no positions), and no gap left where they would go.
+    assert (
+        "Queen's Pawn Game: most of the gap is in partial misses (you 23 of 40, they 10 of 40)."
+    ) in result.output
+    assert (
+        "Queen's Pawn Game: after 1...Qh5 you played 2.Qh5; 2.Nxe5 would have taken all of it. "
+        "https://lichess.org/g9#3"
+    ) in result.output
+    assert "all of it.  " not in result.output
+    assert "Your costliest misses" not in result.output
+    empty = CliRunner().invoke(app, ["--db", str(tmp_path / "empty.db"), "punish"])
+    assert "No blunders to compare yet" in empty.output
+    level = tmp_path / "level.db"
+    _store(level, _level)
+    result = CliRunner().invoke(app, ["--db", str(level), "punish"], env={"COLUMNS": "200"})
+    assert "Openings where you miss more" not in result.output
+    assert "Your costliest misses, partial and clear together\n" in result.output
+    assert "Sicilian Defense: after 1...Qh5 you played 2.Qh5" in result.output
+
+
+def test_a_cli_example_says_what_the_engines_move_would_have_done():
+    """A partial miss took some of the gift: the engine's move would have taken all of it. A
+    clear miss didn't punish it at all."""
+    g = game(1)
+    partial, clear = gifts([g], [chance(g, 2, loss=15.0), chance(g, 3, loss=25.0)])
+    assert _gift_line(partial) == (
+        "Italian Game: after 1...Qh5 you played 2.Qh5; 2.Nxe5 would have taken all of it. "
+        "[dim]https://lichess.org/g1#3[/dim]"
+    )
+    assert _gift_line(clear).endswith(
+        "3.Nxe5 would have punished it. [dim]https://lichess.org/g1#5[/dim]"
+    )
+
+
+def test_the_digest_command_has_the_section(tmp_path):
+    """`chess-coach digest` reads both players' moves (Store.gifts) for When they blunder."""
+    db = tmp_path / "coach.db"
+    _store(db)
+    out = tmp_path / "digest.md"
+    result = CliRunner().invoke(app, ["--db", str(db), "digest", "-o", str(out)])
+    assert result.exit_code == 0, result.output
+    text = out.read_text()
+    assert "## When they blunder" in text
+    assert (
+        "- **Bullet, moves 1-10**: When they blunder you often take only part of it: your reply "
+        "gave back 10-20 points after 60.0% of their blunders (your opponents: 30.0%), +30.0 "
+        "points (95% interval +14.6 to +43.4). Clear misses: no clear difference, 0.0% vs 0.0% "
+        "(+0.0 points, 95% interval -4.6 to +4.6)."
+    ) in text
+
+
+def _edge():
+    """One partial miss of yours at 19.97 points, a hair under the clear bar, and a kept reply of
+    theirs: no gap, so it is shown as your costliest miss."""
+    g = game(1)
+    return [g], [chance(g, 2, loss=19.97), chance(g, 3, yours=False)]
+
+
+def test_what_an_example_gave_back_is_cut_to_one_decimal_never_rounded_to_20(tmp_path):
+    """19.97 rounded to one decimal is 20.0, the clear bar, so a partial miss would read as a
+    clear one: it is cut to 19.9 instead, in the digest and on the page."""
+    games, pairs = _edge()
+    mine = gifts(games, pairs)[0]
+    assert (mine.outcome, mine.given_back) == ("partial", 19.9)
+    text = render(build(games, [r for _, r in pairs if r.is_user], gifts=pairs))
+    assert "(best 2.Nxe5, -19.9%)" in text and "-20.0%" not in text
+    db = tmp_path / "edge.db"
+    _store(db, _edge)
+
+    def missing():
+        raise EngineNotFoundError("no engine")
+
+    p = TestClient(create_app(db, missing)).get("/api/punish").json()
+    assert [m["loss"] for m in p["worst"]] == [19.9]
+
+
+def test_the_web_page_needs_no_engine(tmp_path):
+    db = tmp_path / "coach.db"
+    _store(db)
+
+    def missing():
+        raise EngineNotFoundError("no engine")
+
+    p = TestClient(create_app(db, missing)).get("/api/punish").json()
+    bullet_group = p["groups"][0]
+    assert bullet_group["label"] == "Bullet, moves 1-10"
+    assert bullet_group["headline"].startswith("When they blunder you often take only part of it")
+    partial, clear = bullet_group["partial"], bullet_group["clear"]  # the two rows on the card
+    assert (partial["name"], partial["verdict"]) == ("partial (10-20 points)", "worse")
+    assert partial["yours"] == {"missed": 48, "n": 80, "rate": 60.0, "low": 49.0, "high": 70.0}
+    assert (clear["name"], clear["verdict"], clear["yours"]["missed"]) == (
+        "clear (20+ points)",
+        "same",
+        0,
+    )
+    together = bullet_group["missed"]
+    assert (together["name"], together["verdict"], together["yours"]["missed"]) == (
+        "partial and clear (10+ points)",
+        "worse",
+        48,
+    )
+    assert p["partial_focus"] == ["Bullet, moves 1-10"]
+    assert p["partial_lesson"] == LESSONS["partial"]
+    assert len(p["partials"]) == 3 and all(m["best"].endswith(".Nxe5") for m in p["partials"])
+    assert [k["name"] for k in p["kinds"]] == ["a capture", "a check", "a quiet move"]
+    check = p["kinds"][1]  # no checking punishments on either side: no gap to show
+    assert (check["yours"]["n"], check["gap"], check["interval"]) == (0, None, None)
+    assert p["focus"] == ["Bullet, moves 1-10"] and p["trend"]
+    family = p["families"][0]
+    assert (family["label"], family["verdict"], family["gap"]) == (
+        "Queen's Pawn Game",
+        "worse",
+        32.5,
+    )
+    example = family["examples"][0]
+    assert example["url"].startswith("https://lichess.org/g") and "move" in example
+    assert (family["part"]["name"], family["part"]["yours"]["missed"]) == (
+        "partial (10-20 points)",
+        23,
+    )
+    assert (
+        family["part_note"] == "most of the gap is in partial misses (you 23 of 40, they 10 of 40)"
+    )
+    # The partial examples above already show the bullet gap: no more examples of it.
+    assert (p["worst"], p["worst_part"]) == ([], "partial")
+    assert p["worst_title"] == "Your partial misses (10-20 points) in bullet, moves 1-10"
