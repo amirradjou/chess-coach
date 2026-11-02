@@ -154,9 +154,9 @@ function punishSection(p, tagList) {
   return [
     el("h2", {}, "When they blunder"),
     el("p", { class: "muted" }, "A blunder here is a move that loses 20+ points of win probability. Your reply keeps the gift when it gives back under 10 points, takes only part of it at 10–20 (a partial miss) and misses it at 20 or more (a clear miss). Your opponents' replies to your blunders are the yardstick: players at your level with the same kind of chance. In bullet only moves 1–10 count, and replies made short on time don't."),
-    // Partial and clear misses apart: different habits, each with its own gap.
+    // Partial and clear misses apart (different habits, each with its own gap), then together.
     p.groups.map((g) => el("div", { class: "card" }, el("h3", {}, g.label), el("div", {}, g.headline),
-      rateTable("your reply gave back", [g.partial, g.clear], ["you", "they"]))),
+      rateTable("your reply gave back", [g.partial, g.clear, g.missed], ["you", "they"]))),
     p.partial_lesson ? [
       el("div", { class: "lesson" }, el("b", {}, "What to learn: "), p.partial_lesson),
       p.partials.length ? [

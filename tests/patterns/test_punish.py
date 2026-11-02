@@ -523,6 +523,11 @@ def test_the_digest_has_a_section_only_with_both_sides_moves():
         "  - Clear (gave back 20 or more): you 0.0% (0 of 80), them 0.0% (0 of 80): +0.0 points "
         "(95% interval -4.6 to +4.6, which includes zero)."
     ) in text
+    # And the two together, what the openings, the kinds and the trend count.
+    assert (
+        "  - Partial and clear together (gave back 10 or more): you 60.0% (48 of 80), them 30.0% "
+        "(24 of 80): +30.0 points (95% interval +14.6 to +43.4)."
+    ) in text
     assert (
         "- **Blitz and rapid**: When they blunder there is no clear difference between you and "
         "your opponents. Partial misses are the same as theirs: 40.0% vs 40.0%. Clear misses are "
@@ -567,9 +572,10 @@ def test_punish_command(tmp_path):
         "Bullet, moves 1-10: When they blunder you often take only part of it: your reply gave "
         "back 10-20 points after 60.0% of their blunders"
     ) in result.output
-    for group in ("Bullet, moves 1-10", "Blitz and rapid"):  # both rows, for each group
+    for group in ("Bullet, moves 1-10", "Blitz and rapid"):  # all three rows, for each group
         assert f"{group}: partial (10-20 points)" in result.output
         assert f"{group}: clear (20+ points)" in result.output
+        assert f"{group}: partial and clear (10+ points)" in result.output
     assert f"What to learn: {LESSONS['partial']}" in result.output
     assert "Where you took only part of it (Bullet, moves 1-10)" in result.output
     assert "2.Nxe5 would have taken all of it. https://lichess.org/g" in result.output
@@ -624,6 +630,12 @@ def test_the_web_page_needs_no_engine(tmp_path):
         "clear (20+ points)",
         "same",
         0,
+    )
+    together = bullet_group["missed"]
+    assert (together["name"], together["verdict"], together["yours"]["missed"]) == (
+        "partial and clear (10+ points)",
+        "worse",
+        48,
     )
     assert p["partial_focus"] == ["Bullet, moves 1-10"]
     assert p["partial_lesson"] == LESSONS["partial"]

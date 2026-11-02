@@ -269,6 +269,7 @@ def _punish_lines(r: Report) -> list[str]:
                 f"- **{s.label}**: {headline(s)}",
                 f"  - Partial (gave back 10-20 points): {_row(s.partial)}.",
                 f"  - Clear (gave back 20 or more): {_row(s.clear)}.",
+                f"  - Partial and clear together (gave back 10 or more): {_row(s.missed)}.",
             ]
     if r.partial_lesson:  # only where your partial gap clears zero
         out += ["", f"What to learn: {r.partial_lesson}"]

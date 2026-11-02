@@ -452,7 +452,11 @@ def punish(
     )
     for s in r.groups:
         console.print(f"\n[bold]{s.label}[/bold]: {headline(s)}")
-    rows = [(f"{s.label}: {OUTCOMES[c.label]}", c) for s in r.groups for c in (s.partial, s.clear)]
+    rows = [
+        (f"{s.label}: {OUTCOMES[c.label]}", c)
+        for s in r.groups
+        for c in (s.partial, s.clear, s.missed)
+    ]
     console.print(_rates_table("What your reply gave back", "group", rows, ("you", "they")))
     if r.partial_lesson:
         console.print(f"[green]What to learn:[/green] {r.partial_lesson}")

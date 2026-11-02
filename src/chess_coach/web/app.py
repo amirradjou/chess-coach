@@ -183,12 +183,14 @@ def _compare(c: Compare) -> dict:
 
 
 def _split(s: Split) -> dict:
-    """A group's headline and its two rows: partial misses (10-20 points) and clear ones."""
+    """A group's headline and its rows: partial misses (10-20 points), clear ones (20+) and the
+    two together (what the kinds, the trend and the openings count)."""
     return {
         "label": s.label,
         "headline": headline(s),
         "partial": {**_compare(s.partial), "name": OUTCOMES["partial"]},
         "clear": {**_compare(s.clear), "name": OUTCOMES["clear"]},
+        "missed": {**_compare(s.missed), "name": OUTCOMES["missed"]},
     }
 
 
