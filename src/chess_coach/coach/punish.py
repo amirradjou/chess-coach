@@ -8,6 +8,10 @@ opponents' replies to your own gifts are the yardstick: players at your level wi
 of chance (Lichess Insights calls the two rates Opportunism and Luck). A gap only counts when its
 95% interval (Newcombe) leaves out zero.
 
+What the reply gave back also sorts it (`Gift.outcome`): under 10 points it kept the gift, 10 to
+under 20 it took only part of it (a partial miss), 20 or more it missed it (a clear miss).
+Missing the punishment is partial and clear together: missed_tactic is a reply losing 10+.
+
 The owner's rules apply to the replying move, on both sides alike: in bullet only moves 1-10
 count (features.counted) and replies made short on time don't (features.rushed). Bullet is
 reported apart from blitz and rapid (rapid alone is too small); classical, correspondence and
@@ -20,11 +24,15 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
 from chess_coach.coach.principles import allows
+from chess_coach.engine.evaluation import INACCURACY_WP_LOSS, MISTAKE_WP_LOSS
 from chess_coach.models import Color, Game, MoveFact, Speed
 from chess_coach.patterns.features import BULLET_MOVES, counted, is_bullet, punish_kind, rushed
 from chess_coach.patterns.mining import newcombe, wilson_lower, wilson_upper
 
 GIFT_WP_LOSS = 20.0  # the same bar as missed_tactic (engine/motifs.py)
+# What the reply gave back: under 10 points it kept the gift, from 20 it missed it outright.
+PARTIAL_WP_LOSS = INACCURACY_WP_LOSS  # 10, where missed_tactic starts
+CLEAR_WP_LOSS = MISTAKE_WP_LOSS  # 20
 TREND_GIFTS = 150  # their blunders you could punish, per stretch of the trend: about ±8 points
 GROUPS = {"bullet": f"Bullet, moves 1-{BULLET_MOVES}", "slower": "Blitz and rapid"}
 # Other speeds that count with blitz and rapid, named in the label when there are any.
@@ -72,7 +80,15 @@ class Gift:
 
     @property
     def missed(self) -> bool:
+        """Partial or clear: the engine tagged the reply missed_tactic (it lost 10+ points)."""
         return "missed_tactic" in self.reply.motifs
+
+    @property
+    def outcome(self) -> str:
+        """What the reply gave back of the gift: kept (under 10 points), partial (10 to under
+        20: it took only part of it) or clear (20 or more: it missed it)."""
+        loss = self.reply.wp_loss
+        return "kept" if loss < PARTIAL_WP_LOSS else "partial" if loss < CLEAR_WP_LOSS else "clear"
 
     @property
     def kind(self) -> str:

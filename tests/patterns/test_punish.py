@@ -62,18 +62,23 @@ def fact(game_id: str, ply: int, **overrides) -> MoveFact:
     return MoveFact(**fields)
 
 
-def chance(g, reply_move: int, *, yours=True, missed=False, best_san="Nxe5", clock=200.0):
+def chance(
+    g, reply_move: int, *, yours=True, missed=False, best_san="Nxe5", clock=200.0, loss=None
+):
     """A blunder and the reply on move `reply_move`: theirs and yours, or (yours=False) yours and
-    theirs. A missed reply carries missed_tactic, as the engine tags it (and costs less than a
-    blunder, so it isn't a gift of its own)."""
+    theirs. The reply gives back `loss` points, by default 15 when missed (a partial miss, so it
+    isn't a gift of its own) and 2 when not; from 10 it carries missed_tactic, as the engine tags
+    it."""
     ply = 2 * reply_move - 1 if yours else 2 * reply_move
+    if loss is None:
+        loss = 15.0 if missed else 2.0
     blunder = fact(g.id, ply - 1, wp_loss=30.0, judgement=Judgement.BLUNDER)
     reply = fact(
         g.id,
         ply,
-        wp_loss=15.0 if missed else 2.0,
-        judgement=Judgement.MISTAKE if missed else Judgement.GOOD,
-        motifs=["missed_tactic"] if missed else [],
+        wp_loss=loss,
+        judgement=Judgement.MISTAKE if loss >= 10 else Judgement.GOOD,
+        motifs=["missed_tactic"] if loss >= 10 else [],
         best_san=best_san,
         clock_after=clock,
     )
@@ -111,6 +116,26 @@ def test_a_gap_counts_only_when_its_interval_leaves_out_zero():
     # 0 of 0 is no rate: no gap and no interval, rather than a made-up -100 points.
     for empty in (Compare("x", Rate(3, 5), Rate(0, 0)), Compare("x", Rate(0, 0), Rate(3, 3))):
         assert (empty.gap, empty.interval, empty.verdict) == (None, None, "same")
+
+
+# -- partial and clear misses ----------------------------------------------------------------
+
+
+def test_what_the_reply_gave_back_sorts_each_chance():
+    """Kept under 10 points, partial from 10 to under 20 (it took only part of the gift), clear
+    from 20 (it missed it)."""
+    g = game(1)
+    losses = [5.0, 15.0, 25.0, 9.9, 10.0, 19.9, 20.0]
+    found = gifts([g], [chance(g, 2 + i, loss=loss) for i, loss in enumerate(losses)])
+    assert [x.outcome for x in found] == [
+        "kept",
+        "partial",
+        "clear",
+        "kept",
+        "partial",
+        "partial",
+        "clear",
+    ]
 
 
 # -- which chances count ----------------------------------------------------------------------
