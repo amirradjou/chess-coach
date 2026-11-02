@@ -26,6 +26,12 @@ KF1 = "e4 e5 Nf3 Nc6 Bc4 Bc5 Kf1 Nf6 d3 d6 Nc3 O-O h3 a6 Bb3 Ba7 g4 h6 Kg2 Re8".
 # Named only after 1.b4 (the Polish Opening).
 POLISH = "b4 h6 a3 a6 h3 b6 Nf3 Nf6 e3 e6 Be2 Be7 O-O O-O d3 d6 Nbd2 Nbd7 c4 c5".split()
 NO_A_PAWN = "rnbqkbnr/pppppppp/8/8/8/8/1PPPPPPP/RNBQKBNR w KQkq - 0 1"  # a set-up position
+# What the command and the page say since book counts.
+SINCE_BOOK = (
+    "Since book counts from the last position the opening table names, or from just before it "
+    "when a White move reached it (that move then counts too), so both sides make the same "
+    "number of moves."
+)
 
 
 def line(
@@ -290,6 +296,23 @@ def test_the_openings_command_shows_the_table(tmp_path: Path, monkeypatch):
         "3.4% (1.0%-11.7%)",
         "-2.6",
     ]
+
+
+def test_the_command_and_the_page_say_a_white_move_into_the_book_counts(
+    tmp_path: Path, monkeypatch
+):
+    """Since book starts at an even ply, so when a White move reached the last named position,
+    that book move is inside it (9.h3 in these Italians: from ply 16, see the first test). Both
+    said "since the game left the opening table" (or "the book"), as if no book move counted; on
+    the owner's games one does in 402 of 1,019 games as White, 3.f3 in 58 of 78 Blackmar-Diemers.
+    """
+    monkeypatch.setattr(cli, "console", Console(width=200))
+    result = CliRunner().invoke(cli.app, ["--db", str(_db(tmp_path)), "openings"])
+    assert result.exit_code == 0, result.output
+    said = " ".join(result.output.split())  # the note wraps
+    assert SINCE_BOOK in said and "since the game left" not in said
+    script = page_script()
+    assert SINCE_BOOK in script and "since the game left" not in script
 
 
 def test_the_openings_command_says_when_no_opening_has_enough_games_at_move_ten(

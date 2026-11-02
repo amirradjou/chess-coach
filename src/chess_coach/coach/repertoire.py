@@ -6,12 +6,15 @@ engine's numbers) and what it prefers instead.
 
 And how each opening comes out, by the engine rather than results (`after_ten`): your eval after
 both sides' 10th moves, how often you stand at -1 or worse there, your mistake rate on moves 1-10,
-and what you lost since the game left the opening table, so a gambit's pawn isn't put down to you.
-Move 10 is where bullet stops counting, so bullet games get an outcome too.
+and what you lost since book, so a gambit's pawn isn't put down to you. Move 10 is where bullet
+stops counting, so bullet games get an outcome too.
 
-Both points are read after Black's move, so each side has made the same number of moves. Read
-right after your own move instead, the number would always include your last slip and never their
-reply (for White, your 10th move is ply 19).
+The eval is read after ply 20, Black's 10th move, whatever your colour: with Black that is your
+own 10th move. For White, yours is ply 19: read there, the number would always include your last
+slip and never their reply.
+Since book runs to ply 20 from the last position the opening table names, or from the ply before
+it when a White move reached it, so both sides make the same number of moves in between: that
+White move, the book's last, is then counted too (`book_ply`).
 """
 
 from __future__ import annotations

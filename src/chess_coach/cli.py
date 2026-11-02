@@ -786,8 +786,9 @@ def _after_ten_tables(ranked: dict, min_games: int) -> None:
         "\n[bold]Engine eval after both sides' 10th moves (not results)[/bold], so bullet games "
         f"count too; openings with {min_games}+ games that got that far. Worst first: by your "
         "mistake rate on moves 1-10 (the low end of its 95% interval), then by what you lost "
-        "since the game left the opening table (a gambit's pawn is the table's, not yours), "
-        "counted from after Black's move so both sides make the same number of moves."
+        "since book, so a gambit's pawn is the table's, not yours. Since book counts from the "
+        "last position the opening table names, or from just before it when a White move reached "
+        "it (that move then counts too), so both sides make the same number of moves."
     )
     for color, rows in ranked.items():
         if not rows:
