@@ -207,16 +207,21 @@ Built:
   wrong", and `sync` prints "You played 3...Bg7 again (12th time); it has a puzzle." (or the
   better move) for each repeat a new game is part of.
 - **The opening after move 10** (`repertoire.after_ten`), per family and colour, by the engine
-  only, so bullet counts: the median eval after your 10th move (clamped at +-10 like Lichess's
-  ACPL; median because blowouts skew a mean), the share of games at -1 or worse and the mistake
-  rate (mistakes and blunders, counted moves 1-10) with Wilson intervals (`mining.wilson_upper`
-  is new), and "since book": eval at move 10 minus the eval at the last position up to move 10
-  that the opening table names (transpositions back into a named line count; after move 4 when
-  none matched). Ranked by the low end of the mistake-rate interval, then since-book; never by a
-  mean. Shown in `openings` (a table per colour), the Your openings tab (a table, and a line on
-  each card) and Learn openings (each node and move: "engine eval after your 10th move: -0.9
-  (median of 79 games; not results)") through a {game id: eval after move 10} map read with its
-  own query, so `tree.build` keeps its 16-ply filter. `is_book` is now cached.
+  only, so bullet counts: the median eval after both sides' 10th moves (ply 20, for both colours;
+  clamped at +-10 like Lichess's ACPL; median because blowouts skew a mean; games without a ply 20
+  are left out), the share of games at -1 or worse and the mistake rate (mistakes and blunders,
+  counted moves 1-10) with Wilson intervals (`mining.wilson_upper` is new), and "since book": the
+  eval after ply 20 minus the eval at the book point (`book_ply`), which is the last position up
+  to the user's 10th move that the opening table names (transpositions back into a named line
+  count), moved back to the even ply at or before it so both sides make the same number of moves
+  in between (ply 8, after Black's 4th move, when none matched; ply 0 is the start position, the
+  eval before the first move). One per-game reading (`at_ten`) serves the table and the tree. Ranked
+  by the low end of the mistake-rate interval, then since-book; never by a mean. Shown in
+  `openings` (a table per colour), the Your openings tab (a table, and a line on each card) and
+  Learn openings (each node and move: "engine eval after both sides' 10th moves: +0.1 (median of
+  78 games; not results)") through a {game id: eval after ply 20} map; the tree reads both sides'
+  moves to ply 20 in one query, and `tree.build` keeps its 16-ply filter. `is_book` is now
+  cached.
 
 Decisions:
 - Named book moves are left out of repeats, as `repertoire.fixes` does. Without that the top
@@ -227,6 +232,18 @@ Decisions:
 - The book position is the *last* one named (the spec's wording), not where the game first left
   the table: in the Modern and Pirc, games often leave the table on White's second move and come
   back to a named line two moves later.
+- The level is read after ply 20, both sides' 10th moves, for both colours (research round 2,
+  confirmed by both of its skeptics). As first built it was read right after the user's own 10th
+  move: for White that is ply 19, so it always held his last slip and never the reply, although
+  the two 10th moves cost about the same (his 90.6 cp on average, median 28, over 2,044 moves;
+  theirs 78.5, median 20, over 2,043). The mean of plies 19 and 20 was rejected: it is half a
+  White move heavy whatever the user's colour (all games as Black: 26.5% at -1 or worse instead of
+  32.6%).
+- Since book starts at an even ply for the same reason. Read right after the book position, its
+  two points could be an unequal number of moves apart: in the Blackmar-Diemer it was +17 cp in
+  the 61 games whose book position followed his move and -119 in the 17 where it followed
+  theirs, and the -24 shown mixed the two. The even ply is the one at or before the book
+  position, so when the book ends on a White move, that move and Black's reply are counted.
 - A position is its EPD, not its full FEN, wherever a repeat or a drill is matched: the FEN's
   halfmove clock and move number differ when another move order got there (the Scotch and the
   Danish Gambit Accepted meet at 7.O-O with clocks 3 and 5), and that is one mistake and one
@@ -246,6 +263,14 @@ after-ten heading with no table when no family qualified; a shared fix drill was
 its first opening in the other opening's "Drill these fixes"; a repeat card read "Last on null"
 for undated PGN games. The sync alert's filter and `allows(yours=True)` now have tests.
 
+Fixed after research round 2 (2026-11-01): the level and since book now follow the two
+decisions above (ply 20; an even book point). On the owner's games the level moved for White
+only: all games as White went from -19 cp and 29.0% at -1 or worse (1,024 games) to +26 and 20.1%
+(17.8-22.7%, 1,019 games; the 5 that ended on his 10th move are left out). As Black it stays -44
+and 32.6% (29.8-35.6%, 1,020 games). Since book moved for both colours: all games as White from
+-26.5 to +7 cp, as Black from +5.5 to +9. The ranking rule is untouched, and so is the order of
+the White and Black tables.
+
 On the owner's games (a copy, 2,099 Lichess games at depth 12):
 - `puzzles dedupe`: 14 positions were stored more than once; removed 19 copies, 544 -> 525
   puzzles, the 5 attempts untouched (no group had a tried copy). The Modern/Pirc 3...Nf6 drill now
@@ -264,18 +289,26 @@ On the owner's games (a copy, 2,099 Lichess games at depth 12):
   over 167: 7.O-O in the Scotch and the Danish was two repeats of 3 games (one of 6), seven were
   undercounted (a 5...O-O shown in 4 games was played in 7, and has a puzzle that went unseen)
   and six with 3+ games were missing.
-- After move 10: 1,693 bullet games get there (mean -0.43, 31% at -1 or worse); 23 families with
-  White and 14 with Black have 5+ such games. Worst with White: the Blackmar-Diemer, 79 games,
-  median -0.9, 49% (39-60%) at -1 or worse, mistakes on 7.8% (6.1-9.8%) of moves 1-10, and -0.2
-  since book, but that median's 95% interval runs from -85 to +48 cp (38 games up since book, 41
-  down): how much of the -0.9 is the gambit's and how much the user loses after it is not
-  settled. With Black the Modern (417 games, -0.4, 33% at -1 or worse, 3.3%) and the Pirc (177,
-  -0.3) are *up* since book, +0.3 (95% interval +3 to +40 cp; 234 games up, 183 down) and +0.2
-  (+8 to +39 cp; 107 up, 69 down): the engine dislikes Black's book positions there, and the user
-  doesn't lose ground after them. The Queen's Pawn Game (175, -0.5 median vs -0.8 mean) is +0.1
-  since book, but its interval (-1 to +32 cp; 99 up, 75 down, sign test p = 0.08) includes no
-  change, so it isn't shown to be up.
-- `/api/repeats` takes 1.1 s and `/api/openings` 1.6 s the first time (both cached after).
+- After both sides' 10th moves: 1,691 bullet games get there (mean +0.02, 27% at -1 or worse);
+  23 families with White and 14 with Black have 5+ such games. Worst with White, by the mistake
+  rate, which this doesn't change: the Blackmar-Diemer, 78 games, median +0.1, 27% (18-38%) at -1
+  or worse, mistakes on 7.8% (6.1-9.8%) of moves 1-10, and +0.6 since book. Read after his own
+  10th move it was -0.9 and 49% (39-60%) over 79 games; on the same 78 games that read gives -95
+  cp and 50%, so most of the -0.9 came from reading before the opponent's 10th move. Its since-book
+  median has a 95% interval of -9 to +204 cp (46 games up, 32 down, sign test p = 0.14), so a
+  gain after book isn't shown either. Since book now counts the same number of moves by each side
+  wherever the book ended, but it still differs between the 61 games whose last named position
+  came after his move (median +104) and the 17 where it came after theirs (-13): in the first
+  the opponent's move leaves the table, in the second his does. That is a difference between the
+  games, no longer one of counting. With Black (the levels are unchanged: his 10th move is ply
+  20) the Modern (417 games, -0.4, 33% at -1 or worse, 3.3%) and the Pirc (177, -0.3) are *up*
+  since book, +0.3 (95% interval +9 to +43 cp; 240 games up, 177 down) and +0.2 (+8 to +39 cp;
+  108 up, 68 down): the engine dislikes Black's book positions there, and the user doesn't lose
+  ground after them. The Queen's Pawn Game (175, -0.5 median vs -0.8 mean) is +0.1 since book,
+  but its interval (-1 to +32 cp; 99 up, 75 down, sign test p = 0.08) includes no change, so it
+  isn't shown to be up.
+- `/api/repeats` took 1.1 s the first time; `/api/openings` takes 2.3 s (1.9 s before it read
+  both sides' moves to ply 20, measured the same way on 2026-11-01); both are cached after.
 - `sync` was not run for real (no network in this work); its alert is tested with a faked fetch.
 
 ## Remaining (in order)

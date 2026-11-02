@@ -175,10 +175,13 @@ across 8+ games.
   loss over time, and your puzzle solve rate overall and per tag.
 - `openings` lists the openings you score worst in (by your colour), the book line for the one
   you play most, and the opening mistakes you have repeated in more than one game. Then every
-  opening by the **engine eval after your 10th move (not results)**, so bullet games count too:
-  the median eval, the share of games at -1 or worse and your mistake rate on moves 1-10 (each
-  with its 95% interval), and what you lost since the game left the opening table, so a gambit's
-  pawn isn't put down to you. Worst first by the mistake rate's interval, then that loss.
+  opening by the **engine eval after both sides' 10th moves (not results)**, so bullet games
+  count too: the median eval, the share of games at -1 or worse and your mistake rate on moves
+  1-10 (each with its 95% interval), and what you lost since the game left the opening table, so
+  a gambit's pawn isn't put down to you. The eval and the start of "since book" are both read
+  after a Black move, so each side has made the same number of moves (read right after your own
+  10th move, the number would always include your last slip and never their reply). Worst first
+  by the mistake rate's interval, then that loss.
 - `repeats` lists the same mistake from the same position in 3 or more games (inaccuracies or
   worse; named book moves left out; a position reached by another move order is the same
   position): the better move, their best answer and how often they found it, the reasons in chess
@@ -204,7 +207,7 @@ across 8+ games.
   - **Your openings**: your most-played openings with each colour, score, your usual line, the
     book line, and the fixes: positions you reached in several games where your habitual move
     loses ground (named book moves are never flagged), with "Drill these fixes"; and how each
-    opening comes out by the engine after your 10th move, as in `openings`.
+    opening comes out by the engine after both sides' 10th moves, as in `openings`.
   - **Learn openings**: your most-played openings with each colour as a tree of the moves
     actually played in your games (first 8 moves each), with how often each came up, how you
     scored after it and the stored engine verdict. Where your opponent went wrong, it shows the
@@ -217,7 +220,7 @@ across 8+ games.
     puzzle (only your first answer of the day counts; showing the move counts as a miss). Due
     punishments come first in the deck, training steers their replies towards positions that are
     due, and each opening shows "you've found 3 of 7 punishments" and how many are due. Each
-    position and move also shows where the games through it stand after your 10th move.
+    position and move also shows where the games through it stand after both sides' 10th moves.
   - **Progress**: month by month, your rating and practice week by week (pick the speed), and
     your puzzle solve rate per theme.
 - `puzzles make --openings` turns those opening fixes into drills; any move within 30 cp of the
@@ -283,7 +286,7 @@ uv run chess-coach digest --since 7d                             # this week vs 
 uv run chess-coach puzzles make --limit 50                       # your mistakes as puzzles
 uv run chess-coach drill                                         # practise what is due
 uv run chess-coach progress --by week
-uv run chess-coach openings                                      # incl. the eval after move 10
+uv run chess-coach openings                                      # incl. the eval after both sides' 10th moves
 uv run chess-coach repeats                                       # the same mistake, same position
 uv run chess-coach puzzles make --openings                      # drills for your opening fixes
 uv run chess-coach puzzles dedupe                                # merge puzzles stored twice
