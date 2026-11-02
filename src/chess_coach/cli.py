@@ -279,6 +279,7 @@ def sync(
         today = datetime.now(UTC).date().isoformat()
         due = len(store.due(today))
         cards = sum(c.due <= today for c in store.coach_cards())
+        alerts = _repeat_alerts(store, new) if new else []
     console.print(
         f"Analysed {len(pending)} games. Checked {made.checked + fixes.checked} moves, made "
         f"[green]{made.made + fixes.made}[/green] puzzles ({total} in all)."
@@ -287,6 +288,22 @@ def sync(
         f"Due today: {due} puzzles (`chess-coach drill`) and {cards} opening positions "
         "(Learn openings in `chess-coach serve`)."
     )
+    for line in alerts:
+        console.print(f"[yellow]{line}[/yellow]")
+
+
+def _repeat_alerts(store: Store, new: list[Game]) -> list[str]:
+    """'You played 3...Bg7 again (12th time); it has a puzzle.' for each mistake you repeat from
+    the same position (coach.repeats) that the new games played once more."""
+    from chess_coach.coach.repeats import again, alert, repeats
+
+    found = repeats(
+        list(store.iter_games()),
+        list(store.iter_moves(user_only=True)),
+        store.replies_to_errors(),
+        store.puzzles(),
+    )
+    return [alert(r) for r in again(found, {g.id for g in new})]
 
 
 def _new_games_line(games: list[Game]) -> str:
@@ -394,6 +411,7 @@ def digest(
         games = list(store.iter_games())
         moves = list(store.iter_moves(user_only=True))
         gifts = store.gifts(GIFT_WP_LOSS)
+        replies, puzzles = store.replies_to_errors(), store.puzzles()
     built = build(
         games,
         moves,
@@ -401,6 +419,8 @@ def digest(
         min_games=min_games,
         since=parse_since(since),
         gifts=gifts,
+        replies=replies,
+        puzzles=puzzles,
     )
     text = render(built, top=top)
     if narrate:
@@ -612,6 +632,47 @@ def puzzles_prune(ctx: typer.Context) -> None:
     console.print(f"Removed {len(removed)} puzzles that no longer count; {left} left.")
 
 
+@puzzles_app.command("dedupe")
+def puzzles_dedupe(ctx: typer.Context) -> None:
+    """Merge puzzles stored more than once (same position, same answer): keep the copy you've
+    tried, otherwise the oldest, with every copy's tags. Tried copies are never deleted."""
+    import chess
+
+    from chess_coach.puzzles.make import dedupe
+
+    settings: Settings = ctx.obj
+    with Store(settings.db_path) as store:
+        merges = dedupe(store)
+        left = len(store.puzzles())
+    if not merges:
+        console.print(f"No puzzle is stored twice ({left} puzzles).")
+        return
+    for m in merges:
+        p = m.kept[0]
+        board = chess.Board(p.fen)
+        answer = f"{_number(board)}{p.solution_san}"
+        if len(m.kept) > 1:
+            kept = f"kept all {len(m.kept)} copies you've tried ({', '.join(k.id for k in m.kept)})"
+        else:
+            kept = f"kept {p.id}" + (" (the one you've tried)" if m.tried else "")
+        line = f"{answer} (you played {p.played_san}): {kept}"
+        if m.removed:
+            line += f", removed {', '.join(m.removed)}"
+        if m.added:
+            line += f"; it now also has {', '.join(m.added)}"
+        console.print(line)
+    removed = sum(len(m.removed) for m in merges)
+    console.print(
+        f"{len(merges)} positions were stored more than once: removed {removed} copies, "
+        f"{left} puzzles left."
+    )
+
+
+def _number(board) -> str:
+    """'12.' when White is to move, '12...' when Black is."""
+    return f"{board.fullmove_number}{'.' if board.turn else '...'}"
+
+
 @puzzles_app.command("list")
 def puzzles_list(
     ctx: typer.Context,
@@ -803,14 +864,16 @@ def openings(
     min_games: Annotated[int, typer.Option(help="Smallest number of games per opening.")] = 5,
     top: Annotated[int, typer.Option(help="How many openings to show.")] = 3,
 ) -> None:
-    """The openings you score worst in, the book line, and the slips you repeat in them."""
+    """The openings you score worst in, the book line, and the slips you repeat in them; then how
+    every opening comes out by the engine after both sides' 10th moves (bullet games too)."""
+    from chess_coach.coach.repertoire import LEVEL_PLY, after_ten
     from chess_coach.coach.study import openings as opening_stats
 
     settings: Settings = ctx.obj
     with Store(settings.db_path) as store:
-        stats = opening_stats(
-            list(store.iter_games()), list(store.iter_moves(user_only=True)), min_games
-        )
+        games, moves = list(store.iter_games()), list(store.iter_moves(user_only=True))
+        early = list(store.iter_moves(max_ply=LEVEL_PLY))  # both sides': ply 20 is Black's move
+    stats = opening_stats(games, moves, min_games)
     if not stats:
         console.print(f"No opening has {min_games} analysed games yet.")
         return
@@ -831,6 +894,92 @@ def openings(
                 f"  You played {slip.move} in {slip.games} games; the engine prefers "
                 f"{slip.best}.{where}"
             )
+    _after_ten_tables(after_ten(games, early, min_games), min_games)
+
+
+def _pawns(cp: int) -> str:
+    """+1.2, -0.5, and 0.0 rather than -0.0."""
+    return f"{cp / 100:+.1f}" if abs(cp) >= 5 else "0.0"
+
+
+def _after_ten_tables(ranked: dict, min_games: int) -> None:
+    """Openings by the engine's eval after both sides' 10th moves: results don't come into it, so
+    bullet games count. Ranked by the mistake rate's interval and what you lost since book."""
+    if not any(ranked.values()):
+        console.print(
+            f"\nNo opening has {min_games} games that got to both sides' 10th moves yet, so none "
+            "is judged by the engine there."
+        )
+        return
+    console.print(
+        "\n[bold]Engine eval after both sides' 10th moves (not results)[/bold], so bullet games "
+        f"count too; openings with {min_games}+ games that got that far. Worst first: by your "
+        "mistake rate on moves 1-10 (the low end of its 95% interval), then by what you lost "
+        "since book, so a gambit's pawn is the table's, not yours. Since book counts from the "
+        "last position the opening table names, or from just before it when a White move reached "
+        "it (that move then counts too), so both sides make the same number of moves."
+    )
+    for color, rows in ranked.items():
+        if not rows:
+            continue
+        table = Table(title=f"With {color.capitalize()}")
+        for column in ("opening", "games", "eval (median)", "at -1 or worse", "mistakes 1-10"):
+            table.add_column(column, justify="left" if column == "opening" else "right")
+        table.add_column("since book", justify="right")
+        for a in rows:
+            (bad_low, bad_high), (err_low, err_high) = a.bad_interval, a.error_interval
+            table.add_row(
+                a.family,
+                str(a.games),
+                _pawns(a.median_cp),
+                f"{a.bad_rate:.0%} ({bad_low:.0%}-{bad_high:.0%})",
+                f"{a.error_rate:.1%} ({err_low:.1%}-{err_high:.1%})",
+                _pawns(a.since_book),
+            )
+        console.print(table)
+
+
+@app.command()
+def repeats(
+    ctx: typer.Context,
+    min_games: Annotated[int, typer.Option(help="Smallest number of games it happened in.")] = 3,
+    top: Annotated[int, typer.Option(help="How many to show.")] = 10,
+) -> None:
+    """The same mistake from the same position in several games: what it allows, the better move,
+    and whether a puzzle drills it."""
+    from chess_coach.coach.repeats import repeats as find
+
+    settings: Settings = ctx.obj
+    with Store(settings.db_path) as store:
+        found = find(
+            list(store.iter_games()),
+            list(store.iter_moves(user_only=True)),
+            store.replies_to_errors(),
+            store.puzzles(),
+            min_games,
+        )
+    if not found:
+        console.print(f"No mistake of yours repeats from the same position in {min_games}+ games.")
+        return
+    console.print(
+        f"{len(found)} mistakes you repeat from the same position, in {min_games} or more games "
+        "(inaccuracies or worse; in bullet only your first 10 moves count, and moves made short "
+        "on time don't)."
+    )
+    for r in found[:top]:
+        where = f" ({r.family})" if r.family else ""
+        last = f", last on {r.last:%Y-%m-%d}" if r.last else ""
+        console.print(f"\n[bold]{r.move}[/bold]{where} in {r.games} games{last}.")
+        console.print(f"  Better: {r.better}.")
+        if r.punish:
+            console.print(
+                f"  Their best answer: {r.punish}, found {r.punished} of {r.replies} times."
+            )
+        for reason in r.reasons:
+            console.print(f"  {reason}")
+        console.print(f"  It has a puzzle ({r.puzzle})." if r.puzzle else "  No puzzle for it yet.")
+        for url in r.urls[:3]:
+            console.print(f"  [dim]{url}[/dim]")
 
 
 @app.command()

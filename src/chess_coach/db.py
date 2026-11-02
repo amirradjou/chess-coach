@@ -379,6 +379,15 @@ class Store:
         for row in rows:
             yield _row_to_move(row)
 
+    def replies_to_errors(self) -> dict[tuple[str, int], MoveFact]:
+        """The opponent's move after each of the user's inaccuracies or worse, by (game id, the
+        user's ply). Its best move is what the mistake allowed."""
+        rows = self.conn.execute(
+            "SELECT r.* FROM moves m JOIN moves r ON r.game_id = m.game_id AND r.ply = m.ply + 1 "
+            "WHERE m.is_user = 1 AND m.judgement IN ('inaccuracy', 'mistake', 'blunder')"
+        )
+        return {(row["game_id"], row["ply"] - 1): _row_to_move(row) for row in rows}
+
     def count_moves(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM moves").fetchone()[0]
 
@@ -436,6 +445,12 @@ class Store:
                 "INSERT OR IGNORE INTO reviews (puzzle_id, due, interval, ease, reps, lapses) "
                 "VALUES (?, ?, 0, 2.5, 0, 0)",
                 (p.id, datetime.now(UTC).date().isoformat()),
+            )
+
+    def set_puzzle_tags(self, puzzle_id: str, tags: list[str]) -> None:
+        with self.conn:
+            self.conn.execute(
+                "UPDATE puzzles SET tags = ? WHERE id = ?", (json.dumps(tags), puzzle_id)
             )
 
     def delete_puzzle(self, puzzle_id: str) -> None:

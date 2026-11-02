@@ -6,7 +6,7 @@ invent a pattern.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -21,7 +21,8 @@ from chess_coach.coach.punish import (
     report,
     worst_title,
 )
-from chess_coach.models import Game, MoveFact
+from chess_coach.coach.repeats import Repeat, repeats
+from chess_coach.models import Game, MoveFact, Puzzle
 from chess_coach.patterns.features import (
     BULLET_MOVES,
     game_rows,
@@ -169,6 +170,8 @@ class Digest:
     pressure: list[MotifCount] = field(default_factory=list)
     # When they blunder: your punish rate against your opponents' (with Store.gifts given).
     punish: Report | None = None
+    # The same mistake from the same position in 3+ games (with --since: played again since).
+    repeats: list[Repeat] = field(default_factory=list)
 
 
 def build(
@@ -181,10 +184,15 @@ def build(
     game_lift: float = 1.25,
     since: datetime | None = None,
     gifts: Iterable[tuple[MoveFact, MoveFact]] | None = None,
+    replies: Mapping[tuple[str, int], MoveFact] | None = None,
+    puzzles: Sequence[Puzzle] = (),
 ) -> Digest:
-    """`moves` are the user's; `gifts` (Store.gifts, both players' moves) adds When they
-    blunder."""
+    """The digest's facts. `moves` are the user's; `gifts` (Store.gifts, both players' moves)
+    adds When they blunder; `replies` (Store.replies_to_errors) and `puzzles` complete the
+    repeated mistakes with their punishment and their puzzle."""
     analysed = [g for g in games if g.analyzed_depth]
+    # Counted over every game: with --since, the ones played again in this digest's games
+    again = repeats(analysed, moves, replies or {}, puzzles)
     before: list = []
     if since is not None:
         before = [g for g in analysed if g.played_at and g.played_at < since]
@@ -219,6 +227,7 @@ def build(
         rushed_moves=len(rrows),
         pressure=repeated_under_pressure(rrows),
         punish=report(analysed, gifts) if gifts is not None else None,
+        repeats=[r for r in again if since is None or (r.last and r.last >= since)],
     )
 
 
@@ -321,6 +330,22 @@ def _punish_lines(r: Report) -> list[str]:
     return out
 
 
+def _repeat_line(i: int, r: Repeat) -> str:
+    where = f" ({r.family})" if r.family else ""
+    last = f", last on {r.last:%Y-%m-%d}" if r.last else ""
+    parts = [f"{i}. **{r.move}**{where} in {r.games} games{last}; better {r.better}."]
+    if r.punish:
+        parts.append(
+            f"Their best answer is {r.punish}, and they found it {r.punished} of {r.replies} times."
+        )
+    parts += r.reasons
+    games = ", ".join(f"[{n}]({url})" for n, url in enumerate(r.urls, 1))
+    if games:
+        parts.append(f"Games: {games}.")
+    parts.append("It has a puzzle." if r.puzzle else "No puzzle for it yet.")
+    return " ".join(parts)
+
+
 def render(d: Digest, top: int = 5) -> str:
     if not d.moves:
         return "# Chess digest\n\nNo analysed games yet. Run `chess-coach analyze` first.\n"
@@ -390,6 +415,17 @@ def render(d: Digest, top: int = 5) -> str:
 
     if d.punish is not None and d.punish.gifts:
         out += _punish_lines(d.punish)
+    if d.repeats:
+        when = f", played again since {d.since}" if d.since else ""
+        out += [
+            "## The same mistake in the same position",
+            "",
+            "Your inaccuracies or worse from the very same position in 3 or more games"
+            f"{when} (named book moves left out):",
+            "",
+        ]
+        out += [_repeat_line(i, r) for i, r in enumerate(d.repeats[:top], 1)]
+        out.append("")
 
     if d.pressure:
         out += [

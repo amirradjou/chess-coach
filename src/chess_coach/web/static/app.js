@@ -84,9 +84,27 @@ function habitCard(h, tags) {
   );
 }
 
+// The same mistake from the very same position in 3+ games, with their best answer to it.
+function repeatCard(r) {
+  const drill = r.puzzle ? "it has a puzzle" : "no puzzle for it yet";
+  return el(
+    "div", { class: "example" },
+    boardNode(r.svg),
+    el("div", {}, "You played ", el("span", { class: "played" }, r.move), ` in ${r.games} games`,
+      r.family ? ` (${r.family})` : "", " · better ", el("span", { class: "better" }, r.better)),
+    r.punish ? el("div", { class: "small" }, "Their best answer: ", el("b", {}, r.punish),
+      ` (they found it ${r.punished} of ${r.replies} times)`) : null,
+    reasons(r.reasons),
+    // Games imported from a PGN without a date have none (last: null)
+    el("div", { class: "muted small" }, r.last ? `Last on ${r.last} · ${drill}` : drill[0].toUpperCase() + drill.slice(1)),
+    el("div", { class: "small" }, r.urls.flatMap((url, i) => [i ? " · " : "",
+      el("a", { href: url, target: "_blank", rel: "noopener" }, `game ${i + 1}`)])),
+  );
+}
+
 async function loadMistakes() {
   const punishing = api("/api/punish"); // its own request: the page doesn't wait for it
-  const [o, tagList] = await Promise.all([api("/api/overview"), api("/api/drill/tags")]);
+  const [o, tagList, repeated] = await Promise.all([api("/api/overview"), api("/api/drill/tags"), api("/api/repeats")]);
   const tags = new Set(tagList.map((t) => t.tag));
   $("#summary").textContent =
     `${o.games} analysed games (${o.first} to ${o.last}). You make a mistake or blunder on ` +
@@ -98,6 +116,11 @@ async function loadMistakes() {
     el("h2", {}, "Mistakes you repeat"),
     el("p", { class: "muted" }, "Counted from Stockfish's verdict on your own moves. Red is what you played, green what to play."),
     o.habits.length ? o.habits.map((h) => habitCard(h, tags)) : el("p", {}, "Nothing stands out yet."),
+    repeated.length ? [
+      el("h2", {}, "The same mistake in the same position"),
+      el("p", { class: "muted" }, "Your inaccuracies or worse from the very same position in 3 or more games (named book moves left out). Red is what you played, green the better move."),
+      el("div", { class: "card" }, el("div", { class: "examples" }, repeated.map(repeatCard))),
+    ] : null,
     el("h2", {}, "When it happens"),
     el("p", { class: "muted" }, "Situations where your mistake rate is clearly above your own average."),
     o.situations.length ? o.situations.map((h) => habitCard(h, tags)) : el("p", {}, "No situation stands out yet: analyse more games."),
@@ -277,7 +300,7 @@ async function nextPuzzle() {
   $("#due").textContent = `${p.due} due`;
   fill($("#prompt"),
     p.opening_fix
-      ? el("span", {}, `Your opening (${p.tags[1] || ""}): here you usually play `, el("span", { class: "played" }, p.played), ". Find a better move.")
+      ? el("span", {}, `Your opening (${p.opening || ""}): here you usually play `, el("span", { class: "played" }, p.played), ". Find a better move.")
       : el("span", {}, "In the game you played ", el("span", { class: "played" }, p.played), ". Find the best move."),
     el("br"), el("span", { class: "muted small" }, `${p.side === "white" ? "White" : "Black"} to move · ${p.tags.map(tagName).join(", ")}`),
     p.opening_idea ? el("span", { class: "idea" }, el("b", {}, `${p.opening}: `), p.opening_idea) : null,
@@ -478,6 +501,10 @@ const games = (n) => `${n} game${n === 1 ? "" : "s"}`;
 const scored = (x, sep = " · ", words = "you scored") => (x.score === null ? ""
   : `${sep}${words} ${x.score}%${x.scored < x.games ? ` in the ${games(x.scored)} outside bullet` : ""}`);
 const a = (word) => `${/^[aeiou]/.test(word) ? "an" : "a"} ${word}`;
+// The engine's eval after both sides' 10th moves in the games through here (the median; not
+// results), named in full on moves too: after "you scored 0%" a bare "+0.1" reads like a result.
+const afterTen = (x) => (!x.after_ten ? ""
+  : ` · engine eval after both sides' 10th moves: ${x.after_ten.median} (median of ${games(x.after_ten.games)}; not results)`);
 const optionLabel = (x) => `${x.family} (${games(x.games)}${scored(x, ", ", "you score")}${x.due ? `, ${x.due} due` : ""})`;
 
 async function openCoach() {
@@ -603,7 +630,7 @@ async function coachDraw() {
   fill($("#coach-title"),
     el("b", {}, n.name || coach.family), el("br"),
     el("span", { class: "muted small" }, n.games
-      ? `${who} · reached in ${n.games} of your games${scored(n, " · ", "from here you scored")}`
+      ? `${who} · reached in ${n.games} of your games${scored(n, " · ", "from here you scored")}${afterTen(n)}`
       : `${who} · none of your games reached this position`),
     coach.mode === "explore" && n.best ? el("div", {}, n.turn === "you" ? "Engine's move: " : "Their best: ", el("b", { class: "better" }, n.best.san), ` (${n.best.score} for you)`) : null);
   fill($("#coach-moves"), coach.mode === "explore" ? coachMoves(n) : null);
@@ -629,7 +656,7 @@ function coachMoves(n) {
       el("div", { class: "line-head" },
         el("span", {},
           el("button", { class: "link", onclick: () => coachGo([...coach.path, m.uci]) }, `${m.number}${m.san}`),
-          el("span", { class: "muted small" }, ` · ${games(m.games)}${scored(m)}`)),
+          el("span", { class: "muted small" }, ` · ${games(m.games)}${scored(m)}${afterTen(m)}`)),
         el("span", { class: `verdict ${m.verdict}` }, m.verdict)),
       m.punish ? el("div", { class: "small" }, "Punish it with ", el("b", { class: "better" }, m.punish.san),
         ` (${m.punish.score} for you). ${answered(m)}`) : null,
@@ -751,10 +778,13 @@ function favoriteCard(f) {
   const result = f.score === null
     ? "only bullet, whose results don't count"
     : `scored ${f.score}% (${f.wins} won, ${f.draws} drawn, ${f.losses} lost${decided < f.games ? " outside bullet" : ""})`;
+  const t = f.after_ten;
   return el(
     "div", { class: "card" },
     el("h3", {}, f.family),
     el("div", { class: "muted" }, `${f.games} games · ${result} · mistakes on ${f.opening_error_rate}% of your opening moves`),
+    t ? el("div", { class: "small" }, `Engine eval after both sides' 10th moves (not results): ${t.median} (median of ${games(t.games)}), `,
+      `${t.bad}% of them at −1 or worse; ${t.since_book} since book.`) : null,
     decided ? el("div", { class: "score" }, el("div", { class: "w", style: `width:${pct(f.wins)}` }),
       el("div", { class: "d", style: `width:${pct(f.draws)}` }), el("div", { class: "l", style: `width:${pct(f.losses)}` })) : null,
     f.idea ? el("p", { class: "idea" }, el("b", {}, "What it's about: "), f.idea) : null,
@@ -774,13 +804,35 @@ function favoriteCard(f) {
   );
 }
 
+// Every opening by the engine's eval after both sides' 10th moves: results don't come into it, so
+// bullet games count. Worst first, by the mistake rate's interval and what was lost since book.
+function afterTenTable(rows) {
+  const range = (low, high, unit = "%") => el("span", { class: "muted small" }, ` (${low}–${high}${unit})`);
+  return el("table", {},
+    el("tr", {}, ["opening", "games", "eval", "at −1 or worse", "mistakes, moves 1–10", "since book"].map((h) => el("th", {}, h))),
+    rows.map((a) => el("tr", {},
+      el("td", {}, a.family), el("td", {}, a.games), el("td", {}, a.median),
+      el("td", {}, `${a.bad}%`, range(a.bad_low, a.bad_high)),
+      el("td", {}, `${a.error_rate}%`, range(a.error_low, a.error_high)),
+      el("td", {}, a.since_book))));
+}
+
 async function loadOpenings() {
   const o = await api("/api/openings");
+  const t = o.after_ten;
   fill($("#openings"),
     el("p", { class: "muted" }, "Your most-played openings, how you score, and where your usual move can be improved (named book moves are never flagged)."),
     el("div", { class: "columns" },
       el("div", {}, el("h2", {}, "With White"), o.white.length ? o.white.map(favoriteCard) : el("p", {}, "Not enough games yet.")),
       el("div", {}, el("h2", {}, "With Black"), o.black.length ? o.black.map(favoriteCard) : el("p", {}, "Not enough games yet."))),
+    t.white.length || t.black.length ? [
+      el("h2", {}, "How each opening comes out"),
+      el("p", { class: "muted" }, "Engine eval after both sides' 10th moves (not results), so bullet games count too: the median, and how often you stand at −1 or worse. ",
+        "Worst first, by your mistake rate on moves 1–10 (the low end of its 95% interval, in brackets), then by what you lost since book, so a gambit's pawn is the book's, not yours. ",
+        "Since book counts from the last position the opening table names, or from just before it when a White move reached it (that move then counts too), so both sides make the same number of moves."),
+      t.white.length ? [el("h3", {}, "With White"), afterTenTable(t.white)] : null,
+      t.black.length ? [el("h3", {}, "With Black"), afterTenTable(t.black)] : null,
+    ] : null,
   );
 }
 

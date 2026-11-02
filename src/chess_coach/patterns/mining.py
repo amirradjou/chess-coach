@@ -22,22 +22,23 @@ Feature = tuple[str, str]
 
 def wilson_lower(hits: int, n: int, z: float = 1.96) -> float:
     """Lower bound of the Wilson score interval for hits/n."""
-    if n == 0:
-        return 0.0
-    p = hits / n
-    centre = p + z * z / (2 * n)
-    margin = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))
-    return (centre - margin) / (1 + z * z / n)
+    return _wilson(hits, n, z, -1)
 
 
 def wilson_upper(hits: int, n: int, z: float = 1.96) -> float:
     """Upper bound of the Wilson score interval for hits/n."""
+    return _wilson(hits, n, z, 1)
+
+
+def _wilson(hits: int, n: int, z: float, side: int) -> float:
     if n == 0:
-        return 1.0
+        return 0.0 if side < 0 else 1.0
     p = hits / n
     centre = p + z * z / (2 * n)
     margin = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))
-    return (centre + margin) / (1 + z * z / n)
+    # The bounds lie in [0, 1], but rounding can put one a hair outside: 0 of 5 gave -3e-17,
+    # which prints as "-0%".
+    return min(1.0, max(0.0, (centre + side * margin) / (1 + z * z / n)))
 
 
 def newcombe(hits1: int, n1: int, hits2: int, n2: int, z: float = 1.96) -> tuple[float, float]:

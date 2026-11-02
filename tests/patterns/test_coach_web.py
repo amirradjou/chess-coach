@@ -17,6 +17,7 @@ from .test_patterns import game, planted
 
 ITALIAN = "1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 *"
 AFTER_ITALIAN = "r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4"
+AFTER_NC3_NC6 = "r1bqkbnr/pppppppp/2n5/8/8/2N5/PPPPPPPP/R1BQKBNR w KQkq - 2 2"
 
 
 class FakeEngine:
@@ -176,6 +177,9 @@ def _app(tmp_path: Path, engine=FirstMoves) -> TestClient:
         for m in moves:
             m.fen_before, m.uci = chess.STARTING_FEN, "a2a3"
         store.conn.execute("UPDATE moves SET fen_before = ?, uci = 'a2a3'", (chess.STARTING_FEN,))
+        # ...and the second worst from another position (after 1.Nc3 Nc6), or the two would be
+        # one puzzle
+        store.conn.execute("UPDATE moves SET fen_before = ? WHERE ply = 35", (AFTER_NC3_NC6,))
         store.conn.commit()
         make(store, FakeEngine([LineEval(300, None, e2e4), LineEval(0, None, d2d4)]), limit=2)
     return TestClient(create_app(db, engine))
