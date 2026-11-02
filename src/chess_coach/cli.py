@@ -736,13 +736,14 @@ def openings(
     top: Annotated[int, typer.Option(help="How many openings to show.")] = 3,
 ) -> None:
     """The openings you score worst in, the book line, and the slips you repeat in them; then how
-    every opening comes out by the engine after your 10th move (bullet games too)."""
-    from chess_coach.coach.repertoire import after_ten
+    every opening comes out by the engine after both sides' 10th moves (bullet games too)."""
+    from chess_coach.coach.repertoire import LEVEL_PLY, after_ten
     from chess_coach.coach.study import openings as opening_stats
 
     settings: Settings = ctx.obj
     with Store(settings.db_path) as store:
         games, moves = list(store.iter_games()), list(store.iter_moves(user_only=True))
+        early = list(store.iter_moves(max_ply=LEVEL_PLY))  # both sides': ply 20 is Black's move
     stats = opening_stats(games, moves, min_games)
     if not stats:
         console.print(f"No opening has {min_games} analysed games yet.")
@@ -764,7 +765,7 @@ def openings(
                 f"  You played {slip.move} in {slip.games} games; the engine prefers "
                 f"{slip.best}.{where}"
             )
-    _after_ten_tables(after_ten(games, moves, min_games), min_games)
+    _after_ten_tables(after_ten(games, early, min_games), min_games)
 
 
 def _pawns(cp: int) -> str:
@@ -773,19 +774,20 @@ def _pawns(cp: int) -> str:
 
 
 def _after_ten_tables(ranked: dict, min_games: int) -> None:
-    """Openings by the engine's eval after your 10th move: results don't come into it, so bullet
-    games count. Ranked by the mistake rate's interval and what you lost since book."""
+    """Openings by the engine's eval after both sides' 10th moves: results don't come into it, so
+    bullet games count. Ranked by the mistake rate's interval and what you lost since book."""
     if not any(ranked.values()):
         console.print(
-            f"\nNo opening has {min_games} games that got to your 10th move yet, so none is "
-            "judged by the engine there."
+            f"\nNo opening has {min_games} games that got to both sides' 10th moves yet, so none "
+            "is judged by the engine there."
         )
         return
     console.print(
-        "\n[bold]Engine eval after your 10th move (not results)[/bold], so bullet games count "
-        f"too; openings with {min_games}+ games that got that far. Worst first: by your mistake "
-        "rate on moves 1-10 (the low end of its 95% interval), then by what you lost since the "
-        "game left the opening table (a gambit's pawn is the table's, not yours)."
+        "\n[bold]Engine eval after both sides' 10th moves (not results)[/bold], so bullet games "
+        f"count too; openings with {min_games}+ games that got that far. Worst first: by your "
+        "mistake rate on moves 1-10 (the low end of its 95% interval), then by what you lost "
+        "since the game left the opening table (a gambit's pawn is the table's, not yours), "
+        "counted from after Black's move so both sides make the same number of moves."
     )
     for color, rows in ranked.items():
         if not rows:

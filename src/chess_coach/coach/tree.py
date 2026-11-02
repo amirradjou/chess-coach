@@ -137,8 +137,9 @@ def scored(game_ids: Iterable[str], results: dict[str, str]) -> int:
 
 
 def at_move_ten(game_ids: Iterable[str], evals: Mapping[str, int]) -> tuple[int, int] | None:
-    """(how many of these games got to your 10th move, your median eval there), from a {game id:
-    eval} map (repertoire.evals_after_ten); None when none did. The tree itself stops at move 8."""
+    """(how many of these games got to both sides' 10th moves, your median eval there), from a
+    {game id: eval} map (repertoire.evals_after_ten); None when none did. The tree itself stops at
+    move 8."""
     found = [evals[g] for g in game_ids if g in evals]
     return (len(found), round(median(found))) if found else None
 

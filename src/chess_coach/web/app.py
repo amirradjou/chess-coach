@@ -40,7 +40,7 @@ from chess_coach.coach.progress import (
 )
 from chess_coach.coach.repeats import Repeat, repeats
 from chess_coach.coach.repertoire import (
-    TEN,
+    LEVEL_PLY,
     AfterTen,
     Favorite,
     Fix,
@@ -383,7 +383,9 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             games, moves, key = data(store)
 
         def make() -> dict:
-            ranked = after_ten(games, moves)
+            with Store(db_path) as store:  # both sides' moves: ply 20 is Black's move
+                early = list(store.iter_moves(max_ply=LEVEL_PLY))
+            ranked = after_ten(games, early)
             by_key = {(a.family, a.color): a for rows in ranked.values() for a in rows}
             out: dict = {
                 c: [_favorite(f, by_key.get((f.family, f.color))) for f in fs]
@@ -499,8 +501,8 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
         return Response(svg, media_type="image/svg+xml")
 
     def opening_tree(family: str, color: str) -> tuple[optree.Node, dict[str, str], dict[str, int]]:
-        """The tree, each game's result as it counts, and each game's eval after your 10th
-        move (past the tree's last ply, so read separately)."""
+        """The tree, each game's result as it counts, and each game's eval after both sides'
+        10th moves (past the tree's last ply, which `tree.build` stops at)."""
         with Store(db_path) as store:
             games = [
                 g
@@ -512,13 +514,12 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             if name in cache and cache[name][0] == key:
                 return cache[name][1]  # type: ignore[return-value]
             ids = {g.id for g in games}
-            moves = [m for m in store.iter_moves(max_ply=optree.TREE_PLIES) if m.game_id in ids]
-            own = store.iter_moves(user_only=True, max_ply=2 * TEN)  # your 10th move: ply 19/20
-            tenth = [m for m in own if m.game_id in ids]
+            # both sides' moves to ply 20: the tree keeps the first 16 plies
+            moves = [m for m in store.iter_moves(max_ply=LEVEL_PLY) if m.game_id in ids]
         value = (
             optree.build(games, moves),
             {g.id: result_of(g) for g in games},
-            evals_after_ten(games, tenth),
+            evals_after_ten(games, moves),
         )
         cache[name] = (key, value)
         return value
