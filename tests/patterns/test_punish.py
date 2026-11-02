@@ -742,6 +742,8 @@ def test_the_digest_has_a_section_only_with_both_sides_moves():
     # As on the page and in the CLI, the openings' examples are the boards: no costliest misses.
     assert "Your costliest misses" not in text
     assert "When they blunder is the exception: it also counts your opponents' replies" in text
+    assert "otherwise there is no clear difference, or too few chances to tell." in text
+    assert "with 10+ chances on each side, and an opening's interval allows for how many" in text
     assert "When they blunder" not in render(build(games, moves))
 
 

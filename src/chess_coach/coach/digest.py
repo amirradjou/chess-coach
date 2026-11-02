@@ -419,10 +419,11 @@ def render(d: Digest, top: int = 5) -> str:
             "When they blunder is the exception: it also counts your opponents' replies to your "
             "blunders, as the yardstick for yours. There you are only called worse or better than "
             "your opponents (for partial or clear misses in a group of games, for a kind of "
-            "punishing move, or in an opening) when the 95% interval of the gap leaves out zero. "
-            "Openings are only looked at in a group where you miss more, partial and clear "
-            "together, and partial misses are only shown where your partial gap clears zero. "
-            "Examples stand for a gap, so they are partial or clear misses, whichever is behind "
-            "most of it.",
+            "punishing move, or in an opening) when the 95% interval of the gap leaves out zero; "
+            "otherwise there is no clear difference, or too few chances to tell. Openings are "
+            "only looked at in a group where you miss more, partial and clear together, and with "
+            "10+ chances on each side, and an opening's interval allows for how many were looked "
+            "at. Partial misses are only shown where your partial gap clears zero. Examples stand "
+            "for a gap, so they are partial or clear misses, whichever is behind most of it.",
         ]
     return "\n".join(out).rstrip() + "\n"
