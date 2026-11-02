@@ -177,11 +177,13 @@ across 8+ games.
   you play most, and the opening mistakes you have repeated in more than one game. Then every
   opening by the **engine eval after both sides' 10th moves (not results)**, so bullet games
   count too: the median eval, the share of games at -1 or worse and your mistake rate on moves
-  1-10 (each with its 95% interval), and what you lost since the game left the opening table, so
-  a gambit's pawn isn't put down to you. The eval and the start of "since book" are both read
-  after a Black move, so each side has made the same number of moves (read right after your own
-  10th move, the number would always include your last slip and never their reply). Worst first
-  by the mistake rate's interval, then that loss.
+  1-10 (each with its 95% interval), and what you lost since book, so a gambit's pawn isn't put
+  down to you. The eval is read after Black's 10th move whatever your colour: with Black that is
+  your own 10th move, so a slip there counts; with White, read right after your own 10th move it
+  would always include your last slip and never their reply. Since book counts from the last
+  position the opening table names, or from just before it when a White move reached it (that
+  move then counts too), so both sides make the same number of moves. Worst first by the mistake
+  rate's interval, then that loss.
 - `repeats` lists the same mistake from the same position in 3 or more games (inaccuracies or
   worse; named book moves left out; a position reached by another move order is the same
   position): the better move, their best answer and how often they found it, the reasons in chess
