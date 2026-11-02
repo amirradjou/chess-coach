@@ -185,7 +185,8 @@ move 10).
 - `coach/punish.py`: a gift is any move losing 20+ points of win probability (`Store.gifts`, a
   self-join that pairs it with the next move, either side); the reply missed the punishment when
   it carries `missed_tactic`, which the engine already sets for exactly that (an inaccuracy or
-  worse right after a 20+ move), so nothing is re-derived. The mirror ("Luck") is the same over
+  worse right after a 20+ move), so nothing is re-derived. That is partial and clear misses
+  together: the group headlines split them (next section). The mirror ("Luck") is the same over
   your gifts and your opponents' replies, and is the yardstick: players at your level with the
   same kind of chance. `features.counted` and `features.rushed` are applied to the replying move
   on both sides (in bullet, opponents' replies after move 10 are out too).
@@ -226,9 +227,10 @@ move 10).
   after the rest of the page, with practice buttons per sub-tag and a note that Learn openings'
   punish deck covers only the first 8 moves. No engine anywhere.
 - On a copy of the owner's database (2,099 Lichess games, depth 12; 8,493 answered moves losing
-  20+, 2,398 of them with a counted, unhurried reply), about 0.2 s:
+  20+, 2,398 of them with a counted, unhurried reply), about 0.2 s. Missed here is partial and
+  clear together; the split is in the next section:
   - Bullet, moves 1-10: you missed 44.0% (248 of 563), they missed 36.3% (212 of 584): +7.7
-    points, 95% interval +2.1 to +13.4, the one real gap.
+    points, 95% interval +2.1 to +13.4, the one real gap (all of it partial misses).
   - Blitz and rapid: 36.0% (221 of 614) against 35.6% (227 of 637): +0.4, -4.9 to +5.7, level.
   - By kind: capture 33.1% (599) vs 29.1% (670), check 45.6% (68) vs 39.7% (73), quiet 47.1%
     (510) vs 45.0% (478); no interval clears zero, so no kind lesson.
@@ -250,6 +252,80 @@ move 10).
   (a "-100 points" gap); the capture of a checking piece got no reason (3 of the 469 counted
   misses); the CLI said the engine's move "punished it" and every trend row held 150; any
   non-bullet speed was labelled "Blitz and rapid"; and no test covered `digest`'s wiring.
+
+### Partial and clear misses (2026-11-01, after research round 2)
+
+Research round 2 (re-checked by both skeptics at depth 12 and 18) found that "missed" mixes two
+habits: on the owner's bullet games the whole gap is in replies that give back 10-20 points
+(he takes only part of the gift); replies that give back 20+ are level with his opponents'. So
+each group now shows the two apart, and the headline says which one differs.
+
+- `Gift.outcome` from the reply's `wp_loss`: kept (< 10), partial (10 to < 20), clear (>= 20);
+  the bars are `evaluation.INACCURACY_WP_LOSS` and `MISTAKE_WP_LOSS`. `Split` holds one group's
+  partial and clear `Compare`s (`compare` takes the predicate; `missed` is the default), each
+  with Wilson intervals, a Newcombe interval for the gap and the same verdict rule (worse or
+  better only when the interval leaves out zero).
+- Checked first, on the copy: `missed_tactic` on the reply is exactly `wp_loss >= 10`, on all
+  8,493 answered gifts (3,494 tagged, every one 10+; 4,999 untagged, every one under 10) and on
+  the 2,398 counted ones (908 = 235 partial + 673 clear). The stored judgement agrees: partial =
+  inaccuracy (235), clear = mistake (248) or blunder (425). No reply sits exactly on 10.0 or
+  20.0. It holds by construction too (`motifs.py` tags `missed_tactic` when the move before lost
+  20+ and this one 10+), so `missed` is partial plus clear and the parts below that use it don't
+  contradict the split.
+- `headline(Split)`, a gap first (worse before better, partial before clear) and a gap only
+  when its interval clears zero; otherwise "Partial misses are the same as theirs: X vs Y" and
+  "Clear misses are the same as theirs: X vs Y" (both same: "When they blunder you do as well as
+  your opponents."). Partial worse, clear not: "When they blunder you often take only part of
+  it: your reply gave back 10-20 points after 14.7% of their blunders (your opponents: 8.2%),
+  +6.5 points (95% interval +2.8 to +10.3). Clear misses are the same as theirs: 29.3% vs
+  28.1%." Clear gaps read "you miss it outright more (less) often".
+- `LESSONS["partial"]` ("After their slip, compare checks, captures and threats before your
+  usual move, and take the one that wins most.") is `Report.partial_lesson`, only when some
+  group's partial gap is worse (`partial_focus`); `Report.lessons` stays the kinds'. Examples:
+  `Report.partials`, your partial misses in those groups that gave back the most (`costliest`),
+  in the existing format (their blunder, your reply, the engine's move,
+  `principles.allows(captures=True)`, the link). Losses in examples now show one decimal
+  (digest, API): rounded, 19.6 read "-20%", the clear bar.
+- Which definition each part uses:
+  - partial / clear (`outcome`): the group headlines and their two rows, the partial lesson and
+    the partial examples;
+  - missed, partial and clear together (`missed_tactic`): the kinds table (and its lessons),
+    the trend, the openings list and its gate (a group where you miss more, its interval above
+    zero, as before), and the costliest misses. Their titles say so ("Missed (partial or
+    clear)", "partial and clear together");
+  - puzzle tags (`punish_capture|check|quiet`): every `missed_tactic` puzzle, and puzzles start
+    at 20 points lost (`make.MIN_WP_LOSS`), so all are clear misses: 228 of 228 on the copy. No
+    drill trains partial misses yet; the CLI's drill line says so, and the card's practice line
+    says the puzzles come from moves losing 20+.
+- Surfaces: the CLI prints both headlines and one table with a partial and a clear row per
+  group, then the lesson and the examples; the digest puts both rows under each group's line;
+  `/api/punish` groups are `{label, headline, partial, clear}` (each a compare with `name`), plus
+  `partial_focus`, `partial_lesson` and `partials`; the web card shows each group with its
+  headline and a two-row table, then the lesson and the boards.
+- On a fresh copy of the owner's database (same 2,398 counted chances):
+  - Bullet, moves 1-10: partial 14.7% (83 of 563) against 8.2% (48 of 584), +6.5, 95% interval
+    +2.8 to +10.3, worse; clear 29.3% (165 of 563) against 28.1% (164 of 584), +1.2, -4.0 to
+    +6.5, the same.
+  - Blitz and rapid: partial 8.8% (54 of 614) against 7.8% (50 of 637), +0.9, -2.1 to +4.1;
+    clear 27.2% (167 of 614) against 27.8% (177 of 637), -0.6, -5.5 to +4.4; level on both.
+  - Partial examples (bullet): 9.Qd5 after 8...Qf6 (9.Qh3 hits the queen; -19.6), 5...d5 after
+    5.O-O (5...Qxg5 takes a hanging knight; -19.6), 10...Re8 after 10.Nf3 (10...h6; -19.4).
+- How firm the partial gap is (research round 2): game-clustered +6.5 [+2.7, +10.0] over 681
+  games; at depth 18 (6,567 positions re-scored, game-clustered) +6.6 [+3.3, +10.0], with clear
+  +1.7 [-3.7, +7.1]. Public players' partial rates don't separate rating levels (bands A / B /
+  C: 9.8 / 10.3 / 9.7%), so it is a personal habit, not a level gap, and the wording stays away
+  from levels.
+- Caveats (here, not in the UI):
+  - In the 268 bullet games where both sides gave a counted gift, the partial gap is +2.6, 95%
+    interval -1.8 to +7.1 (39 of 351 against 31 of 365): inside the same games it is not clear.
+  - 11 of his 83 bullet partial misses come from the Danish Gambit Accepted: 11 of his 42
+    chances there, against his opponents' 0 of 42 (clear: 12 of 42 each). With the other two
+    Danish families it is 13 of 83 (Danish Gambit 2 of 7 against 0 of 3; Declined 0 of 1
+    against 0 of 5).
+  - The gap sits in his newer games: older half +3.3 [-1.9, +8.5], newer half +9.8 [+4.5,
+    +15.2]. A second depth-12 run with other engine settings shrinks it to +2.9 [-0.6, +6.6];
+    that run agrees with depth 18 less often (90.7% of reply classes against 94.8% for the
+    stored evals), but the 10-20 band does depend on the engine's settings.
 
 ## Remaining (in order)
 
