@@ -41,9 +41,11 @@ from chess_coach.coach.progress import (
 from chess_coach.coach.punish import (
     GIFT_WP_LOSS,
     KINDS,
+    OUTCOMES,
     Compare,
     Gift,
     Rate,
+    Split,
     headline,
     label,
     report,
@@ -177,6 +179,16 @@ def _compare(c: Compare) -> dict:
         "gap": None if c.gap is None else round(c.gap * 100, 1),
         "interval": None if interval is None else [round(x * 100, 1) for x in interval],
         "verdict": c.verdict,
+    }
+
+
+def _split(s: Split) -> dict:
+    """A group's headline and its two rows: partial misses (10-20 points) and clear ones."""
+    return {
+        "label": s.label,
+        "headline": headline(s),
+        "partial": {**_compare(s.partial), "name": OUTCOMES["partial"]},
+        "clear": {**_compare(s.clear), "name": OUTCOMES["clear"]},
     }
 
 
@@ -360,7 +372,8 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
                 r = report(games, store.gifts(GIFT_WP_LOSS))
             return {
                 "gifts": r.gifts,
-                "groups": [{**_compare(c), "headline": headline(c)} for c in r.groups],
+                "groups": [_split(s) for s in r.groups],
+                # From here on a miss is partial or clear together.
                 "kinds": [{**_compare(c), "name": KINDS[c.label]} for c in r.kinds],
                 "lessons": r.lessons,
                 "trend": [_compare(c) for c in r.trend],

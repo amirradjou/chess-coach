@@ -10,7 +10,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from chess_coach.coach.punish import KINDS, Gift, Report, headline, label, report
+from chess_coach.coach.punish import KINDS, Compare, Gift, Report, headline, label, report
 from chess_coach.models import Game, MoveFact
 from chess_coach.patterns.features import (
     BULLET_MOVES,
@@ -238,16 +238,37 @@ def _miss(g: Gift) -> str:
     return f"{linked}: {reasons[0]}" if reasons else linked
 
 
+def _row(c: Compare) -> str:
+    """'you 14.7% (83 of 563), them 8.2% (48 of 584): +6.5 points (95% interval +2.8 to +10.3)'"""
+    text = (
+        f"you {c.yours.rate:.1%} ({c.yours.missed} of {c.yours.n}), them {c.theirs.rate:.1%} "
+        f"({c.theirs.missed} of {c.theirs.n})"
+    )
+    if c.gap is None or c.interval is None:  # a side with no chances: no gap
+        return text
+    low, high = c.interval
+    zero = ", which includes zero" if c.verdict == "same" else ""
+    interval = f"95% interval {100 * low:+.1f} to {100 * high:+.1f}{zero}"
+    return f"{text}: {100 * c.gap:+.1f} points ({interval})"
+
+
 def _punish_lines(r: Report) -> list[str]:
     out = [
         "## When they blunder",
         "",
-        "A blunder here is a move that loses 20+ points of win probability; the reply misses the "
-        "punishment when it is an inaccuracy or worse. Your opponents' replies to your blunders "
-        "are the yardstick: players at your level with the same kind of chance.",
+        "A blunder here is a move that loses 20+ points of win probability. Your reply keeps the "
+        "gift when it gives back under 10 points, takes only part of it at 10-20 (a partial "
+        "miss) and misses it at 20 or more (a clear miss). Your opponents' replies to your "
+        "blunders are the yardstick: players at your level with the same kind of chance.",
         "",
     ]
-    out += [f"- **{c.label}**: {headline(c)}" for c in r.groups if c.yours.n or c.theirs.n]
+    for s in r.groups:
+        if s.chances:
+            out += [
+                f"- **{s.label}**: {headline(s)}",
+                f"  - Partial (gave back 10-20 points): {_row(s.partial)}.",
+                f"  - Clear (gave back 20 or more): {_row(s.clear)}.",
+            ]
     # A kind of punishment one side never had to find can't be compared, so it is left out.
     kinds = "; ".join(
         f"{KINDS[c.label]}, you {c.yours.rate:.0%} of {c.yours.n} and them {c.theirs.rate:.0%} "
@@ -257,7 +278,7 @@ def _punish_lines(r: Report) -> list[str]:
     )
     if kinds:
         verdict = " ".join(r.lessons) or "No kind stands out against your opponents."
-        out += ["", f"Missed, by the move that punishes: {kinds}. {verdict}"]
+        out += ["", f"Missed (partial or clear), by the move that punishes: {kinds}. {verdict}"]
     focus = " and ".join(r.focus).lower()  # the groups where you miss more, if any
     if r.families:  # only inside those groups, each with its own gap clear of zero
         where = ", ".join(
@@ -265,7 +286,11 @@ def _punish_lines(r: Report) -> list[str]:
             f"{c.theirs.missed} of {c.theirs.n})"
             for c in (f.compare for f in r.families)
         )
-        out += ["", f"In {focus}, you miss more than your opponents most in {where}."]
+        out += [
+            "",
+            f"In {focus}, counting partial and clear misses together, you miss more than your "
+            f"opponents most in {where}.",
+        ]
     if r.worst:
         title = f"Your costliest misses in {focus}:" if focus else "Your costliest misses:"
         out += ["", title, "", *(f"- {_miss(g)}" for g in r.worst)]
@@ -370,8 +395,9 @@ def render(d: Digest, top: int = 5) -> str:
             "",
             "When they blunder is the exception: it also counts your opponents' replies to your "
             "blunders, as the yardstick for yours. There you are only called worse or better than "
-            "your opponents (in a group of games, for a kind of punishing move, or in an opening) "
-            "when the 95% interval of the gap leaves out zero, and openings are only looked at in "
-            "a group where you are worse.",
+            "your opponents (for partial or clear misses in a group of games, for a kind of "
+            "punishing move, or in an opening) when the 95% interval of the gap leaves out zero. "
+            "Openings are only looked at in a group where you miss more, partial and clear "
+            "together.",
         ]
     return "\n".join(out).rstrip() + "\n"

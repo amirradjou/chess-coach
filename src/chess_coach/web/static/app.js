@@ -130,9 +130,9 @@ function gapCell(c) {
     el("div", { class: "muted small" }, `${points(c.interval[0])} to ${points(c.interval[1])}`));
 }
 
-function rateTable(head, rows) {
+function rateTable(head, rows, sides = ["you missed", "they missed"]) {
   return el("table", {},
-    el("tr", {}, [head, "you missed", "they missed", "gap (95%)"].map((h) => el("th", {}, h))),
+    el("tr", {}, [head, ...sides, "gap (95%)"].map((h) => el("th", {}, h))),
     rows.map((c) => el("tr", {}, el("td", {}, c.name ?? c.label), rateCell(c.yours), rateCell(c.theirs), gapCell(c))));
 }
 
@@ -153,14 +153,17 @@ function punishSection(p, tagList) {
   const focus = p.focus.length ? ` (${p.focus.join(", ").toLowerCase()})` : "";
   return [
     el("h2", {}, "When they blunder"),
-    el("p", { class: "muted" }, "A blunder here is a move that loses 20+ points of win probability; your reply misses the punishment when it's an inaccuracy or worse. Your opponents' replies to your blunders are the yardstick: players at your level with the same kind of chance. In bullet only moves 1–10 count, and replies made short on time don't."),
-    p.groups.map((g) => el("div", { class: "card" }, el("h3", {}, g.label), el("div", {}, g.headline))),
-    el("h3", {}, "By the move that punishes"),
+    el("p", { class: "muted" }, "A blunder here is a move that loses 20+ points of win probability. Your reply keeps the gift when it gives back under 10 points, takes only part of it at 10–20 (a partial miss) and misses it at 20 or more (a clear miss). Your opponents' replies to your blunders are the yardstick: players at your level with the same kind of chance. In bullet only moves 1–10 count, and replies made short on time don't."),
+    // Partial and clear misses apart: different habits, each with its own gap.
+    p.groups.map((g) => el("div", { class: "card" }, el("h3", {}, g.label), el("div", {}, g.headline),
+      rateTable("your reply gave back", [g.partial, g.clear], ["you", "they"]))),
+    el("h3", {}, "Missed, by the move that punishes"),
+    el("p", { class: "muted small" }, "Here, in the trend and in the openings below, a miss is partial or clear together: your reply gave back 10 points or more."),
     rateTable("punishing move", p.kinds),
     p.lessons.length
       ? p.lessons.map((l) => el("div", { class: "lesson" }, el("b", {}, "What to learn: "), l))
       : el("p", { class: "muted small" }, "No kind of punishing move stands out against your opponents: everyone misses some kinds more than others."),
-    drills.length ? el("p", {}, "Practise your missed punishments: ", drills.flatMap((t) => [
+    drills.length ? el("p", {}, "Practise the punishments you missed outright (puzzles come from moves losing 20+ points): ", drills.flatMap((t) => [
       el("button", { class: "chip", onclick: () => show("practice", t.tag) }, `${tagName(t.tag)} (${t.puzzles})`), " "])) : null,
     p.trend.length > 1 ? [
       el("h3", {}, "Over time"),

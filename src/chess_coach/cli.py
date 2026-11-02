@@ -425,9 +425,17 @@ def punish(
     since: SinceOption = None,
     examples: Annotated[int, typer.Option(help="Missed punishments to show per opening.")] = 2,
 ) -> None:
-    """When they blunder: how often you miss the punishment, against how often your opponents
-    miss it when you blunder. In bullet only moves 1-10 count; replies short on time don't."""
-    from chess_coach.coach.punish import GIFT_WP_LOSS, KINDS, TREND_GIFTS, headline, label, report
+    """When they blunder: what your reply gave back, against what your opponents' replies gave
+    back after your blunders, with partial misses (10-20 points) and clear ones (20+) apart. In
+    bullet only moves 1-10 count; replies short on time don't."""
+    from chess_coach.coach.punish import (
+        GIFT_WP_LOSS,
+        KINDS,
+        OUTCOMES,
+        TREND_GIFTS,
+        headline,
+        report,
+    )
 
     settings: Settings = ctx.obj
     with Store(settings.db_path) as store:
@@ -437,60 +445,80 @@ def punish(
         console.print("No blunders to compare yet. Run `chess-coach analyze` first.")
         return
     console.print(
-        "[bold]When they blunder[/bold] (a move losing 20+ points of win probability): how often "
-        "the reply misses the punishment (an inaccuracy or worse), yours against your opponents'."
+        "[bold]When they blunder[/bold] (a move losing 20+ points of win probability), your reply "
+        "keeps the gift (gives back under 10 points), takes only part of it (10-20: a partial "
+        "miss) or misses it (20 or more: a clear miss). Yours against your opponents' replies to "
+        "your blunders."
     )
-    for c in r.groups:
-        console.print(f"\n[bold]{c.label}[/bold]: {headline(c)}")
-    console.print(_rates_table("By the move that punishes", "punishing move", r.kinds, names=KINDS))
+    for s in r.groups:
+        console.print(f"\n[bold]{s.label}[/bold]: {headline(s)}")
+    rows = [(f"{s.label}: {OUTCOMES[c.label]}", c) for s in r.groups for c in (s.partial, s.clear)]
+    console.print(_rates_table("What your reply gave back", "group", rows, ("you", "they")))
+    title = "Missed (partial or clear), by the move that punishes"
+    console.print(_rates_table(title, "punishing move", [(KINDS[c.label], c) for c in r.kinds]))
     for lesson in r.lessons:
         console.print(f"[green]What to learn:[/green] {lesson}")
     if not r.lessons:
         console.print("No kind of punishing move stands out against your opponents.")
     title = (
-        f"Over time (about {TREND_GIFTS} of their blunders you could punish per row; the oldest "
-        "may hold fewer)"
+        f"Missed over time (about {TREND_GIFTS} of their blunders you could punish per row; the "
+        "oldest may hold fewer)"
     )
-    console.print(_rates_table(title, "games played", r.trend))
+    console.print(_rates_table(title, "games played", [(c.label, c) for c in r.trend]))
     # Openings only where you clearly miss more (inside a group where you do); otherwise your
     # costliest misses are the evidence.
     shown = r.worst
     if r.families:
-        title = f"Openings where you miss more than your opponents ({', '.join(r.focus)})"
-        console.print(_rates_table(title, "opening", [f.compare for f in r.families]))
+        title = (
+            f"Openings where you miss more than your opponents, partial and clear together "
+            f"({', '.join(r.focus)})"
+        )
+        rows = [(f.compare.label, f.compare) for f in r.families]
+        console.print(_rates_table(title, "opening", rows))
         shown = [g for f in r.families for g in f.examples]
     elif r.worst:
         where = f" in {' and '.join(r.focus).lower()}" if r.focus else ""
         console.print(f"\n[bold]Your costliest misses{where}[/bold]")
     for g in shown:
-        text = f"after {label(g.blunder)} you played {label(g.reply)}; "
-        text += f"{label(g.reply, g.reply.best_san)} would have punished it."
-        family = g.game.opening_family
-        parts = [
-            f"{family}: {text}" if family else text[0].upper() + text[1:],
-            *g.reasons(),
-            f"[dim]{g.url}[/dim]" if g.url else "",
-        ]
-        console.print(" ".join(p for p in parts if p))
+        console.print(_gift_line(g, "would have punished it"))
     console.print(
-        "Drill your missed punishments: `chess-coach drill --tag punish_capture` (or "
+        "Drill the punishments you missed outright (puzzles are made from moves losing 20+ "
+        "points, so partial misses have none): `chess-coach drill --tag punish_capture` (or "
         "punish_check, punish_quiet; missed_tactic for all of them)."
     )
 
 
-def _rates_table(title: str, first: str, rows, names: dict[str, str] | None = None) -> Table:
-    """Your miss rate against your opponents' per row, each with its 95% interval; '–' where a
-    side had no chances, so there is no rate and no gap."""
+def _gift_line(g, ending: str) -> str:
+    """'Modern Defense: after 2.Bh6 you played 2...Bg7; 2...Nxh6 <ending>.', then what their
+    blunder allowed in chess terms and the link."""
+    from chess_coach.coach.punish import label
+
+    text = f"after {label(g.blunder)} you played {label(g.reply)}; "
+    text += f"{label(g.reply, g.reply.best_san)} {ending}."
+    family = g.game.opening_family
+    parts = [
+        f"{family}: {text}" if family else text[0].upper() + text[1:],
+        *g.reasons(),
+        f"[dim]{g.url}[/dim]" if g.url else "",
+    ]
+    return " ".join(p for p in parts if p)
+
+
+def _rates_table(
+    title: str, first: str, rows, columns: tuple[str, str] = ("you missed", "they missed")
+) -> Table:
+    """Your rate against your opponents' per (name, Compare) row, each with its 95% interval;
+    '–' where a side had no chances, so there is no rate and no gap."""
     table = Table(title=title)
-    for column in (first, "you missed", "they missed", "gap, points (95%)"):
+    for column in (first, *columns, "gap, points (95%)"):
         table.add_column(column, justify="left" if column == first else "right")
-    for c in rows:
+    for name, c in rows:
         gap = "–"
         if c.gap is not None and c.interval is not None:
             low, high = c.interval
             gap = f"{100 * c.gap:+.1f} ({100 * low:+.1f} to {100 * high:+.1f})"
         table.add_row(
-            (names or {}).get(c.label, c.label),
+            name,
             *(
                 f"{r.rate:.1%} of {r.n} ({r.low:.0%}-{r.high:.0%})" if r.n else "–"
                 for r in (c.yours, c.theirs)

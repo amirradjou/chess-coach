@@ -100,6 +100,27 @@ def chances(games, n: int, missed: int, *, yours=True, best_san="Nxe5"):
     ]
 
 
+def mix(games, *, partial=0, clear=0, kept=0, yours=True):
+    """Chances spread over `games`, one a move from move 2 on in each: `partial` replies giving
+    back 15 points, then `clear` ones giving back 25, then `kept` ones giving back 2."""
+    losses = [15.0] * partial + [25.0] * clear + [2.0] * kept
+    return [
+        chance(games[i % len(games)], 2 + i // len(games), yours=yours, loss=loss)
+        for i, loss in enumerate(losses)
+    ]
+
+
+def blitz_group(yours: tuple[int, int, int], theirs: tuple[int, int, int]):
+    """The blitz and rapid group from (partial, clear, chances) for your replies and for theirs,
+    which are in other games."""
+    mine, others = [game(i) for i in range(40)], [game(i) for i in range(40, 80)]
+    (p1, c1, n1), (p2, c2, n2) = yours, theirs
+    pairs = mix(mine, partial=p1, clear=c1, kept=n1 - p1 - c1) + mix(
+        others, partial=p2, clear=c2, kept=n2 - p2 - c2, yours=False
+    )
+    return report(mine + others, pairs).groups[1]
+
+
 # -- the verdict -----------------------------------------------------------------------------
 
 
@@ -108,14 +129,12 @@ def test_a_gap_counts_only_when_its_interval_leaves_out_zero():
     level = Compare("x", Rate(40, 100), Rate(38, 100))
     better = Compare("x", Rate(30, 100), Rate(60, 100))
     assert [c.verdict for c in (worse, level, better)] == ["worse", "same", "better"]
-    assert "You miss it more often than your opponents do: +30.0 points" in headline(worse)
-    assert "That's about the same as your opponents: +2.0 points" in headline(level)
-    assert "includes zero" in headline(level)
-    assert "You miss it less often" in headline(better)
-    assert headline(Compare("x", Rate(3, 5), Rate(0, 0))).startswith("Not enough")
     # 0 of 0 is no rate: no gap and no interval, rather than a made-up -100 points.
     for empty in (Compare("x", Rate(3, 5), Rate(0, 0)), Compare("x", Rate(0, 0), Rate(3, 3))):
         assert (empty.gap, empty.interval, empty.verdict) == (None, None, "same")
+    g = game(1)
+    only_yours = report([g], [chance(g, 2, missed=True), chance(g, 3)]).groups[1]
+    assert headline(only_yours) == "Not enough blunders on both sides to compare yet."
 
 
 # -- partial and clear misses ----------------------------------------------------------------
@@ -136,6 +155,55 @@ def test_what_the_reply_gave_back_sorts_each_chance():
         "partial",
         "clear",
     ]
+
+
+def test_the_partial_sentence_needs_its_interval_clear_of_zero():
+    # The owner's bullet numbers (moves 1-10): partial misses well above theirs, clear ones level.
+    owner = headline(blitz_group((83, 165, 563), (48, 164, 584)))
+    assert owner == (
+        "When they blunder you often take only part of it: your reply gave back 10-20 points "
+        "after 14.7% of their blunders (your opponents: 8.2%), +6.5 points (95% interval +2.8 to "
+        "+10.3). Clear misses are the same as theirs: 29.3% vs 28.1%."
+    )
+    # His blitz and rapid numbers: partial +0.9 (95% interval -2.1 to +4.1), so no gap is named.
+    level = headline(blitz_group((54, 167, 614), (50, 177, 637)))
+    assert level == (
+        "When they blunder you do as well as your opponents. Partial misses are the same as "
+        "theirs: 8.8% vs 7.8%. Clear misses are the same as theirs: 27.2% vs 27.8%."
+    )
+    # Fewer partial misses than theirs is a gap too, the other way.
+    fewer = headline(blitz_group((8, 40, 200), (30, 40, 200)))
+    assert fewer.startswith(
+        "When they blunder you take only part of it less often than your opponents: your reply "
+        "gave back 10-20 points after 4.0% of their blunders (your opponents: 15.0%), -11.0 "
+        "points (95% interval -16.9 to -5.3)."
+    )
+
+
+def test_the_clear_sentence_needs_its_interval_clear_of_zero():
+    # Clear misses well above theirs, partial ones level: the clear gap comes first.
+    clear = headline(blitz_group((20, 80, 200), (20, 40, 200)))
+    assert clear.startswith(
+        "When they blunder you miss it outright more often than your opponents: your reply gave "
+        "back 20 or more points after 40.0% of their blunders (your opponents: 20.0%), +20.0 "
+        "points (95% interval +11.1 to +28.5)."
+    )
+    assert clear.endswith(" Partial misses are the same as theirs: 10.0% vs 10.0%.")
+    # A clear gap whose interval includes zero is never named (his bullet: +1.2, -4.0 to +6.5).
+    owner = headline(blitz_group((83, 165, 563), (48, 164, 584)))
+    assert "outright" not in owner
+    assert owner.endswith(" Clear misses are the same as theirs: 29.3% vs 28.1%.")
+    # With a partial gap first: more clear misses too, or fewer.
+    both = headline(blitz_group((83, 250, 563), (48, 164, 584)))
+    assert (
+        " You also miss it outright more often: your reply gave back 20 or more points after "
+        in (both)
+    )
+    fewer = headline(blitz_group((83, 40, 563), (48, 164, 584)))
+    assert fewer.startswith("When they blunder you often take only part of it: ")
+    assert " You miss it outright less often than they do: your reply gave back 20 or more " in (
+        fewer
+    )
 
 
 # -- which chances count ----------------------------------------------------------------------
@@ -230,9 +298,14 @@ def _season():
 def test_bullet_and_blitz_are_compared_apart():
     games, pairs = _season()
     r = report(games, pairs)
-    assert [(c.label, c.yours, c.theirs, c.verdict) for c in r.groups] == [
+    # Every miss in the season gives back 15 points: partial ones, and no clear miss anywhere.
+    assert [(s.label, s.partial.yours, s.partial.theirs, s.partial.verdict) for s in r.groups] == [
         ("Bullet, moves 1-10", Rate(48, 80), Rate(24, 80), "worse"),
         ("Blitz and rapid", Rate(32, 80), Rate(32, 80), "same"),
+    ]
+    assert [(s.clear.yours, s.clear.theirs, s.clear.verdict) for s in r.groups] == [
+        (Rate(0, 80), Rate(0, 80), "same"),
+        (Rate(0, 80), Rate(0, 80), "same"),
     ]
     assert r.gifts == 320
 
@@ -242,7 +315,7 @@ def test_slower_games_count_with_blitz_and_rapid_and_the_label_says_so():
     classical, daily = game(2, speed=Speed.CLASSICAL), game(3, speed=Speed.CORRESPONDENCE)
     pairs = [chance(g, 5) for g in (blitz, classical, daily)]
     r = report([blitz, classical, daily], pairs)
-    assert [(c.label, c.yours.n) for c in r.groups] == [
+    assert [(s.label, s.chances) for s in r.groups] == [
         ("Bullet, moves 1-10", 0),
         ("Blitz, rapid, classical and correspondence", 3),
     ]
@@ -293,7 +366,7 @@ def _level():
 def test_no_opening_is_listed_without_a_gap_to_explain():
     games, pairs = _level()
     r = report(games, pairs)
-    assert [c.verdict for c in r.groups] == ["same", "same"]
+    assert [(s.partial.verdict, s.clear.verdict) for s in r.groups] == [("same", "same")] * 2
     assert (r.focus, r.families) == ([], [])
     # Your costliest misses are still the evidence, from all the games.
     assert len(r.worst) == 3 and all(g.yours and g.missed for g in r.worst)
@@ -381,13 +454,31 @@ def test_the_digest_has_a_section_only_with_both_sides_moves():
     moves = [r for _, r in pairs if r.is_user]
     text = render(build(games, moves, gifts=pairs))
     assert "## When they blunder" in text
-    assert "- **Bullet, moves 1-10**: You missed the punishment for 60.0%" in text
-    assert "- **Blitz and rapid**:" in text and "about the same as your opponents" in text
+    assert (
+        "- **Bullet, moves 1-10**: When they blunder you often take only part of it: your reply "
+        "gave back 10-20 points after 60.0% of their blunders (your opponents: 30.0%), +30.0 points"
+    ) in text
+    # Both rows under each group, the clear one level (0 of 80 each: an interval around zero).
+    assert (
+        "  - Partial (gave back 10-20 points): you 60.0% (48 of 80), them 30.0% (24 of 80): "
+        in (text)
+    )
+    assert (
+        "  - Clear (gave back 20 or more): you 0.0% (0 of 80), them 0.0% (0 of 80): +0.0 points "
+        "(95% interval -4.6 to +4.6, which includes zero)."
+    ) in text
+    assert (
+        "- **Blitz and rapid**: When they blunder you do as well as your opponents. Partial misses "
+        "are the same as theirs: 40.0% vs 40.0%. Clear misses are the same as theirs: 0.0% vs 0.0%."
+    ) in text
     # Every punishment here is a capture: checks and quiet moves, 0 of 0 on both sides, stay out.
-    kinds = "Missed, by the move that punishes: a capture, you 50% of 160 and them 35% of 160. "
-    assert kinds + LESSONS["capture"] in text
+    kinds = "by the move that punishes: a capture, you 50% of 160 and them 35% of 160. "
+    assert f"Missed (partial or clear), {kinds}{LESSONS['capture']}" in text
     assert "a check, you" not in text and "a quiet move, you" not in text
-    assert "In bullet, moves 1-10, you miss more than your opponents most in the" in text
+    assert (
+        "In bullet, moves 1-10, counting partial and clear misses together, you miss more than "
+        "your opponents most in the"
+    ) in text
     assert "Your costliest misses in bullet, moves 1-10:" in text
     assert "(https://lichess.org/g" in text
     assert "When they blunder is the exception: it also counts your opponents' replies" in text
@@ -411,11 +502,16 @@ def test_punish_command(tmp_path):
     _store(db)
     result = CliRunner().invoke(app, ["--db", str(db), "punish"], env={"COLUMNS": "200"})
     assert result.exit_code == 0, result.output
-    assert "Bullet, moves 1-10: You missed the punishment for" in result.output
-    assert "You miss it more often than your opponents do" in result.output
-    assert "By the move that punishes" in result.output
+    assert (
+        "Bullet, moves 1-10: When they blunder you often take only part of it: your reply gave "
+        "back 10-20 points after 60.0% of their blunders"
+    ) in result.output
+    for group in ("Bullet, moves 1-10", "Blitz and rapid"):  # both rows, for each group
+        assert f"{group}: partial (10-20 points)" in result.output
+        assert f"{group}: clear (20+ points)" in result.output
+    assert "Missed (partial or clear), by the move that punishes" in result.output
     assert "0.0% of 0" not in result.output and "100.0 to" not in result.output  # no 0 of 0 rate
-    assert "Openings where you miss more than your opponents (Bullet, moves 1-10)" in result.output
+    assert "Openings where you miss more than your opponents, partial and clear" in result.output
     # The engine's move was not played: it would have punished the blunder. No reasons here (the
     # facts have no positions), and no gap left where they would go.
     assert "2.Nxe5 would have punished it. https://lichess.org/g" in result.output
@@ -440,8 +536,9 @@ def test_the_digest_command_has_the_section(tmp_path):
     text = out.read_text()
     assert "## When they blunder" in text
     assert (
-        "- **Bullet, moves 1-10**: You missed the punishment for 60.0% of your opponents' "
-        "blunders (48 of 80); they missed it for 30.0% of yours (24 of 80)."
+        "- **Bullet, moves 1-10**: When they blunder you often take only part of it: your reply "
+        "gave back 10-20 points after 60.0% of their blunders (your opponents: 30.0%), +30.0 "
+        "points (95% interval +14.6 to +43.4). Clear misses are the same as theirs: 0.0% vs 0.0%."
     ) in text
 
 
@@ -454,9 +551,16 @@ def test_the_web_page_needs_no_engine(tmp_path):
 
     p = TestClient(create_app(db, missing)).get("/api/punish").json()
     bullet_group = p["groups"][0]
-    assert (bullet_group["label"], bullet_group["verdict"]) == ("Bullet, moves 1-10", "worse")
-    assert bullet_group["yours"] == {"missed": 48, "n": 80, "rate": 60.0, "low": 49.0, "high": 70.0}
-    assert bullet_group["headline"].startswith("You missed the punishment for 60.0%")
+    assert bullet_group["label"] == "Bullet, moves 1-10"
+    assert bullet_group["headline"].startswith("When they blunder you often take only part of it")
+    partial, clear = bullet_group["partial"], bullet_group["clear"]  # the two rows on the card
+    assert (partial["name"], partial["verdict"]) == ("partial (10-20 points)", "worse")
+    assert partial["yours"] == {"missed": 48, "n": 80, "rate": 60.0, "low": 49.0, "high": 70.0}
+    assert (clear["name"], clear["verdict"], clear["yours"]["missed"]) == (
+        "clear (20+ points)",
+        "same",
+        0,
+    )
     assert [k["name"] for k in p["kinds"]] == ["a capture", "a check", "a quiet move"]
     check = p["kinds"][1]  # no checking punishments on either side: no gap to show
     assert (check["yours"]["n"], check["gap"], check["interval"]) == (0, None, None)

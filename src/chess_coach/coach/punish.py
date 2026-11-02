@@ -1,16 +1,18 @@
-"""When they blunder: how often you miss the punishment for your opponents' blunders, next to
-how often they miss it for yours.
+"""When they blunder: what your replies to your opponents' blunders gave back, next to what
+theirs gave back after yours.
 
 A gift is a move that loses at least 20 points of win probability; the reply is the other
-player's next move, and it misses the punishment when the engine tagged it `missed_tactic` (an
-inaccuracy or worse right after a gift: engine/motifs.py), so nothing is re-derived here. Your
+player's next move. What the reply gave back sorts it (`Gift.outcome`): under 10 points it kept
+the gift, 10 to under 20 it took only part of it (a partial miss), 20 or more it missed it (a
+clear miss). Partial and clear misses are compared apart because they are different habits: on
+the owner's bullet games the whole gap is in partial misses, and clear ones are level. Your
 opponents' replies to your own gifts are the yardstick: players at your level with the same kind
 of chance (Lichess Insights calls the two rates Opportunism and Luck). A gap only counts when its
 95% interval (Newcombe) leaves out zero.
 
-What the reply gave back also sorts it (`Gift.outcome`): under 10 points it kept the gift, 10 to
-under 20 it took only part of it (a partial miss), 20 or more it missed it (a clear miss).
-Missing the punishment is partial and clear together: missed_tactic is a reply losing 10+.
+`Gift.missed` is partial and clear together: the engine's `missed_tactic` on the reply (an
+inaccuracy or worse right after a gift: engine/motifs.py), the same as a reply losing 10+ points.
+The kinds of punishing move, the trend and the openings use it, so nothing is re-derived there.
 
 The owner's rules apply to the replying move, on both sides alike: in bullet only moves 1-10
 count (features.counted) and replies made short on time don't (features.rushed). Bullet is
@@ -20,7 +22,7 @@ unknown-speed games count with blitz and rapid, and then the group's label names
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 
 from chess_coach.coach.principles import allows
@@ -33,6 +35,7 @@ GIFT_WP_LOSS = 20.0  # the same bar as missed_tactic (engine/motifs.py)
 # What the reply gave back: under 10 points it kept the gift, from 20 it missed it outright.
 PARTIAL_WP_LOSS = INACCURACY_WP_LOSS  # 10, where missed_tactic starts
 CLEAR_WP_LOSS = MISTAKE_WP_LOSS  # 20
+OUTCOMES = {"partial": "partial (10-20 points)", "clear": "clear (20+ points)"}
 TREND_GIFTS = 150  # their blunders you could punish, per stretch of the trend: about ±8 points
 GROUPS = {"bullet": f"Bullet, moves 1-{BULLET_MOVES}", "slower": "Blitz and rapid"}
 # Other speeds that count with blitz and rapid, named in the label when there are any.
@@ -189,31 +192,94 @@ class Compare:
         return self.yours.missed - self.yours.n * self.theirs.rate
 
 
-def compare(name: str, found: Iterable[Gift]) -> Compare:
+def compare(
+    name: str, found: Iterable[Gift], hit: Callable[[Gift], bool] = lambda g: g.missed
+) -> Compare:
+    """How often `hit` holds for your replies and for theirs; by default missed (partial or
+    clear)."""
     yours, theirs = [0, 0], [0, 0]
     for g in found:
         side = yours if g.yours else theirs
-        side[0] += g.missed
+        side[0] += hit(g)
         side[1] += 1
     return Compare(name, Rate(*yours), Rate(*theirs))
 
 
-def headline(c: Compare) -> str:
-    """Your rate, theirs, and whether the gap between them is real."""
-    if c.gap is None or c.interval is None:
-        return "Not enough blunders on both sides to compare yet."
-    text = (
-        f"You missed the punishment for {c.yours.rate:.1%} of your opponents' blunders "
-        f"({c.yours.missed} of {c.yours.n}); they missed it for {c.theirs.rate:.1%} of yours "
-        f"({c.theirs.missed} of {c.theirs.n})."
+@dataclass(frozen=True, slots=True)
+class Split:
+    """One group's chances by what the reply gave back: how often it took only part of the gift
+    (partial) and how often it missed it (clear), yours against your opponents'. The labels of
+    `partial` and `clear` are OUTCOMES keys."""
+
+    label: str
+    partial: Compare
+    clear: Compare
+
+    @property
+    def chances(self) -> int:
+        """Gifts in the group, both sides'."""
+        return self.partial.yours.n + self.partial.theirs.n
+
+
+def split(name: str, found: Iterable[Gift]) -> Split:
+    found = list(found)
+    return Split(
+        name,
+        compare("partial", found, lambda g: g.outcome == "partial"),
+        compare("clear", found, lambda g: g.outcome == "clear"),
     )
+
+
+_ORDER = {"worse": 0, "better": 1, "same": 2}
+
+
+def headline(s: Split) -> str:
+    """The group in plain words, a gap first (worse before better, partial before clear). A gap
+    is only named when its 95% interval leaves out zero; otherwise the rates are the same."""
+    p, c = s.partial, s.clear
+    if p.gap is None or c.gap is None:
+        return "Not enough blunders on both sides to compare yet."
+    if p.verdict == c.verdict == "same":
+        return f"When they blunder you do as well as your opponents. {_partial(p)} {_clear(c)}"
+    if _ORDER[c.verdict] < _ORDER[p.verdict]:
+        return f"{_clear(c, lead=True)} {_partial(p)}"
+    return f"{_partial(p, lead=True)} {_clear(c, also=p.verdict == c.verdict)}"
+
+
+def _partial(p: Compare, lead: bool = False) -> str:
+    if p.verdict == "same":
+        return f"Partial misses are the same as theirs: {p.yours.rate:.1%} vs {p.theirs.rate:.1%}."
+    facts = _facts(p, "10-20")
+    if p.verdict == "worse":  # always the lead: partial goes first on a tie
+        return f"When they blunder you often take only part of it: {facts}."
+    if lead:
+        return (
+            f"When they blunder you take only part of it less often than your opponents: {facts}."
+        )
+    return f"You take only part of it less often than they do: {facts}."
+
+
+def _clear(c: Compare, lead: bool = False, also: bool = False) -> str:
+    if c.verdict == "same":
+        return f"Clear misses are the same as theirs: {c.yours.rate:.1%} vs {c.theirs.rate:.1%}."
+    facts = _facts(c, "20 or more")
+    more = "more" if c.verdict == "worse" else "less"
+    if lead:
+        return f"When they blunder you miss it outright {more} often than your opponents: {facts}."
+    if also:
+        return f"You also miss it outright {more} often: {facts}."
+    return f"You miss it outright {more} often than they do: {facts}."
+
+
+def _facts(c: Compare, band: str) -> str:
+    """Both rates and the gap with its interval. Only for a gap that clears zero: a verdict
+    other than same always has a gap and an interval."""
     low, high = c.interval
-    gap = f"{100 * c.gap:+.1f} points (95% interval {100 * low:+.1f} to {100 * high:+.1f})"
-    if c.verdict == "worse":
-        return f"{text} You miss it more often than your opponents do: {gap}."
-    if c.verdict == "better":
-        return f"{text} You miss it less often than your opponents do: {gap}."
-    return f"{text} That's about the same as your opponents: {gap}, which includes zero."
+    return (
+        f"your reply gave back {band} points after {c.yours.rate:.1%} of their blunders (your "
+        f"opponents: {c.theirs.rate:.1%}), {100 * c.gap:+.1f} points (95% interval "
+        f"{100 * low:+.1f} to {100 * high:+.1f})"
+    )
 
 
 def _when(g: Gift) -> str:
@@ -265,7 +331,8 @@ class Family:
 
 @dataclass(slots=True)
 class Report:
-    groups: list[Compare]  # bullet (moves 1-10), then blitz and rapid (and slower: group_names)
+    groups: list[Split]  # bullet (moves 1-10), then blitz and rapid (and slower: group_names)
+    # The rest count a miss as partial or clear together (Gift.missed).
     kinds: list[Compare]  # by the punishing move: capture, check, quiet (labels are KINDS keys)
     trend: list[Compare]
     # Where the gap comes from, inside the groups where you miss more than your opponents
@@ -277,7 +344,7 @@ class Report:
 
     @property
     def gifts(self) -> int:
-        return sum(c.yours.n + c.theirs.n for c in self.groups)
+        return sum(s.chances for s in self.groups)
 
     @property
     def lessons(self) -> list[str]:
@@ -294,30 +361,32 @@ def report(
     worst: int = 3,
 ) -> Report:
     """Everything above over `games`. Openings are only looked at inside a group where you miss
-    more than your opponents, and one is listed only when its own gap clears zero as well: a
-    raw excess would list 1-of-1 samples. They are ranked by `Compare.excess`, so the first are
-    where most of the gap comes from, not just where you play most."""
+    (partial and clear together) more than your opponents, and one is listed only when its own
+    gap clears zero as well: a raw excess would list 1-of-1 samples. They are ranked by
+    `Compare.excess`, so the first are where most of the gap comes from, not just where you play
+    most."""
     found = gifts(games, pairs)
     names = group_names(found)
-    groups = {
-        key: compare(name, (g for g in found if g.group == key)) for key, name in names.items()
-    }
-    worse = [key for key, c in groups.items() if c.verdict == "worse"]
+    by_group = {key: [g for g in found if g.group == key] for key in names}
+    splits = {key: split(names[key], gs) for key, gs in by_group.items()}
+    worse = [key for key, gs in by_group.items() if compare(names[key], gs).verdict == "worse"]
     focused = [g for g in found if g.group in worse]
     by_family: dict[str, list[Gift]] = {}
     for g in focused:
         if family := g.game.opening_family:
             by_family.setdefault(family, []).append(g)
-    clear = [c for c in (compare(f, gs) for f, gs in by_family.items()) if c.verdict == "worse"]
+    standing_out = [
+        c for c in (compare(f, gs) for f, gs in by_family.items()) if c.verdict == "worse"
+    ]
     misses = [g for g in (focused if worse else found) if g.yours and g.missed]
     return Report(
-        groups=list(groups.values()),
+        groups=list(splits.values()),
         kinds=[compare(kind, (g for g in found if g.kind == kind)) for kind in KINDS],
         trend=trend(found),
         focus=[names[key] for key in worse],
         families=[
             Family(c, costliest((g for g in misses if g.game.opening_family == c.label), examples))
-            for c in sorted(clear, key=lambda c: -c.excess)[:families]
+            for c in sorted(standing_out, key=lambda c: -c.excess)[:families]
         ],
         worst=costliest(misses, worst),
     )
