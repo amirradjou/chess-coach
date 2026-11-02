@@ -206,6 +206,30 @@ def test_the_clear_sentence_needs_its_interval_clear_of_zero():
     )
 
 
+def test_partial_misses_get_a_lesson_and_examples_only_where_the_gap_is():
+    bullets = [bullet(i) for i in range(40)]
+    blitzes = [game(i) for i in range(40, 80)]
+    pairs = (
+        mix(bullets[:20], partial=30, clear=20, kept=50)
+        + mix(bullets[20:], partial=5, clear=20, kept=75, yours=False)
+        + mix(blitzes[:20], partial=10, clear=20, kept=70)
+        + mix(blitzes[20:], partial=10, clear=20, kept=70, yours=False)
+    )
+    r = report(bullets + blitzes, pairs)
+    assert [(s.partial.verdict, s.clear.verdict) for s in r.groups] == [
+        ("worse", "same"),
+        ("same", "same"),
+    ]
+    assert r.partial_focus == ["Bullet, moves 1-10"]
+    assert r.partial_lesson == LESSONS["partial"]
+    assert r.partial_lesson not in r.lessons  # kinds have their own lessons
+    assert len(r.partials) == 3
+    assert all(g.yours and g.outcome == "partial" and g.group == "bullet" for g in r.partials)
+    # Level everywhere: no lesson and no examples for it.
+    level = report(blitzes, pairs[200:])
+    assert (level.partial_focus, level.partial_lesson, level.partials) == ([], None, [])
+
+
 # -- which chances count ----------------------------------------------------------------------
 
 
@@ -471,6 +495,8 @@ def test_the_digest_has_a_section_only_with_both_sides_moves():
         "- **Blitz and rapid**: When they blunder you do as well as your opponents. Partial misses "
         "are the same as theirs: 40.0% vs 40.0%. Clear misses are the same as theirs: 0.0% vs 0.0%."
     ) in text
+    assert f"What to learn: {LESSONS['partial']}" in text
+    assert "Where you took only part of it in bullet, moves 1-10:" in text
     # Every punishment here is a capture: checks and quiet moves, 0 of 0 on both sides, stay out.
     kinds = "by the move that punishes: a capture, you 50% of 160 and them 35% of 160. "
     assert f"Missed (partial or clear), {kinds}{LESSONS['capture']}" in text
@@ -509,6 +535,9 @@ def test_punish_command(tmp_path):
     for group in ("Bullet, moves 1-10", "Blitz and rapid"):  # both rows, for each group
         assert f"{group}: partial (10-20 points)" in result.output
         assert f"{group}: clear (20+ points)" in result.output
+    assert f"What to learn: {LESSONS['partial']}" in result.output
+    assert "Where you took only part of it (Bullet, moves 1-10)" in result.output
+    assert "2.Nxe5 would have taken all of it. https://lichess.org/g" in result.output
     assert "Missed (partial or clear), by the move that punishes" in result.output
     assert "0.0% of 0" not in result.output and "100.0 to" not in result.output  # no 0 of 0 rate
     assert "Openings where you miss more than your opponents, partial and clear" in result.output
@@ -561,6 +590,9 @@ def test_the_web_page_needs_no_engine(tmp_path):
         "same",
         0,
     )
+    assert p["partial_focus"] == ["Bullet, moves 1-10"]
+    assert p["partial_lesson"] == LESSONS["partial"]
+    assert len(p["partials"]) == 3 and all(m["best"].endswith(".Nxe5") for m in p["partials"])
     assert [k["name"] for k in p["kinds"]] == ["a capture", "a check", "a quiet move"]
     check = p["kinds"][1]  # no checking punishments on either side: no gap to show
     assert (check["yours"]["n"], check["gap"], check["interval"]) == (0, None, None)

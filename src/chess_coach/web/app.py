@@ -373,6 +373,10 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             return {
                 "gifts": r.gifts,
                 "groups": [_split(s) for s in r.groups],
+                # Where you take only part of their blunders more often than your opponents.
+                "partial_focus": r.partial_focus,
+                "partial_lesson": r.partial_lesson,
+                "partials": [_miss(g) for g in r.partials],
                 # From here on a miss is partial or clear together.
                 "kinds": [{**_compare(c), "name": KINDS[c.label]} for c in r.kinds],
                 "lessons": r.lessons,

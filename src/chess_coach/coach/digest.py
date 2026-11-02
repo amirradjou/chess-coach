@@ -269,6 +269,12 @@ def _punish_lines(r: Report) -> list[str]:
                 f"  - Partial (gave back 10-20 points): {_row(s.partial)}.",
                 f"  - Clear (gave back 20 or more): {_row(s.clear)}.",
             ]
+    if r.partial_lesson:  # only where your partial gap clears zero
+        out += ["", f"What to learn: {r.partial_lesson}"]
+        if r.partials:
+            where = " and ".join(r.partial_focus).lower()
+            lines = [f"- {_miss(g)}" for g in r.partials]
+            out += ["", f"Where you took only part of it in {where}:", "", *lines]
     # A kind of punishment one side never had to find can't be compared, so it is left out.
     kinds = "; ".join(
         f"{KINDS[c.label]}, you {c.yours.rate:.0%} of {c.yours.n} and them {c.theirs.rate:.0%} "
@@ -398,6 +404,6 @@ def render(d: Digest, top: int = 5) -> str:
             "your opponents (for partial or clear misses in a group of games, for a kind of "
             "punishing move, or in an opening) when the 95% interval of the gap leaves out zero. "
             "Openings are only looked at in a group where you miss more, partial and clear "
-            "together.",
+            "together, and partial misses are only shown where your partial gap clears zero.",
         ]
     return "\n".join(out).rstrip() + "\n"

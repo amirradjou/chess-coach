@@ -157,6 +157,13 @@ function punishSection(p, tagList) {
     // Partial and clear misses apart: different habits, each with its own gap.
     p.groups.map((g) => el("div", { class: "card" }, el("h3", {}, g.label), el("div", {}, g.headline),
       rateTable("your reply gave back", [g.partial, g.clear], ["you", "they"]))),
+    p.partial_lesson ? [
+      el("div", { class: "lesson" }, el("b", {}, "What to learn: "), p.partial_lesson),
+      p.partials.length ? [
+        el("h3", {}, `Where you took only part of it (${p.partial_focus.join(", ").toLowerCase()})`),
+        el("div", { class: "examples" }, p.partials.map(missExample)),
+      ] : null,
+    ] : null,
     el("h3", {}, "Missed, by the move that punishes"),
     el("p", { class: "muted small" }, "Here, in the trend and in the openings below, a miss is partial or clear together: your reply gave back 10 points or more."),
     rateTable("punishing move", p.kinds),

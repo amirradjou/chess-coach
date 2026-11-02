@@ -454,6 +454,13 @@ def punish(
         console.print(f"\n[bold]{s.label}[/bold]: {headline(s)}")
     rows = [(f"{s.label}: {OUTCOMES[c.label]}", c) for s in r.groups for c in (s.partial, s.clear)]
     console.print(_rates_table("What your reply gave back", "group", rows, ("you", "they")))
+    if r.partial_lesson:
+        console.print(f"[green]What to learn:[/green] {r.partial_lesson}")
+        console.print(
+            f"\n[bold]Where you took only part of it ({', '.join(r.partial_focus)})[/bold]"
+        )
+        for g in r.partials:
+            console.print(_gift_line(g, "would have taken all of it"))
     title = "Missed (partial or clear), by the move that punishes"
     console.print(_rates_table(title, "punishing move", [(KINDS[c.label], c) for c in r.kinds]))
     for lesson in r.lessons:

@@ -45,9 +45,14 @@ OTHER_SPEEDS = {
     Speed.UNKNOWN: "games of unknown speed",
 }
 KINDS = {"capture": "a capture", "check": "a check", "quiet": "a quiet move"}
-# Only shown when you miss that kind of punishment clearly more often than your opponents do:
-# everyone misses quiet punishments more than captures, so that alone is no lesson.
+# Only shown when you do it clearly more often than your opponents: take only part of their
+# blunders (partial), or miss a kind of punishment (everyone misses quiet punishments more than
+# captures, so that alone is no lesson).
 LESSONS = {
+    "partial": (
+        "After their slip, compare checks, captures and threats before your usual move, and take "
+        "the one that wins most."
+    ),
     "capture": (
         "When they blunder, look first at what their move left undefended: count attackers and "
         "defenders, and take what is free."
@@ -332,6 +337,10 @@ class Family:
 @dataclass(slots=True)
 class Report:
     groups: list[Split]  # bullet (moves 1-10), then blitz and rapid (and slower: group_names)
+    # The groups where you take only part of their blunders more often than your opponents
+    # (`partial_focus`, their labels), and your partial misses there that gave back the most.
+    partial_focus: list[str]
+    partials: list[Gift]
     # The rest count a miss as partial or clear together (Gift.missed).
     kinds: list[Compare]  # by the punishing move: capture, check, quiet (labels are KINDS keys)
     trend: list[Compare]
@@ -351,6 +360,11 @@ class Report:
         """Only for a kind of punishment you miss clearly more often than your opponents do."""
         return [LESSONS[c.label] for c in self.kinds if c.verdict == "worse"]
 
+    @property
+    def partial_lesson(self) -> str | None:
+        """Take the whole gift: only where you take part of it more often than your opponents."""
+        return LESSONS["partial"] if self.partial_focus else None
+
 
 def report(
     games: Sequence[Game],
@@ -359,17 +373,19 @@ def report(
     families: int = 4,
     examples: int = 2,
     worst: int = 3,
+    partials: int = 3,
 ) -> Report:
     """Everything above over `games`. Openings are only looked at inside a group where you miss
     (partial and clear together) more than your opponents, and one is listed only when its own
     gap clears zero as well: a raw excess would list 1-of-1 samples. They are ranked by
     `Compare.excess`, so the first are where most of the gap comes from, not just where you play
-    most."""
+    most. Partial misses are shown only from a group whose partial gap clears zero."""
     found = gifts(games, pairs)
     names = group_names(found)
     by_group = {key: [g for g in found if g.group == key] for key in names}
     splits = {key: split(names[key], gs) for key, gs in by_group.items()}
     worse = [key for key, gs in by_group.items() if compare(names[key], gs).verdict == "worse"]
+    taken_part = [key for key, s in splits.items() if s.partial.verdict == "worse"]
     focused = [g for g in found if g.group in worse]
     by_family: dict[str, list[Gift]] = {}
     for g in focused:
@@ -379,8 +395,13 @@ def report(
         c for c in (compare(f, gs) for f, gs in by_family.items()) if c.verdict == "worse"
     ]
     misses = [g for g in (focused if worse else found) if g.yours and g.missed]
+    partial_misses = [
+        g for g in found if g.group in taken_part and g.yours and g.outcome == "partial"
+    ]
     return Report(
         groups=list(splits.values()),
+        partial_focus=[names[key] for key in taken_part],
+        partials=costliest(partial_misses, partials),
         kinds=[compare(kind, (g for g in found if g.kind == kind)) for kind in KINDS],
         trend=trend(found),
         focus=[names[key] for key in worse],
