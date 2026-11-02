@@ -240,10 +240,15 @@ Decisions:
   White move heavy whatever the user's colour (all games as Black: 26.5% at -1 or worse instead of
   32.6%).
 - Since book starts at an even ply for the same reason. Read right after the book position, its
-  two points could be an unequal number of moves apart: in the Blackmar-Diemer it was +17 cp in
-  the 61 games whose book position followed his move and -119 in the 17 where it followed
-  theirs, and the -24 shown mixed the two. The even ply is the one at or before the book
-  position, so when the book ends on a White move, that move and Black's reply are counted.
+  two points could be an unequal number of moves apart: in the Blackmar-Diemer it was +17.5 cp
+  (median) in the 62 games whose book position followed his move and -119 in the 17 where it
+  followed theirs, and the -24 shown, over all 79, mixed the two. The even ply is the one at or
+  before the book position, so when the book ends on a White move, that move is counted too: as
+  White his own last book move (402 of 1,019 games; median -24 cp, mean -32), as Black theirs
+  (240 of 1,020; median +11.5 for him). `openings` and the page say so. Rounding up instead would
+  leave out the first move after book whenever a White move ends it, a Black user's own
+  included; it changes no conclusion below (Blackmar-Diemer +67 instead of +63, Modern +28
+  either way).
 - A position is its EPD, not its full FEN, wherever a repeat or a drill is matched: the FEN's
   halfmove clock and move number differ when another move order got there (the Scotch and the
   Danish Gambit Accepted meet at 7.O-O with clocks 3 and 5), and that is one mistake and one
@@ -270,6 +275,14 @@ only: all games as White went from -19 cp and 29.0% at -1 or worse (1,024 games)
 and 32.6% (29.8-35.6%, 1,020 games). Since book moved for both colours: all games as White from
 -26.5 to +7 cp, as Black from +5.5 to +9. The ranking rule is untouched, and so is the order of
 the White and Black tables.
+
+Fixed after the second review (2026-11-01): Learn openings' move rows showed "+0.1 after both
+sides' 10th moves" right after a score; they now name the engine eval in full, as each node's
+title does. The since-book notes (`openings`, the Your openings tab, the README) said it runs
+from where the game left the table, after Black's move; they now say it starts just before the
+last named position when a White move reached it, and that this move counts. The README gave the
+ply-19 reason as if it held with Black too. The Blackmar-Diemer split in the decisions above
+mixed two samples: its 61 games and +17 came from the 78 that reach ply 20, the -24 from all 79.
 
 On the owner's games (a copy, 2,099 Lichess games at depth 12):
 - `puzzles dedupe`: 14 positions were stored more than once; removed 19 copies, 544 -> 525
@@ -299,8 +312,10 @@ On the owner's games (a copy, 2,099 Lichess games at depth 12):
   gain after book isn't shown either. Since book now counts the same number of moves by each side
   wherever the book ended, but it still differs between the 61 games whose last named position
   came after his move (median +104) and the 17 where it came after theirs (-13): in the first
-  the opponent's move leaves the table, in the second his does. That is a difference between the
-  games, no longer one of counting. With Black (the levels are unchanged: his 10th move is ply
+  the opponent's move leaves the table, in the second his does. The 61 also count his last book
+  move (3.f3 in 58 of them, median -25 cp) and the 17 count none; read from the named position
+  itself, the 61 come to +137. So that one move narrows the gap rather than making it: the gap is
+  a difference between the games. With Black (the levels are unchanged: his 10th move is ply
   20) the Modern (417 games, -0.4, 33% at -1 or worse, 3.3%) and the Pirc (177, -0.3) are *up*
   since book, +0.3 (95% interval +9 to +43 cp; 240 games up, 177 down) and +0.2 (+8 to +39 cp;
   108 up, 68 down): the engine dislikes Black's book positions there, and the user doesn't lose
