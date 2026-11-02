@@ -409,10 +409,10 @@ const games = (n) => `${n} game${n === 1 ? "" : "s"}`;
 const scored = (x, sep = " · ", words = "you scored") => (x.score === null ? ""
   : `${sep}${words} ${x.score}%${x.scored < x.games ? ` in the ${games(x.scored)} outside bullet` : ""}`);
 const a = (word) => `${/^[aeiou]/.test(word) ? "an" : "a"} ${word}`;
-// The engine's eval after both sides' 10th moves in the games through here (the median; not results).
-const afterTen = (x, long = false) => (!x.after_ten ? ""
-  : long ? ` · engine eval after both sides' 10th moves: ${x.after_ten.median} (median of ${games(x.after_ten.games)}; not results)`
-    : ` · ${x.after_ten.median} after both sides' 10th moves`);
+// The engine's eval after both sides' 10th moves in the games through here (the median; not
+// results), named in full on moves too: after "you scored 0%" a bare "+0.1" reads like a result.
+const afterTen = (x) => (!x.after_ten ? ""
+  : ` · engine eval after both sides' 10th moves: ${x.after_ten.median} (median of ${games(x.after_ten.games)}; not results)`);
 const optionLabel = (x) => `${x.family} (${games(x.games)}${scored(x, ", ", "you score")}${x.due ? `, ${x.due} due` : ""})`;
 
 async function openCoach() {
@@ -538,7 +538,7 @@ async function coachDraw() {
   fill($("#coach-title"),
     el("b", {}, n.name || coach.family), el("br"),
     el("span", { class: "muted small" }, n.games
-      ? `${who} · reached in ${n.games} of your games${scored(n, " · ", "from here you scored")}${afterTen(n, true)}`
+      ? `${who} · reached in ${n.games} of your games${scored(n, " · ", "from here you scored")}${afterTen(n)}`
       : `${who} · none of your games reached this position`),
     coach.mode === "explore" && n.best ? el("div", {}, n.turn === "you" ? "Engine's move: " : "Their best: ", el("b", { class: "better" }, n.best.san), ` (${n.best.score} for you)`) : null);
   fill($("#coach-moves"), coach.mode === "explore" ? coachMoves(n) : null);

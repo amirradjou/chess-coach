@@ -1,6 +1,7 @@
 """How an opening comes out by the engine after both sides' 10th moves: no results, so bullet
 counts."""
 
+from importlib import resources
 from pathlib import Path
 
 import chess
@@ -80,6 +81,12 @@ def line(
 
 def yours(facts):
     return [m for m in facts if m.is_user]
+
+
+def page_script() -> str:
+    """The page's script as `serve` sends it. The page has no JS tests, so its wording is read
+    here."""
+    return resources.files("chess_coach.web").joinpath("static/app.js").read_text(encoding="utf-8")
 
 
 def black_game(i):
@@ -252,6 +259,21 @@ def test_the_openings_page_and_the_tree_show_move_ten_without_stockfish(tmp_path
     root = client.get("/api/coach/node", params={**q, "path": ""}).json()
     assert root["after_ten"] == {"games": 5, "median": "-1.0"}
     assert root["moves"][0]["after_ten"] == {"games": 5, "median": "-1.0"}  # 1.e4, every game
+
+
+def test_every_label_on_the_page_calls_the_number_an_engine_eval_not_results():
+    """Learn openings' move rows read "1.e4 · 81 games · you scored 0% in the 1 game outside
+    bullet · +0.1 after both sides' 10th moves": right after a score, a bare +0.1 reads like a
+    result. Every label the page gives the number says what it is, as each node's title does."""
+    labels = [
+        line
+        for line in page_script().splitlines()
+        if "10th moves" in line and not line.lstrip().startswith("//")
+    ]
+    assert len(labels) >= 3  # the tree's nodes and moves, the opening cards, the table's note
+    for label in labels:
+        assert "ngine eval after both sides' 10th moves" in label, label
+        assert "not results" in label, label
 
 
 def test_the_openings_command_shows_the_table(tmp_path: Path, monkeypatch):
