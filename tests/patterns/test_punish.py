@@ -163,14 +163,14 @@ def test_the_partial_sentence_needs_its_interval_clear_of_zero():
     assert owner == (
         "When they blunder you often take only part of it: your reply gave back 10-20 points "
         "after 14.7% of their blunders (your opponents: 8.2%), +6.5 points (95% interval +2.8 to "
-        "+10.3). Clear misses are the same as theirs: 29.3% vs 28.1%."
+        "+10.3). Clear misses: no clear difference, 29.3% vs 28.1% (+1.2 points, 95% interval "
+        "-4.0 to +6.5)."
     )
     # His blitz and rapid numbers: partial +0.9 (95% interval -2.1 to +4.1), so no gap is named.
     level = headline(blitz_group((54, 167, 614), (50, 177, 637)))
-    assert level == (
+    assert level.startswith(
         "When they blunder there is no clear difference between you and your opponents. Partial "
-        "misses are the same as theirs: 8.8% vs 7.8%. Clear misses are the same as theirs: 27.2% "
-        "vs 27.8%."
+        "misses: no clear difference, 8.8% vs 7.8% (+0.9 points, 95% interval -2.1 to +4.1)."
     )
     # Fewer partial misses than theirs is a gap too, the other way.
     fewer = headline(blitz_group((8, 40, 200), (30, 40, 200)))
@@ -189,11 +189,17 @@ def test_the_clear_sentence_needs_its_interval_clear_of_zero():
         "back 20 or more points after 40.0% of their blunders (your opponents: 20.0%), +20.0 "
         "points (95% interval +11.1 to +28.5)."
     )
-    assert clear.endswith(" Partial misses are the same as theirs: 10.0% vs 10.0%.")
+    assert clear.endswith(
+        " Partial misses: no clear difference, 10.0% vs 10.0% (+0.0 points, 95% interval -6.0 to "
+        "+6.0)."
+    )
     # A clear gap whose interval includes zero is never named (his bullet: +1.2, -4.0 to +6.5).
     owner = headline(blitz_group((83, 165, 563), (48, 164, 584)))
     assert "outright" not in owner
-    assert owner.endswith(" Clear misses are the same as theirs: 29.3% vs 28.1%.")
+    assert owner.endswith(
+        " Clear misses: no clear difference, 29.3% vs 28.1% (+1.2 points, 95% interval -4.0 to "
+        "+6.5)."
+    )
     # With a partial gap first: more clear misses too, or fewer.
     both = headline(blitz_group((83, 250, 563), (48, 164, 584)))
     assert (
@@ -205,6 +211,34 @@ def test_the_clear_sentence_needs_its_interval_clear_of_zero():
     assert " You miss it outright less often than they do: your reply gave back 20 or more " in (
         fewer
     )
+
+
+def test_a_level_row_is_no_clear_difference_or_too_few_to_tell_never_the_same():
+    """An interval that includes zero shows no gap, not equal rates: the row keeps its numbers
+    and interval, and says too few to tell while the interval still allows 10 points either
+    way."""
+    # His weekly digest (bullet, 2026-10-26 to 10-30): 3 of 13 against 1 of 19 partial misses.
+    week = headline(blitz_group((3, 5, 13), (1, 7, 19)))
+    assert week == (
+        "When they blunder there are too few chances yet to tell you apart from your opponents. "
+        "Partial misses: too few to tell, 23.1% vs 5.3% (+17.8 points, 95% interval -6.6 to "
+        "+45.3). Clear misses: too few to tell, 38.5% vs 36.8% (+1.6 points, 95% interval -28.7 "
+        "to +33.1)."
+    )
+    # All his bullet games: 563 and 584 chances, a narrow interval around a small gap.
+    owner = headline(blitz_group((83, 165, 563), (48, 164, 584)))
+    assert owner.endswith(
+        " Clear misses: no clear difference, 29.3% vs 28.1% (+1.2 points, 95% interval -4.0 to "
+        "+6.5)."
+    )
+    level = headline(blitz_group((54, 167, 614), (50, 177, 637)))
+    assert level == (
+        "When they blunder there is no clear difference between you and your opponents. Partial "
+        "misses: no clear difference, 8.8% vs 7.8% (+0.9 points, 95% interval -2.1 to +4.1). "
+        "Clear misses: no clear difference, 27.2% vs 27.8% (-0.6 points, 95% interval -5.5 to "
+        "+4.4)."
+    )
+    assert all("the same as" not in text for text in (week, owner, level))
 
 
 def test_both_parts_level_but_together_worse_names_the_gap_together():
@@ -528,10 +562,12 @@ def test_the_digest_has_a_section_only_with_both_sides_moves():
         "  - Partial and clear together (gave back 10 or more): you 60.0% (48 of 80), them 30.0% "
         "(24 of 80): +30.0 points (95% interval +14.6 to +43.4)."
     ) in text
+    # 32 of 80 each: an interval that still allows 15 points either way.
     assert (
-        "- **Blitz and rapid**: When they blunder there is no clear difference between you and "
-        "your opponents. Partial misses are the same as theirs: 40.0% vs 40.0%. Clear misses are "
-        "the same as theirs: 0.0% vs 0.0%."
+        "- **Blitz and rapid**: When they blunder there are too few chances yet to tell you apart "
+        "from your opponents. Partial misses: too few to tell, 40.0% vs 40.0% (+0.0 points, 95% "
+        "interval -14.9 to +14.9). Clear misses: no clear difference, 0.0% vs 0.0% (+0.0 points, "
+        "95% interval -4.6 to +4.6)."
     ) in text
     assert f"What to learn: {LESSONS['partial']}" in text
     assert "Where you took only part of it in bullet, moves 1-10:" in text
@@ -608,7 +644,8 @@ def test_the_digest_command_has_the_section(tmp_path):
     assert (
         "- **Bullet, moves 1-10**: When they blunder you often take only part of it: your reply "
         "gave back 10-20 points after 60.0% of their blunders (your opponents: 30.0%), +30.0 "
-        "points (95% interval +14.6 to +43.4). Clear misses are the same as theirs: 0.0% vs 0.0%."
+        "points (95% interval +14.6 to +43.4). Clear misses: no clear difference, 0.0% vs 0.0% "
+        "(+0.0 points, 95% interval -4.6 to +4.6)."
     ) in text
 
 

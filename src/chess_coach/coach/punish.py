@@ -41,6 +41,9 @@ OUTCOMES = {
     "missed": "partial and clear (10+ points)",
 }
 TREND_GIFTS = 150  # their blunders you could punish, per stretch of the trend: about ±8 points
+# A level row (its gap's interval includes zero) whose interval still reaches a gap this big
+# either way is "too few to tell"; a narrower one is "no clear difference". Neither is "the same".
+UNSURE_GAP = 0.10
 GROUPS = {"bullet": f"Bullet, moves 1-{BULLET_MOVES}", "slower": "Blitz and rapid"}
 # Other speeds that count with blitz and rapid, named in the label when there are any.
 OTHER_SPEEDS = {
@@ -254,7 +257,12 @@ def headline(s: Split) -> str:
     if p.gap is None or c.gap is None:
         return "Not enough blunders on both sides to compare yet."
     if p.verdict == c.verdict == "same":
-        if m.verdict == "same":
+        if m.verdict == "same" and _unsure(m):
+            lead = (
+                "When they blunder there are too few chances yet to tell you apart from your "
+                "opponents."
+            )
+        elif m.verdict == "same":
             lead = "When they blunder there is no clear difference between you and your opponents."
         else:
             more = "more" if m.verdict == "worse" else "less"
@@ -268,9 +276,26 @@ def headline(s: Split) -> str:
     return f"{_partial(p, lead=True)} {_clear(c, also=p.verdict == c.verdict)}"
 
 
+def _unsure(c: Compare) -> bool:
+    """A gap's interval that still reaches UNSURE_GAP either way: too few chances to tell."""
+    low, high = c.interval
+    return max(-low, high) >= UNSURE_GAP
+
+
+def _level(c: Compare, name: str) -> str:
+    """A row whose gap's interval includes zero. That shows no gap, not equal rates, so the row
+    keeps its numbers and says no clear difference, or too few to tell (`_unsure`)."""
+    low, high = c.interval
+    words = "too few to tell" if _unsure(c) else "no clear difference"
+    return (
+        f"{name}: {words}, {c.yours.rate:.1%} vs {c.theirs.rate:.1%} ({100 * c.gap:+.1f} points, "
+        f"95% interval {100 * low:+.1f} to {100 * high:+.1f})."
+    )
+
+
 def _partial(p: Compare, lead: bool = False) -> str:
     if p.verdict == "same":
-        return f"Partial misses are the same as theirs: {p.yours.rate:.1%} vs {p.theirs.rate:.1%}."
+        return _level(p, "Partial misses")
     facts = _facts(p, "10-20")
     if p.verdict == "worse":  # always the lead: partial goes first on a tie
         return f"When they blunder you often take only part of it: {facts}."
@@ -283,7 +308,7 @@ def _partial(p: Compare, lead: bool = False) -> str:
 
 def _clear(c: Compare, lead: bool = False, also: bool = False) -> str:
     if c.verdict == "same":
-        return f"Clear misses are the same as theirs: {c.yours.rate:.1%} vs {c.theirs.rate:.1%}."
+        return _level(c, "Clear misses")
     facts = _facts(c, "20 or more")
     more = "more" if c.verdict == "worse" else "less"
     if lead:
