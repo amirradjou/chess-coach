@@ -168,8 +168,9 @@ def test_the_partial_sentence_needs_its_interval_clear_of_zero():
     # His blitz and rapid numbers: partial +0.9 (95% interval -2.1 to +4.1), so no gap is named.
     level = headline(blitz_group((54, 167, 614), (50, 177, 637)))
     assert level == (
-        "When they blunder you do as well as your opponents. Partial misses are the same as "
-        "theirs: 8.8% vs 7.8%. Clear misses are the same as theirs: 27.2% vs 27.8%."
+        "When they blunder there is no clear difference between you and your opponents. Partial "
+        "misses are the same as theirs: 8.8% vs 7.8%. Clear misses are the same as theirs: 27.2% "
+        "vs 27.8%."
     )
     # Fewer partial misses than theirs is a gap too, the other way.
     fewer = headline(blitz_group((8, 40, 200), (30, 40, 200)))
@@ -204,6 +205,37 @@ def test_the_clear_sentence_needs_its_interval_clear_of_zero():
     assert " You miss it outright less often than they do: your reply gave back 20 or more " in (
         fewer
     )
+
+
+def test_both_parts_level_but_together_worse_names_the_gap_together():
+    """Neither part clears zero on its own, but together they do. The headline names that gap,
+    as the openings below (which use it) do, and never says you do as well."""
+    mine, others = [game(i) for i in range(40)], [game(i) for i in range(40, 80)]
+    pairs = mix(mine, partial=55, clear=180, kept=365) + mix(
+        others, partial=40, clear=160, kept=400, yours=False
+    )
+    r = report(mine + others, pairs)
+    s = r.groups[1]
+    assert (s.partial.verdict, s.clear.verdict, s.missed.verdict) == ("same", "same", "worse")
+    text = headline(s)
+    assert text.startswith(
+        "When they blunder you miss it more often than your opponents, partial and clear misses "
+        "together: your reply gave back 10 or more points after 39.2% of their blunders (your "
+        "opponents: 33.3%), +5.8 points (95% interval +0.4 to +11.2). Apart, neither is clear."
+    )
+    assert "as well as" not in text
+    assert r.focus == ["Blitz and rapid"]  # where the openings are looked at: the same gap
+    # Fewer misses together, each part level: the same, the other way.
+    fewer = report(
+        mine + others,
+        mix(mine, partial=40, clear=160, kept=400)
+        + mix(others, partial=55, clear=180, kept=365, yours=False),
+    )
+    assert headline(fewer.groups[1]).startswith(
+        "When they blunder you miss it less often than your opponents, partial and clear misses "
+        "together: "
+    )
+    assert fewer.focus == []
 
 
 def test_partial_misses_get_a_lesson_and_examples_only_where_the_gap_is():
@@ -492,8 +524,9 @@ def test_the_digest_has_a_section_only_with_both_sides_moves():
         "(95% interval -4.6 to +4.6, which includes zero)."
     ) in text
     assert (
-        "- **Blitz and rapid**: When they blunder you do as well as your opponents. Partial misses "
-        "are the same as theirs: 40.0% vs 40.0%. Clear misses are the same as theirs: 0.0% vs 0.0%."
+        "- **Blitz and rapid**: When they blunder there is no clear difference between you and "
+        "your opponents. Partial misses are the same as theirs: 40.0% vs 40.0%. Clear misses are "
+        "the same as theirs: 0.0% vs 0.0%."
     ) in text
     assert f"What to learn: {LESSONS['partial']}" in text
     assert "Where you took only part of it in bullet, moves 1-10:" in text

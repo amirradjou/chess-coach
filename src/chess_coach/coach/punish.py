@@ -35,7 +35,11 @@ GIFT_WP_LOSS = 20.0  # the same bar as missed_tactic (engine/motifs.py)
 # What the reply gave back: under 10 points it kept the gift, from 20 it missed it outright.
 PARTIAL_WP_LOSS = INACCURACY_WP_LOSS  # 10, where missed_tactic starts
 CLEAR_WP_LOSS = MISTAKE_WP_LOSS  # 20
-OUTCOMES = {"partial": "partial (10-20 points)", "clear": "clear (20+ points)"}
+OUTCOMES = {
+    "partial": "partial (10-20 points)",
+    "clear": "clear (20+ points)",
+    "missed": "partial and clear (10+ points)",
+}
 TREND_GIFTS = 150  # their blunders you could punish, per stretch of the trend: about ±8 points
 GROUPS = {"bullet": f"Bullet, moves 1-{BULLET_MOVES}", "slower": "Blitz and rapid"}
 # Other speeds that count with blitz and rapid, named in the label when there are any.
@@ -213,12 +217,14 @@ def compare(
 @dataclass(frozen=True, slots=True)
 class Split:
     """One group's chances by what the reply gave back: how often it took only part of the gift
-    (partial) and how often it missed it (clear), yours against your opponents'. The labels of
-    `partial` and `clear` are OUTCOMES keys."""
+    (partial), how often it missed it (clear), and the two together (missed: what the openings,
+    kinds and trend count), yours against your opponents'. The labels of `partial`, `clear` and
+    `missed` are OUTCOMES keys."""
 
     label: str
     partial: Compare
     clear: Compare
+    missed: Compare
 
     @property
     def chances(self) -> int:
@@ -232,6 +238,7 @@ def split(name: str, found: Iterable[Gift]) -> Split:
         name,
         compare("partial", found, lambda g: g.outcome == "partial"),
         compare("clear", found, lambda g: g.outcome == "clear"),
+        compare("missed", found),
     )
 
 
@@ -240,12 +247,22 @@ _ORDER = {"worse": 0, "better": 1, "same": 2}
 
 def headline(s: Split) -> str:
     """The group in plain words, a gap first (worse before better, partial before clear). A gap
-    is only named when its 95% interval leaves out zero; otherwise the rates are the same."""
-    p, c = s.partial, s.clear
+    is only named when its 95% interval leaves out zero. When neither part has one, the two
+    together can (`Split.missed`, the gap the openings below are looked at by), so the headline
+    never says you do as well while the rest of the section says you miss more."""
+    p, c, m = s.partial, s.clear, s.missed
     if p.gap is None or c.gap is None:
         return "Not enough blunders on both sides to compare yet."
     if p.verdict == c.verdict == "same":
-        return f"When they blunder you do as well as your opponents. {_partial(p)} {_clear(c)}"
+        if m.verdict == "same":
+            lead = "When they blunder there is no clear difference between you and your opponents."
+        else:
+            more = "more" if m.verdict == "worse" else "less"
+            lead = (
+                f"When they blunder you miss it {more} often than your opponents, partial and "
+                f"clear misses together: {_facts(m, '10 or more')}. Apart, neither is clear."
+            )
+        return f"{lead} {_partial(p)} {_clear(c)}"
     if _ORDER[c.verdict] < _ORDER[p.verdict]:
         return f"{_clear(c, lead=True)} {_partial(p)}"
     return f"{_partial(p, lead=True)} {_clear(c, also=p.verdict == c.verdict)}"
@@ -384,7 +401,8 @@ def report(
     names = group_names(found)
     by_group = {key: [g for g in found if g.group == key] for key in names}
     splits = {key: split(names[key], gs) for key, gs in by_group.items()}
-    worse = [key for key, gs in by_group.items() if compare(names[key], gs).verdict == "worse"]
+    # The same compare as the headline's 'partial and clear together', so the two always agree.
+    worse = [key for key, s in splits.items() if s.missed.verdict == "worse"]
     taken_part = [key for key, s in splits.items() if s.partial.verdict == "worse"]
     focused = [g for g in found if g.group in worse]
     by_family: dict[str, list[Gift]] = {}
