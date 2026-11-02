@@ -555,6 +555,41 @@ def test_an_opening_is_listed_only_when_its_own_gap_clears_zero():
     assert all(f.compare.verdict == "worse" for f in r.families)
 
 
+def test_an_opening_needs_ten_chances_a_side_and_a_gap_clear_of_chance():
+    """A 95% interval per opening lets about one opening in 40 clear zero by chance, and a 1 of 1
+    against 0 of 3 did. So an opening is only looked at with 10+ chances on each side, and listed
+    when its gap clears zero at 95% across all the openings looked at at once."""
+    games, pairs = _openings(((22, 24, 84), (0, 24, 84)), ((14, 32, 76), (6, 18, 74)))
+    english = [bullet(300 + i) for i in range(4)]
+    for g in english:
+        g.opening = "English Opening"
+    pairs += [chance(english[0], 2, loss=25.0)] + [chance(g, 2, yours=False) for g in english[1:]]
+    r = report(games + english, pairs)
+    assert [f.compare.label for f in r.families] == ["Danish Gambit Accepted", "Queen's Pawn Game"]
+    # 9 of 9 against 0 of 9 is never looked at; 10 of 10 against 0 of 10 is.
+    for n, listed in ((9, []), (10, ["Sicilian Defense"])):
+        mine, theirs = [bullet(500 + i) for i in range(3)], [bullet(510 + i) for i in range(3)]
+        for g in mine + theirs:
+            g.opening = "Sicilian Defense"
+        few = mix(mine, partial=n) + mix(theirs, kept=n, yours=False)
+        assert [f.compare.label for f in report(mine + theirs, few).families] == listed
+    # Ten openings with 12 of 20 against 5 of 20 in each: one alone clears zero at 95% (+4.6 at
+    # the low end), but not when ten are looked at at once.
+    games, pairs = [], []
+    for k in range(10):
+        for side, (p, n) in ((True, (12, 20)), (False, (5, 20))):
+            here = [bullet(600 + 10 * k + 5 * (not side) + i) for i in range(4)]
+            for g in here:
+                g.opening = f"Opening {k}"
+            games += here
+            pairs += mix(here, partial=p, kept=n - p, yours=side)
+    r = report(games, pairs)
+    assert (r.focus, r.families) == (["Bullet, moves 1-10"], [])
+    first = {g.id for g in games if g.opening == "Opening 0"}
+    alone = report([g for g in games if g.id in first], [x for x in pairs if x[1].game_id in first])
+    assert [f.compare.label for f in alone.families] == ["Opening 0"]
+
+
 def _level():
     """Blitz only, level overall: you miss 8 of 20 and so do they. In the Sicilian you missed 6 of
     10 against their 4 of 10, more than they did but nowhere near a real gap."""

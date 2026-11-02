@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
+from statistics import NormalDist
 
 from chess_coach.coach.principles import allows
 from chess_coach.engine.evaluation import INACCURACY_WP_LOSS, MISTAKE_WP_LOSS
@@ -42,6 +43,9 @@ OUTCOMES = {
     "missed": "partial and clear (10+ points)",
 }
 TREND_GIFTS = 150  # their blunders you could punish, per stretch of the trend: about ±8 points
+# An opening is only looked at with this many chances on each side (fewer can't show a gap), and
+# listed when its gap clears zero at 95% across all the openings looked at (`_clear_of_chance`).
+OPENING_CHANCES = 10
 # A level row (its gap's interval includes zero) whose interval still reaches a gap this big
 # either way is "too few to tell"; a narrower one is "no clear difference". Neither is "the same".
 UNSURE_GAP = 0.10
@@ -403,9 +407,10 @@ def part_note(c: Compare) -> str:
 @dataclass(slots=True)
 class Family:
     """An opening where you clearly miss more than your opponents do, partial and clear together
-    (its own 95% interval leaves out zero), with the part behind most of that gap (`part`,
-    labelled partial or clear) and your misses of that part there. Examples stand for the gap, so
-    a clear miss never stands for a gap that is all partial misses."""
+    (its gap clears zero across all the openings looked at: `_clear_of_chance`; `compare` keeps
+    the usual 95% interval), with the part behind most of that gap (`part`, labelled partial or
+    clear) and your misses of that part there. Examples stand for the gap, so a clear miss never
+    stands for a gap that is all partial misses."""
 
     compare: Compare
     part: Compare
@@ -457,11 +462,13 @@ def report(
     partials: int = 3,
 ) -> Report:
     """Everything above over `games`. Openings are only looked at inside a group where you miss
-    (partial and clear together) more than your opponents, and one is listed only when its own
-    gap clears zero as well: a raw excess would list 1-of-1 samples. They are ranked by
-    `Compare.excess`, so the first are where most of the gap comes from, not just where you play
-    most. Partial misses are shown only from a group whose partial gap clears zero. Examples
-    stand for a gap, so they come from the part behind most of it (`main_part`)."""
+    (partial and clear together) more than your opponents, with OPENING_CHANCES on each side, and
+    one is listed only when its own gap clears zero as well, allowing for how many were looked at
+    (`_clear_of_chance`): a raw excess, or a 95% interval each, lists 1-of-1 samples and chance
+    gaps. They are ranked by `Compare.excess`, so the first are where most of the gap comes from,
+    not just where you play most. Partial misses are shown only from a group whose partial gap
+    clears zero. Examples stand for a gap, so they come from the part behind most of it
+    (`main_part`)."""
     found = gifts(games, pairs)
     names = group_names(found)
     by_group = {key: [g for g in found if g.group == key] for key in names}
@@ -474,9 +481,12 @@ def report(
     for g in focused:
         if family := g.game.opening_family:
             by_family.setdefault(family, []).append(g)
-    standing_out = [
-        c for c in (compare(f, gs) for f, gs in by_family.items()) if c.verdict == "worse"
+    looked_at = [
+        c
+        for c in (compare(f, gs) for f, gs in by_family.items())
+        if min(c.yours.n, c.theirs.n) >= OPENING_CHANCES
     ]
+    standing_out = [c for c in looked_at if _clear_of_chance(c, len(looked_at))]
     listed = []
     for c in sorted(standing_out, key=lambda c: -c.excess)[:families]:
         part = main_part(by_family[c.label])
@@ -506,6 +516,14 @@ def report(
         worst=examples_of_gap,
         worst_part=worst_part,
     )
+
+
+def _clear_of_chance(c: Compare, tests: int) -> bool:
+    """You miss more here even allowing for how many openings were looked at: the gap's interval
+    leaves out zero at 95% across all `tests` of them at once (Bonferroni). One 95% interval per
+    opening would let about one in 40 clear zero by chance."""
+    z = NormalDist().inv_cdf(1 - 0.05 / (2 * tests))
+    return newcombe(c.yours.missed, c.yours.n, c.theirs.missed, c.theirs.n, z)[0] > 0
 
 
 def worst_title(r: Report) -> str:
