@@ -497,6 +497,8 @@ def test_the_digest_has_a_section_only_with_both_sides_moves():
     ) in text
     assert f"What to learn: {LESSONS['partial']}" in text
     assert "Where you took only part of it in bullet, moves 1-10:" in text
+    # The newest game first; one decimal, so a partial miss never reads as 20.
+    assert "- [2.Qh5 after 1...Qh5 (best 2.Nxe5, -15.0%)](https://lichess.org/g9#3)\n" in text
     # Every punishment here is a capture: checks and quiet moves, 0 of 0 on both sides, stay out.
     kinds = "by the move that punishes: a capture, you 50% of 160 and them 35% of 160. "
     assert f"Missed (partial or clear), {kinds}{LESSONS['capture']}" in text
