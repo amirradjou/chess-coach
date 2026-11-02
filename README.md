@@ -168,12 +168,14 @@ across 8+ games.
   opponent blunders (loses 20+ points of win probability), how often your reply misses the
   punishment (the `missed_tactic` tag), next to how often your opponents miss it after your
   blunders: players at your level with the same kind of chance. Bullet (moves 1-10, on both
-  sides) and blitz + rapid are compared apart, each with a 95% interval for the gap; you're only
-  called worse or better when that interval leaves out zero. Then the same by the kind of
-  punishing move (capture, check, quiet; a lesson only when you miss a kind more than your
-  opponents do), the trend in stretches of 150 chances, the openings where the gap comes from and
-  your costliest misses on boards, with what the blunder allowed in chess terms. Puzzles from a
-  missed punishment are tagged `punish_capture`, `punish_check` or `punish_quiet` to drill apart.
+  sides) and blitz + rapid (with any slower games, named in the label) are compared apart, each
+  with a 95% interval for the gap; you're only called worse or better when that interval leaves
+  out zero. Then the same by the kind of punishing move (capture, check, quiet; a lesson only
+  when you miss a kind more than your opponents do), the trend in stretches of about 150
+  chances, and on boards, with what the blunder allowed in chess terms: the openings where you
+  clearly miss more than your opponents (only inside a group where you do, each with its own
+  interval clear of zero), or else your costliest misses. Puzzles from a missed punishment are
+  tagged `punish_capture`, `punish_check` or `punish_quiet` to drill apart.
 - `puzzles make` re-checks your costliest moves (20+ points of win probability lost) at depth 18
   with three lines, and keeps a position only when one move is the only mate or beats the next
   best by 150 centipawns, so there is one answer to find. `puzzles list` shows them with their

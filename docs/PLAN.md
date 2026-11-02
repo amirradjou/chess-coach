@@ -190,23 +190,31 @@ move 10).
   same kind of chance. `features.counted` and `features.rushed` are applied to the replying move
   on both sides (in bullet, opponents' replies after move 10 are out too).
 - Groups: bullet (moves 1-10) and everything slower together ("Blitz and rapid"; rapid alone is
-  too small). Each rate has a Wilson interval (`mining.wilson_upper` joins `wilson_lower`), the
-  gap a Newcombe hybrid-score interval (`mining.newcombe`); the sentence says worse or better only
-  when that interval leaves out zero, otherwise "about the same as your opponents".
+  too small; classical, correspondence or unknown-speed games count there too, and then the label
+  names them: `punish.group_names`). Each rate has a Wilson interval (`mining.wilson_upper` joins
+  `wilson_lower`), the gap a Newcombe hybrid-score interval (`mining.newcombe`); the sentence says
+  worse or better only when that interval leaves out zero, otherwise "about the same as your
+  opponents". A side with no chances has no rate, gap or interval ('–', `null` in the API),
+  never 0 of 0 read as 0%.
 - Kind of punishment from the reply's `best_san` (`features.punish_kind`: capture, check, quiet;
   castling is quiet). A kind's lesson (`punish.LESSONS`) fires only when you miss that kind more
   than your opponents do with the interval clear of zero; your quiet rate against your own
   capture rate is never compared (everyone misses quiet punishments more).
-- Trend: stretches of games holding 150 of your chances each, counted back from the newest game
-  and closed at a game boundary; both rates in a stretch come from the same games. No month column
-  (2026 months have 4-50 chances each).
-- Evidence: openings ranked by excess misses (yours minus your n times their rate), taken from the
-  groups where you're worse (or all of them when none is), with your costliest misses there:
-  board with their blunder as the last move, your reply in red, the punishment in green,
-  `Game.move_url` at the reply's ply and `principles.allows`. `allows` now also names a capture of
-  a piece that was hanging or attacked by a cheaper piece ("It lets Nxh6 take their bishop on h6,
-  which was hanging ..."), with a new attack it makes; before, it said nothing for captures, the
-  commonest punishment.
+- Trend: stretches of games holding about 150 of your chances each, counted back from the newest
+  game; a stretch closes at the end of the game that brings it to 150 or more, and the oldest
+  holds what is left. Both rates in a stretch come from the same games. No month column (2026
+  months have 4-50 chances each).
+- Evidence: openings only inside the groups where you're worse, and only those whose own gap
+  clears zero too, ranked by excess misses (yours minus your n times their rate), with your
+  costliest misses there. When no opening qualifies (or no group is worse), your costliest misses
+  are the evidence instead: from the worse groups, or from all. Boards show their blunder as the
+  last move, your reply in red and the punishment in green, with `Game.move_url` at the reply's
+  ply and `principles.allows(..., captures=True)`. That also names a capture of a piece that
+  was hanging or attacked by a cheaper piece ("It lets Nxh6 take their bishop on h6, which was
+  hanging ..."), with a new attack it makes, even after a blunder that gave check
+  (`principles.en_prise` is `hanging()` without its in-check guard). Only When they blunder passes
+  `captures`: the opening tree joins `allows` with `explain`, which already says the piece was
+  left hanging, so the tree's reasons are the same as on main.
 - Puzzle sub-tags: a puzzle with `missed_tactic` gets `punish_capture|punish_check|punish_quiet`
   from its solution SAN (`features.punish_tag`); new ones in `make.verify`, existing ones by a
   tiny Store migration on open (`Store._tag_punishments`, idempotent: it only touches puzzles
@@ -226,11 +234,22 @@ move 10).
     (510) vs 45.0% (478); no interval clears zero, so no kind lesson.
   - Trend (8 stretches, 2018-10 to 2026-10): your rate 34.7-45.3%, theirs 30.6-40.6%; no
     stretch's gap clears zero.
-  - Where the bullet gap comes from: Danish Gambit Accepted 23/42 vs 12/42, Queen's Pawn Game
-    23/38 vs 12/37, Blackmar-Diemer Gambit 30/48 vs 26/62, Sicilian Defense 22/44 vs 10/32. The
-    costliest misses are fianchetto reflexes: 2.Bh6 2...Bg7?? (2...Nxh6 wins the bishop).
+  - Where the bullet gap comes from: Danish Gambit Accepted 23/42 vs 12/42 (+26.2, 95% interval
+    +5.1 to +44.3), Queen's Pawn Game 23/38 vs 12/37 (+28.1, +5.5 to +47.0), Blackmar-Diemer
+    Gambit 30/48 vs 26/62 (+20.6, +1.8 to +37.4). The Sicilian Defense (22/44 vs 10/32, +18.8,
+    -3.6 to +38.2) is not listed: its interval includes zero. The costliest misses are fianchetto
+    reflexes: 2.Bh6 2...Bg7?? (2...Nxh6 wins the bishop).
+  - `--since 7d`: bullet 8 of 13 against 8 of 19 (+19.4, -14.4 to +47.5), about the same, so no
+    openings: just the three costliest misses.
   - Puzzles: the migration tagged all 228 `missed_tactic` puzzles: 112 punish_capture, 95
     punish_quiet, 21 punish_check.
+- After two reviews (2026-11-01), fixed: openings had been listed on a raw excess (1-of-1
+  samples, and from all games when no group was worse) under "where you miss more than your
+  opponents"; `allows`' new capture clause had repeated explain's hanging-piece reason on the
+  opening tree (82 of 940 punishable opponent mistakes there); a side with 0 chances read as 0%
+  (a "-100 points" gap); the capture of a checking piece got no reason (3 of the 469 counted
+  misses); the CLI said the engine's move "punished it" and every trend row held 150; any
+  non-bullet speed was labelled "Blitz and rapid"; and no test covered `digest`'s wiring.
 
 ## Remaining (in order)
 
