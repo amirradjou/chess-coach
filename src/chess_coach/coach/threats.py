@@ -21,7 +21,7 @@ from chess_coach.engine.stockfish import Engine, LineEval
 from chess_coach.engine.threats import DEPTH, IGNORED, LABELS, UNSAFE, look
 from chess_coach.models import Game, MoveFact, ThreatFact
 from chess_coach.patterns.features import ERRORS, counted, rushed
-from chess_coach.patterns.mining import Evidence, difference, wilson
+from chess_coach.patterns.mining import Evidence, newcombe, wilson
 
 STEPS: dict[str, tuple[str, str, str]] = {
     # label: (title, what happened, what to practise)
@@ -163,7 +163,7 @@ class Step:
     @property
     def diff(self) -> tuple[float, float]:
         """95% interval for your share minus theirs."""
-        return difference(self.you.hits, self.you.n, self.them.hits, self.them.n)
+        return newcombe(self.you.hits, self.you.n, self.them.hits, self.them.n)
 
     @property
     def verdict(self) -> str:

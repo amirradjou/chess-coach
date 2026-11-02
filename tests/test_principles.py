@@ -69,12 +69,37 @@ def test_what_their_mistake_allows():
     for san in "e4 e5 d4 exd4 c3 dxc3 Nxc3 Nf6".split():
         danish.push_san(san)
     assert allows(danish.fen(), "e4e5") == ["It lets e5 hit their knight on f6."]
+    # when the mistake is yours, the knight is yours
+    assert allows(danish.fen(), "e4e5", yours=True) == ["It lets e5 hit your knight on f6."]
     fork = "r1bqkb1r/pppp1ppp/2n5/4p3/2B1n3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4"  # 3...Nxe4?
     assert allows(fork, "c4f7") == ["It lets Bxf7+ come with check."]
     mate = "rnbqkbnr/ppppp2p/5p2/6p1/4P3/8/PPPP1PPP/RNBQKBNR w KQkq g6 0 3"  # 2...g5??
     assert allows(mate, "d1h5") == ["It allows Qh5#, checkmate."]
     assert allows(chess.STARTING_FEN, "e2e4") == []  # nothing to name
     assert allows(chess.STARTING_FEN, "e2e5") == []  # not a legal move
+
+
+def test_what_their_mistake_allows_to_take():
+    bh6 = chess.Board()
+    for san in "d4 g6 Bh6".split():  # 2.Bh6?? leaves the bishop to the knight and the bishop
+        bh6.push_san(san)
+    assert allows(bh6.fen(), "g8h6", captures=True) == [
+        "It lets Nxh6 take their bishop on h6, which was hanging (attacked and not defended)."
+    ]
+    nd5 = "r1bqk2r/pppp1ppp/2n1pn2/3N4/1bB1P3/5N2/PPPP1PPP/R1BQK2R b KQkq - 5 5"  # 5.Nd5?
+    assert allows(nd5, "e6d5", captures=True) == [
+        "It lets exd5 take their knight on d5, which was attacked by a cheaper piece, and hit "
+        "their bishop on c4."
+    ]
+    bxf7 = chess.Board()
+    for san in "e4 e5 Nf3 Nc6 Bc4 Nd4 Bxf7+".split():  # in check, and nothing defends f7
+        bxf7.push_san(san)
+    assert allows(bxf7.fen(), "e8f7", captures=True) == [
+        "It lets Kxf7 take their bishop on f7, which was hanging (attacked and not defended)."
+    ]
+    # Without `captures` (the opening tree, where explain() names the hanging piece) as before.
+    assert allows(bh6.fen(), "g8h6") == []
+    assert allows(nd5, "e6d5") == ["It lets exd5 hit their bishop on c4."]
 
 
 def test_pawn_structure_and_the_centre():
