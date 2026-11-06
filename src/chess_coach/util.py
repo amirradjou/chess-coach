@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 _RELATIVE = re.compile(r"^(\d+)([dwmy])$")
+DAY_STARTS_AT_HOUR = 4  # local: practising past midnight still counts for the evening before
+
+
+def practice_day(at: datetime | None = None) -> date:
+    """The day practice counts for: the local date, changing at 4 am rather than at midnight."""
+    local = (at or datetime.now(UTC)).astimezone()
+    return (local - timedelta(hours=DAY_STARTS_AT_HOUR)).date()
 
 
 def parse_since(text: str | None, *, now: datetime | None = None) -> datetime | None:

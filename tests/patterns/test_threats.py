@@ -331,6 +331,7 @@ def test_practice_asks_what_they_threaten_first(tmp_path):
         store.save_threats([ThreatFact("lichess:g1", 28, IGNORED, "a5b6", "axb6", 426, None, 12)])
     p = client.get("/api/drill/next").json()
     assert p["ask_threat"] == {"last": "14.a5", "last_uci": "a4a5"}
+    assert client.get("/api/today/next").json()["ask_threat"] == p["ask_threat"]  # Today asks too
     right = client.post("/api/drill/threat", json={"id": p["id"], "uci": "a5b6"}).json()
     assert right == {
         "right": True,

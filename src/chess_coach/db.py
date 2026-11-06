@@ -21,6 +21,7 @@ from chess_coach.models import (
     Speed,
     ThreatFact,
 )
+from chess_coach.util import practice_day
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS games (
@@ -183,6 +184,7 @@ class Store:
         if "accept" not in columns:  # databases from before opening-fix drills
             self.conn.execute("ALTER TABLE puzzles ADD COLUMN accept TEXT NOT NULL DEFAULT '[]'")
         self._fix_lichess_ids()
+        self._fix_opening_fix_ids()
         self._tag_punishments()
 
     def _fix_lichess_ids(self) -> None:
@@ -229,6 +231,33 @@ class Store:
                         (new, len(old) + 1, len(old) + 1, f"{old}:"),
                     )
                 self.conn.execute("UPDATE puzzles SET game_id = ? WHERE game_id = ?", (new, old))
+
+    def _fix_opening_fix_ids(self) -> None:
+        """Opening fixes were stored under the id of a game move ("<game>:<ply>"), which a puzzle
+        from that same move would overwrite. Give them their own ("fix:<game>:<ply>")."""
+        old = [
+            r[0]
+            for r in self.conn.execute(
+                "SELECT id FROM puzzles WHERE id NOT LIKE 'fix:%' "
+                "AND EXISTS (SELECT 1 FROM json_each(tags) WHERE value = 'opening-fix')"
+            )
+        ]
+        if not old:
+            return
+        self.conn.commit()
+        with self.conn:
+            # Reviews and attempts point at the puzzle id; check them at commit
+            self.conn.execute("BEGIN")
+            self.conn.execute("PRAGMA defer_foreign_keys = ON")
+            for table, column in (
+                ("puzzles", "id"),
+                ("reviews", "puzzle_id"),
+                ("attempts", "puzzle_id"),
+            ):
+                self.conn.executemany(
+                    f"UPDATE {table} SET {column} = ? WHERE {column} = ?",
+                    [(f"fix:{id_}", id_) for id_ in old],
+                )
 
     def _tag_punishments(self) -> None:
         """Puzzles made before the punish sub-tags: a missed punishment (missed_tactic) also gets
@@ -485,14 +514,16 @@ class Store:
             )
 
     def add_puzzle(self, p: Puzzle) -> None:
-        """Store a puzzle and schedule it for today."""
+        """Store a puzzle and schedule it for today. One already stored stays as it is: replacing
+        the row would delete its practice history with it (ON DELETE CASCADE)."""
         with self.conn:
             self.conn.execute(
                 """
-                INSERT OR REPLACE INTO puzzles (
+                INSERT INTO puzzles (
                     id, game_id, ply, fen, solution, solution_san, played_san, line, gap_cp,
                     depth, tags, created_at, accept
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (id) DO NOTHING
                 """,
                 (
                     p.id,
@@ -513,7 +544,7 @@ class Store:
             self.conn.execute(
                 "INSERT OR IGNORE INTO reviews (puzzle_id, due, interval, ease, reps, lapses) "
                 "VALUES (?, ?, 0, 2.5, 0, 0)",
-                (p.id, datetime.now(UTC).date().isoformat()),
+                (p.id, practice_day().isoformat()),
             )
 
     def set_puzzle_tags(self, puzzle_id: str, tags: list[str]) -> None:
@@ -532,14 +563,25 @@ class Store:
         return [p for p in out if tag is None or tag in p.tags]
 
     def due(self, today: str, tag: str | None = None, limit: int | None = None) -> list[Puzzle]:
-        """Puzzles due on or before `today`, most overdue first."""
+        """Puzzles you've tried that are due again on or before `today`, most overdue first. A new
+        puzzle isn't due: see `untried`."""
         rows = self.conn.execute(
             "SELECT p.* FROM puzzles p JOIN reviews r ON r.puzzle_id = p.id "
-            "WHERE r.due <= ? ORDER BY r.due, p.id",
+            "WHERE r.due <= ? AND EXISTS (SELECT 1 FROM attempts a WHERE a.puzzle_id = p.id) "
+            "ORDER BY r.due, p.id",
             (today,),
         )
         out = [p for p in (_row_to_puzzle(r) for r in rows) if tag is None or tag in p.tags]
         return out[:limit] if limit is not None else out
+
+    def untried(self, tag: str | None = None) -> list[Puzzle]:
+        """Puzzles you have never answered, oldest first."""
+        rows = self.conn.execute(
+            "SELECT p.* FROM puzzles p "
+            "WHERE NOT EXISTS (SELECT 1 FROM attempts a WHERE a.puzzle_id = p.id) "
+            "ORDER BY p.created_at, p.id"
+        )
+        return [p for p in (_row_to_puzzle(r) for r in rows) if tag is None or tag in p.tags]
 
     def review(self, puzzle_id: str) -> Review | None:
         row = self.conn.execute(
@@ -626,12 +668,9 @@ class Store:
         return [(r[0], r[1], bool(r[2])) for r in rows]
 
     def coach_answered(self, card_id: str, day: str) -> bool:
-        """Whether you already answered this card on `day` (an ISO date, UTC like the times)."""
-        row = self.conn.execute(
-            "SELECT 1 FROM coach_attempts WHERE card_id = ? AND substr(at, 1, 10) = ? LIMIT 1",
-            (card_id, day),
-        ).fetchone()
-        return row is not None
+        """Whether you already answered this card on `day`, an ISO date (see util.practice_day)."""
+        rows = self.conn.execute("SELECT at FROM coach_attempts WHERE card_id = ?", (card_id,))
+        return any(practice_day(datetime.fromisoformat(r[0])).isoformat() == day for r in rows)
 
     def coach_last_answers(self, family: str, color: str) -> dict[str, bool]:
         """Card id -> whether your latest answer there was right, for one opening."""

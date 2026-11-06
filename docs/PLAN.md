@@ -615,6 +615,60 @@ Fixed, each with a test that fails on the code before it (numbers from a copy of
   borderline: depth 14 gives +3.0 (+0.5 to +5.4), and two 2-thread runs at depth 12 gave +1.5
   (-0.9 to +3.9, "same") and +2.5 (+0.1 to +4.9), so engine noise alone can flip the verdict.
 
+## Today: practice you can finish (2026-11-05, branch `feat/practice-today`)
+
+Why: the research found practice is the real limit (5 puzzle attempts ever, with all 544 puzzles
+due at once). A list that long gives no reason to start and no way to finish, so the app now
+offers a small session and says when it's over.
+
+Bugs found by that research, each fixed with a test that failed first:
+- `Store.add_puzzle` used `INSERT OR REPLACE`, which deleted the row and (`ON DELETE CASCADE`) its
+  attempts and review. Now `ON CONFLICT (id) DO NOTHING`.
+- Opening fixes took a game move's id, so a fix and a puzzle from that move overwrote each other.
+  They are now `fix:<game>:<ply>`; `Store._fix_opening_fix_ids` renames the stored ones on open, in
+  puzzles, reviews and attempts (48 on the owner's database, none with attempts).
+- Practice served puzzles the bullet rule leaves out: 3 of the 5 ever practised are bullet moves
+  12, 13 and 26, kept by `puzzles prune` for their attempts. `make.left_out` now names them for
+  prune and for Practice; their history stays and Progress still counts it.
+- The practice day was the UTC date at 11 places, so in Toronto it changed at 8 pm.
+  `util.practice_day` is the one place: the local date, changing at 4 am. Attempt times stay in
+  UTC. Tests that compared with the UTC date failed in the evening; they now ask `practice_day`.
+
+The session (`puzzles/today.py`):
+- Due means tried and due again. A puzzle never answered is new, so `puzzles make` no longer makes
+  everything due. Practice reads "N due again · M new".
+- 10 items: due reviews and due opening cards first, most overdue first, then at most 5 new a day.
+  New ones come from positions reached in 2+ games (most games first), then games of the last 90
+  days, then the rest, the newest game first within each. On the owner's database the first new
+  ones are fixes in positions reached in 80, 73, 32, 23 and 22 games.
+- Never two new items from one game. Two from one game never touch unless nothing else is left:
+  `_spaced` plays a game holding more than half of what's left first, so a working order is found
+  when there is one.
+- There is no session table. `session()` works everything out from today's answers, so an answer in
+  Practice or Learn openings counts, and the count can't drift from what happened.
+- A position reached only counts where a move counts (`features.counted`): a bullet position after
+  move 10 doesn't make a puzzle more urgent.
+
+Web: Today is the first tab and uses Practice's board. A due opening card is judged as in Learn
+openings (`training.judge`, moved out of the route so the terminal shares it): your usual sound move
+on your own line, or within 30 cp of the engine's best; right after their mistake only the
+punishment. Today loads before What you get wrong: requested together, the first board took about
+15 s on the owner's database, alone about 1 s, then 20 ms.
+
+Found in the browser, not by tests: `.drill` and `.toolbar label` set `display`, which beats the
+`hidden` attribute, so the done panel appeared above a board still on screen, while `hidden` read
+true. `[hidden] { display: none !important; }` fixes that everywhere.
+
+Finding the database: `--db`, then `CHESS_COACH_DB`, then `db` in
+`~/.config/chess-coach/config.toml`, then `data/chess-coach.db`, which on the owner's machine holds
+only the 3 test games. When the one in use has no puzzles, `today` names the file beside it with the
+most, read-only, because `Store` migrates whatever it opens. A config file that can't be read is an
+error rather than a quiet fall back to another database. Tests run with their own `HOME`, so none
+can reach a real database through it. Stockfish is also found from the checkout, not just the
+working directory.
+
+Open, the owner's call: whether 10 items and 4 am are right (both are constants in one place).
+
 ## Remaining (in order)
 
 1. ~~Fresh puzzles from the full analysis~~: done 2026-10-31. `puzzles prune` removed 83

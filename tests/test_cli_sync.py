@@ -117,7 +117,7 @@ def test_sync_fetches_since_the_newest_game_and_analyses_newest_first(
     assert "Looked for their threats before 7 mistakes and blunders not checked before" in (
         result.output
     )
-    assert "Due today: 0 puzzles" in result.output
+    assert result.output.strip().splitlines()[-1].startswith("Today: ")
 
 
 @pytest.mark.engine

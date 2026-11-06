@@ -26,6 +26,8 @@ body {
   color: var(--ink);
   font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
+/* `hidden` always hides, even on an element whose rule sets its display (flex, say). */
+[hidden] { display: none !important; }
 header, main { max-width: 1100px; margin: 0 auto; padding: 0 16px; }
 header { padding-top: 24px; }
 h1 { margin: 0 0 4px; font-size: 26px; }

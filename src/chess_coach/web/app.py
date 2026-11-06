@@ -8,7 +8,7 @@ import threading
 from collections import Counter
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
 from typing import Annotated
@@ -69,12 +69,22 @@ from chess_coach.db import Store
 from chess_coach.engine.motifs import pass_turn
 from chess_coach.engine.stockfish import Engine, EngineNotFoundError, LineEval
 from chess_coach.engine.threats import IGNORED, same_threat
-from chess_coach.models import Puzzle, ThreatFact, card_id
+from chess_coach.models import CoachCard, Puzzle, ThreatFact, card_id
 from chess_coach.openings import opening_families, opening_table
 from chess_coach.patterns.features import ERRORS, move_rows, result_of
 from chess_coach.patterns.mining import Evidence
 from chess_coach.puzzles import review
 from chess_coach.puzzles.srs import schedule
+from chess_coach.puzzles.today import (
+    Facts,
+    accuracy,
+    days_practised,
+    practice_queue,
+    read_facts,
+    session,
+    upcoming,
+)
+from chess_coach.util import practice_day
 
 PLAYED = "#d1495b"  # your move
 BETTER = "#2a9d8f"  # the engine's move
@@ -82,7 +92,6 @@ TRIED = "#3d5a80"  # your answer in practice
 THREAT = "#e07a1f"  # their threat, or the reply your move allowed
 ARROWS = {"best": BETTER, "played": PLAYED, "tried": TRIED, "threat": THREAT}
 OPENING_NOTE_MOVES = 15  # puzzles this early get a note on what their opening is about
-COACH_MARGIN_CP = 30  # in opening training, a move this close to the engine's best counts
 EXPLORE_DEPTH = 16  # quick enough to answer while you click through a line
 CACHE_POSITIONS = 10_000
 
@@ -381,6 +390,11 @@ class CoachMove(BaseModel):
     best: str | None = None  # the move stored for this position, used when there's no engine
 
 
+class CardAnswer(BaseModel):
+    id: str  # a due opening card
+    uci: str  # your move, or "?" when you asked to see it
+
+
 class CoachAnswer(BaseModel):
     family: str
     color: str
@@ -565,17 +579,27 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
 
         return cached("openings", key, make)
 
+    def practice_facts(store: Store) -> Facts:
+        key = (store.count_games(), store.count_moves(), len(store.puzzles()))
+        return cached("practice", key, lambda: read_facts(store))
+
     @app.get("/api/drill/next")
     def drill_next(tag: str | None = None) -> dict:
-        today = datetime.now(UTC).date().isoformat()
         with Store(db_path) as store:
-            due = store.due(today, tag, 1)
-            total_due = len(store.due(today, tag))
-            if not due:
-                return {"done": True, "puzzles": len(store.puzzles(tag))}
-            p = due[0]
-            game = store.get_game(p.game_id)
-            threat = None if "opening-fix" in p.tags else store.threat(p.game_id, p.ply)
+            again, new = practice_queue(store, practice_facts(store), practice_day(), tag)
+            if not again and not new:
+                left = practice_facts(store).left_out
+                return {"done": True, "puzzles": sum(p.id not in left for p in store.puzzles(tag))}
+            return {
+                "again": len(again),
+                "new": len(new),
+                **drill_item(store, [*again, *new][0], tag),
+            }
+
+    def drill_item(store: Store, p: Puzzle, tag: str | None = None) -> dict:
+        """A puzzle as the page shows it."""
+        game = store.get_game(p.game_id)
+        threat = None if "opening-fix" in p.tags else store.threat(p.game_id, p.ply)
         board = chess.Board(p.fen)
         ask = None
         if threat is not None and threat.label == IGNORED and threat.last_uci:
@@ -591,7 +615,6 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             "side": "white" if board.turn == chess.WHITE else "black",
             "played": p.played_san,
             "tags": p.tags,
-            "due": total_due,
             "opening_fix": "opening-fix" in p.tags,
             "opening": family,
             "opening_idea": opening_idea(family) if early else None,
@@ -642,7 +665,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             correct = tried is not None and puzzle.is_right(tried.uci())
             due = schedule_now.due
             if a.record:
-                after = schedule(schedule_now, correct, now.date())
+                after = schedule(schedule_now, correct, practice_day(now))
                 store.save_attempt(after, a.uci, correct, now)
                 due = after.due
         out = {
@@ -806,7 +829,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
 
     @app.get("/api/coach/openings")
     def coach_openings() -> dict:
-        today = datetime.now(UTC).date().isoformat()
+        today = practice_day().isoformat()
         with Store(db_path) as store:
             games = list(store.iter_games())
             due = Counter((c.family, c.color) for c in store.coach_cards() if c.due <= today)
@@ -837,7 +860,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
     def coach_deck(family: str, color: str):
         """This opening's punish deck in practice order, its cards, and today's date."""
         root, _, _ = opening_tree(family, color)
-        today = datetime.now(UTC).date().isoformat()
+        today = practice_day().isoformat()
         with Store(db_path) as store:
             cards = store.coach_cards(family, color)
             last = store.coach_last_answers(family, color)
@@ -906,26 +929,50 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
         if board.turn != (chess.WHITE if a.color == "white" else chess.BLACK):
             raise HTTPException(400, "it isn't your move there")
         path = [m.uci() for m in board.move_stack]
-        root, _, _ = opening_tree(a.family, a.color)
-        parent = optree.walk(root, path[:-1]) if path else None
-        edge = parent.edges.get(path[-1]) if parent else None
-        kind = training.PUNISH if edge is not None and edge.punishable else training.LINE
-        now = datetime.now(UTC)
-        cid = card_id(a.color, a.family, path)
-        with Store(db_path) as store:
-            before = store.coach_card(cid)
-            # One answer a day counts, so going back over a line doesn't push a card away.
-            recorded = not store.coach_answered(cid, now.date().isoformat())
-            if recorded:
-                card = training.answer(before, a.family, a.color, path, kind, a.correct, now.date())
-                store.save_coach_attempt(card, a.uci, a.correct, now)
-            else:
-                card = before
+        recorded, kind, card = save_card_answer(a.family, a.color, path, a.uci, a.correct)
         return {
             "recorded": recorded,
             "kind": kind,
             "next_due": card.due if card else None,
             **coach_summary(a.family, a.color),
+        }
+
+    def save_card_answer(
+        family: str, color: str, path: list[str], uci: str, correct: bool
+    ) -> tuple[bool, str, CoachCard | None]:
+        """Record an answer and schedule the card again. One answer a day counts, so going back
+        over a line doesn't push a card away. Returns (recorded, kind, the card)."""
+        root, _, _ = opening_tree(family, color)
+        kind = training.kind_at(root, path)
+        now = datetime.now(UTC)
+        today = practice_day(now)
+        cid = card_id(color, family, path)
+        with Store(db_path) as store:
+            before = store.coach_card(cid)
+            if store.coach_answered(cid, today.isoformat()):
+                return False, kind, before
+            card = training.answer(before, family, color, path, kind, correct, today)
+            store.save_coach_attempt(card, uci, correct, now)
+        return True, kind, card
+
+    def check_json(board: chess.Board, move: chess.Move, stored: chess.Move | None) -> dict:
+        """What the page says about a move in opening training, in chess terms."""
+        c = training.check_move(board, move, analyst, stored)
+        fen = board.fen()
+        reasons = explain(fen, move.uci(), c.best.uci()) if c.best and not c.ok else Reasons()
+        score = None
+        if c.reply is not None:
+            mate = None if c.reply.mate is None else -c.reply.mate
+            score = review.Score(-c.reply.cp, mate).text
+        return {
+            "ok": c.ok,
+            "uci": move.uci(),
+            "san": board.san(move),
+            "best": {"uci": c.best.uci(), "san": board.san(c.best)} if c.best else None,
+            "loss": None if c.loss is None else round(c.loss / 100, 1),
+            "score": score,
+            "faults": reasons.faults,
+            "ideas": reasons.ideas,
         }
 
     @app.post("/api/coach/check")
@@ -937,45 +984,115 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             stored = review.legal(board, c.best) if c.best else None
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        after = board.copy(stack=False)
-        after.push(move)
-        ev, reply = analyst(board.fen()), analyst(after.fen())
-        loss = score = None
-        if ev is not None and ev.move is not None and reply is not None:
-            best = ev.move
-            loss = max(0, ev.cp + reply.cp)  # the reply is scored for the other side
-            ok = move == best or loss <= COACH_MARGIN_CP
-            score = review.Score(-reply.cp, None if reply.mate is None else -reply.mate).text
-        else:
-            best = stored
-            ok = best is None or move == best
-        reasons = explain(c.fen, move.uci(), best.uci()) if best and not ok else Reasons()
+        return check_json(board, move, stored)
+
+    def card_item(card: CoachCard) -> dict:
+        """A due opening card as Today shows it. It doesn't name the move to find."""
+        root, _, _ = opening_tree(card.family, card.color)
+        moves = [chess.Move.from_uci(u) for u in card.path]
+        board = chess.Board()
+        line = board.variation_san(moves) if moves else ""
+        for m in moves:
+            board.push(m)
         return {
-            "ok": ok,
-            "uci": move.uci(),
-            "san": board.san(move),
-            "best": {"uci": best.uci(), "san": board.san(best)} if best else None,
-            "loss": None if loss is None else round(loss / 100, 1),
-            "score": score,
+            "kind": "card",
+            "id": card.id,
+            "fen": board.fen(),
+            "side": card.color,
+            "punish": training.kind_at(root, card.path) == training.PUNISH,
+            "opening": card.family,
+            "opening_idea": opening_idea(card.family),
+            "line": line,
+            "last": card.path[-1] if card.path else None,
+        }
+
+    @app.post("/api/today/card")
+    def today_card(a: CardAnswer) -> dict:
+        """Answer a due opening card: judged as in Learn openings, with the move to learn."""
+        with Store(db_path) as store:
+            card = store.coach_card(a.id)
+        if card is None:
+            raise HTTPException(404, "no such card")
+        board = chess.Board()
+        for uci in card.path:
+            board.push(chess.Move.from_uci(uci))
+        try:
+            move = None if a.uci == "?" else review.legal(board, a.uci)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        root, _, _ = opening_tree(card.family, card.color)
+        kind = training.kind_at(root, card.path)
+        judged = training.judge(kind, optree.walk(root, card.path), board, move, analyst)
+        _, _, saved = save_card_answer(card.family, card.color, card.path, a.uci, judged.correct)
+        t = judged.target
+        check = judged.check
+        reasons = (
+            explain(board.fen(), move.uci(), check.best.uci())
+            if move and check and check.best and not check.ok
+            else Reasons()
+        )
+        return {
+            "correct": judged.correct,
+            "answer": board.san(move) if move else None,
+            "target": {"uci": t.uci(), "san": board.san(t)} if t else None,
+            "loss": None if check is None or check.loss is None else round(check.loss / 100, 1),
             "faults": reasons.faults,
             "ideas": reasons.ideas,
+            "next_due": saved.due if saved else None,
+        }
+
+    @app.get("/api/today/next")
+    def today_next() -> dict:
+        """What to practise next in today's session; when it's over, how the practice is going."""
+        day = practice_day()
+        with Store(db_path) as store:
+            facts = practice_facts(store)
+            now = session(store, facts, day)
+            progress = {
+                "done": now.done,
+                "total": now.total,
+                "again": now.again,
+                "new": now.new,
+                "minutes": now.minutes,
+            }
+            if now.items:
+                item = now.items[0]
+                if item.card is not None:
+                    shown = card_item(item.card)
+                else:
+                    shown = {"kind": "puzzle", **drill_item(store, item.puzzle)}
+                return {"done": False, "progress": progress, **shown}
+            tomorrow = upcoming(store, facts, day + timedelta(days=1))
+            attempts, answers = store.attempts(), store.coach_attempts()
+            puzzles = sum(p.id not in facts.left_out for p in store.puzzles())
+        reviews, first = accuracy(attempts, answers)
+        return {
+            "done": True,
+            "progress": progress,
+            "puzzles": puzzles,
+            "tomorrow": {"again": tomorrow.again, "new": tomorrow.new},
+            "days": {"practised": days_practised(attempts, answers, day), "of": 7},
+            "reviews": {"right": reviews.right, "tried": reviews.tried},
+            "first": {"right": first.right, "tried": first.tried},
         }
 
     @app.get("/api/drill/tags")
     def drill_tags() -> list[dict]:
-        today = datetime.now(UTC).date().isoformat()
         with Store(db_path) as store:
-            puzzles = store.puzzles()
-            due = {p.id for p in store.due(today)}
+            facts = practice_facts(store)
+            puzzles = [p for p in store.puzzles() if p.id not in facts.left_out]
+            again, new = practice_queue(store, facts, practice_day())
+        due, fresh = {p.id for p in again}, {p.id for p in new}
         counts: dict[str, list[int]] = {}
         for p in puzzles:
             for t in p.tags:
-                c = counts.setdefault(t, [0, 0])
+                c = counts.setdefault(t, [0, 0, 0])
                 c[0] += 1
                 c[1] += p.id in due
+                c[2] += p.id in fresh
         return [
-            {"tag": t, "puzzles": n, "due": d}
-            for t, (n, d) in sorted(counts.items(), key=lambda kv: -kv[1][0])
+            {"tag": t, "puzzles": n, "due": d, "new": f}
+            for t, (n, d, f) in sorted(counts.items(), key=lambda kv: -kv[1][0])
         ]
 
     @app.get("/api/progress")
@@ -986,7 +1103,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             overall, tags = solve_rates(store.puzzles(), attempts)
         speeds = trend_speeds(games)
         chosen = speed if speed in speeds else (speeds[0] if speeds else None)
-        today = datetime.now(UTC).date()
+        today = practice_day()
         weeks = weekly(games, chosen, attempts, answers, today=today) if chosen else []
         effect = practice_effect(weeks)
         return {

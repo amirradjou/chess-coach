@@ -162,7 +162,7 @@ class ThreatFact:
 class Puzzle:
     """A position from the user's own game where one move clearly stood out and they missed it."""
 
-    id: str  # "<game_id>:<ply>"
+    id: str  # "<game_id>:<ply>", or "fix:<game_id>:<ply>" for an opening fix
     game_id: str
     ply: int
     fen: str  # before the user's move; the user is to move

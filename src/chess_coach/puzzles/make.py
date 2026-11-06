@@ -193,7 +193,7 @@ def verify_fix(engine: Engine, fix, family: str, depth: int = VERIFY_DEPTH) -> P
         return None
     game_id, ply, _ = fix.games[0]
     return Puzzle(
-        id=f"{game_id}:{ply}",
+        id=f"fix:{game_id}:{ply}",  # a puzzle from that same move has the id without "fix:"
         game_id=game_id,
         ply=ply,
         fen=fix.fen,
@@ -294,20 +294,32 @@ def dedupe(store: Store) -> list[Merge]:
     return merges
 
 
-def prune(store: Store) -> list[str]:
-    """Remove puzzles never attempted that `keep` would no longer make: from bullet after move
-    10, or from a move made short on time and not repeated often enough. Returns the removed
-    ids."""
-    games = {g.id: g for g in store.iter_games()}
-    moves = {(m.game_id, m.ply): m for m in store.iter_moves(user_only=True)}
-    repeated = repeated_tags(games.values(), moves.values())
-    tried = {pid for pid, _, _ in store.attempts()}
-    removed = []
-    for p in store.puzzles():
-        m = moves.get((p.game_id, p.ply))
-        if p.id in tried or FIX_TAG in p.tags or m is None or p.game_id not in games:
+def left_out(
+    puzzles: Iterable[Puzzle], games: Iterable[Game], moves: Iterable[MoveFact]
+) -> list[str]:
+    """Puzzles `keep` would no longer make: from bullet after move 10, or from a move made short on
+    time and not repeated often enough. Opening fixes aren't made from one move, so they stand.
+    `moves` are the user's."""
+    by_id = {g.id: g for g in games}
+    facts = {(m.game_id, m.ply): m for m in moves}
+    repeated = repeated_tags(by_id.values(), facts.values())
+    out = []
+    for p in puzzles:
+        m = facts.get((p.game_id, p.ply))
+        if FIX_TAG in p.tags or m is None or p.game_id not in by_id:
             continue
-        if not keep(m, games[p.game_id], repeated):
-            store.delete_puzzle(p.id)
-            removed.append(p.id)
+        if not keep(m, by_id[p.game_id], repeated):
+            out.append(p.id)
+    return out
+
+
+def prune(store: Store) -> list[str]:
+    """Remove the puzzles `left_out` names that were never attempted. One with attempts stays, for
+    its history, but Practice doesn't serve it. Returns the removed ids."""
+    tried = {pid for pid, _, _ in store.attempts()}
+    moves = store.iter_moves(user_only=True)
+    named = left_out(store.puzzles(), list(store.iter_games()), moves)
+    removed = [pid for pid in named if pid not in tried]
+    for pid in removed:
+        store.delete_puzzle(pid)
     return removed
