@@ -215,3 +215,13 @@ def test_today_in_the_terminal_asks_a_due_card(tmp_path, monkeypatch):
         assert store.coach_answered(card.id, _today().isoformat())
         saved = store.coach_card(card.id)
     assert saved is not None and saved.due == (_today() + timedelta(days=1)).isoformat()
+
+
+def test_a_card_with_no_move_known_says_so_in_the_terminal(tmp_path, monkeypatch):
+    _client(tmp_path, no_engine)
+    db = tmp_path / "coach.db"
+    _due_card(db, ["a2a3", "a7a6"], "line")  # a position in none of the games
+    monkeypatch.setattr("chess_coach.web.app.Analyst", _NoEngine)
+    result = CliRunner().invoke(cli_app, ["--db", str(db), "today", "--cli"], input="?\n")
+    assert result.exit_code == 0, result.output
+    assert "None" not in result.output and "No move is known" in result.output
