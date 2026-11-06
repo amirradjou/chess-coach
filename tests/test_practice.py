@@ -18,7 +18,19 @@ from chess_coach.models import CoachCard, Color, Game, Judgement, MoveFact, Phas
 from chess_coach.openings import epd
 from chess_coach.puzzles.make import verify_fix
 from chess_coach.puzzles.srs import schedule
-from chess_coach.puzzles.today import Facts, new_first, read_facts
+from chess_coach.puzzles.today import (
+    Facts,
+    Item,
+    Session,
+    accuracy,
+    days_practised,
+    new_first,
+    plan,
+    read_facts,
+    session,
+    status_line,
+    upcoming,
+)
 from chess_coach.util import practice_day
 from chess_coach.web.app import create_app
 
@@ -89,7 +101,7 @@ def puzzle(game_id: str, ply: int, fen: str = START, *, tags: list[str] | None =
 def attempt(store: Store, puzzle_id: str, at: datetime = WHEN, correct: bool = True) -> None:
     review = store.review(puzzle_id)
     assert review is not None
-    store.save_attempt(schedule(review, correct, at.date()), "e2e4", correct, at)
+    store.save_attempt(schedule(review, correct, practice_day(at)), "e2e4", correct, at)
 
 
 def test_adding_a_puzzle_again_keeps_its_practice_history(tmp_path: Path) -> None:
@@ -300,3 +312,153 @@ def test_a_bullet_position_after_move_10_doesnt_count_as_reached(tmp_path: Path)
         facts = read_facts(store)
     assert facts.reached.get(epd(START)) == 2  # move 8, twice
     assert epd(FEN_A) not in facts.reached  # move 13: bullet doesn't count from move 11
+
+
+def _new(game_id: str, n: int = 1) -> Item:
+    return Item(f"{game_id}:{n}", game_id)
+
+
+def _due(game_id: str | None, n: int = 1, on: str = "2026-11-01") -> Item:
+    return Item(f"{game_id}:{n}", game_id, on)
+
+
+def _no_game_twice_in_a_row(items: list[Item]) -> bool:
+    games = [i.game_id for i in items]
+    return all(a is None or a != b for a, b in zip(games, games[1:], strict=False))
+
+
+def test_a_session_is_10_items_with_reviews_first_and_at_most_5_new() -> None:
+    twelve = [_due(f"g{i}") for i in range(12)]
+    assert [i.id for i in plan(twelve, [_new("n")])] == [i.id for i in twelve[:10]]
+
+    three = [_due(f"g{i}") for i in range(3)]
+    many = [_new(f"n{i}") for i in range(9)]
+    got = plan(three, many)
+    assert len(got) == 8 and sum(i.new for i in got) == 5
+    assert got[:3] == three  # the reviews first
+
+    eight = [_due(f"g{i}") for i in range(8)]
+    assert sum(i.new for i in plan(eight, many)) == 2  # only 2 places left
+
+
+def test_todays_answers_use_up_the_session_and_its_new_items() -> None:
+    many = [_new(f"n{i}") for i in range(9)]
+    assert len(plan([], many, done=7, new_done=2)) == 3
+    assert len(plan([], many, done=3, new_done=3)) == 2  # 5 new a day, not 5 more
+    assert plan([], many, done=10) == []
+    assert plan([], many, done=14) == []
+
+
+def test_never_two_new_items_from_one_game() -> None:
+    new = [_new("a", 1), _new("a", 2), _new("b", 1), _new("a", 3), _new("c", 1)]
+    assert [i.id for i in plan([], new)] == ["a:1", "b:1", "c:1"]
+    # nor one more from a game whose new item you already did today
+    assert [i.id for i in plan([], new, new_done=1, games_used={"a"})] == ["b:1", "c:1"]
+
+
+def test_never_two_from_one_game_back_to_back() -> None:
+    items = [_due("a", 1), _due("a", 2), _due("b", 1), _due("b", 2)]
+    assert _no_game_twice_in_a_row(plan(items, []))
+    # the first item isn't from the game you just answered
+    assert plan([_due("a"), _due("b")], [], last_game="a")[0].game_id == "b"
+    # a review and a new item from one game are kept apart too
+    got = plan([_due("a", 1), _due("b", 1)], [_new("a", 2)])
+    assert _no_game_twice_in_a_row(got)
+    # the order that works is found even when the plain order would run out of other games
+    crowded = [_due("x"), _due("a", 1), _due("a", 2), _due("a", 3), _due("y")]
+    assert _no_game_twice_in_a_row(plan(crowded, []))
+
+
+def test_a_game_may_follow_itself_only_when_nothing_else_is_left() -> None:
+    items = [_due("a", 1), _due("a", 2)]
+    assert [i.id for i in plan(items, [])] == ["a:1", "a:2"]
+
+
+def test_opening_cards_have_no_game_to_keep_apart() -> None:
+    assert [i.id for i in plan([_due(None, 1), _due(None, 2)], [])] == ["None:1", "None:2"]
+
+
+def _practice_db(db: Path, games: int = 8) -> None:
+    with Store(db) as store:
+        for i in range(games):
+            store.upsert_game(game(f"lichess:g{i}"))
+            store.add_puzzle(puzzle(f"lichess:g{i}", 1))
+
+
+def test_session_state_comes_from_todays_answers(tmp_path: Path) -> None:
+    db = tmp_path / "c.db"
+    _practice_db(db, 8)
+    with Store(db) as store:
+        facts = read_facts(store)
+        day = practice_day()
+        start = session(store, facts, day)
+        assert (start.done, start.total, start.again, start.new) == (0, 5, 0, 5)
+
+        first = start.items[0].id
+        attempt(store, first, datetime.now(UTC), correct=False)
+        now = session(store, facts, day)
+        assert (now.done, now.total, now.new) == (1, 5, 4)
+        assert first not in [i.id for i in now.items]
+        # the miss comes back tomorrow, with the next new ones after it
+        next_day = upcoming(store, facts, day + timedelta(days=1))
+        assert next_day.items[0].id == first and (next_day.again, next_day.new) == (1, 5)
+
+
+def test_a_practice_answer_yesterday_doesnt_use_up_today(tmp_path: Path) -> None:
+    db = tmp_path / "c.db"
+    _practice_db(db, 3)
+    with Store(db) as store:
+        yesterday = datetime.now(UTC) - timedelta(days=1)
+        attempt(store, "lichess:g0:1", yesterday, correct=False)
+        now = session(store, read_facts(store), practice_day())
+        assert (
+            now.done == 0 and now.items[0].id == "lichess:g0:1" and (now.again, now.new) == (1, 2)
+        )
+
+
+def test_opening_cards_come_with_the_reviews_most_overdue_first(tmp_path: Path) -> None:
+    db = tmp_path / "c.db"
+    _practice_db(db, 2)
+    day = practice_day()
+    long_ago = (day - timedelta(days=30)).isoformat()
+    with Store(db) as store:
+        attempt(store, "lichess:g0:1", datetime.now(UTC) - timedelta(days=20), correct=False)
+        card = CoachCard("Danish", "white", ["e2e4", "e7e5"], "line", long_ago)
+        store.save_coach_attempt(card, "g1f3", False, datetime.now(UTC) - timedelta(days=31))
+        s = session(store, read_facts(store), day)
+    assert [i.id for i in s.items] == [card.id, "lichess:g0:1", "lichess:g1:1"]
+    assert (s.items[0].card, s.again, s.new) == (card, 2, 1)
+
+
+def test_the_status_line_says_what_is_left() -> None:
+    ten = Session([*(_due(f"g{i}") for i in range(5)), *(_new(f"n{i}") for i in range(5))])
+    tomorrow = Session([_due("g"), _new("n")])
+    assert status_line(ten, tomorrow) == "Today: 10 to practise (about 5 min): 5 due again, 5 new"
+    assert status_line(Session(ten.items[:6], 4), tomorrow) == (
+        "Today: 6 left of 10 (about 3 min): 5 due again, 1 new"
+    )
+    assert status_line(Session([], 10), tomorrow) == (
+        "Today: done, 10 practised. Tomorrow: 1 due again, 1 new"
+    )
+    assert status_line(Session([]), Session([])) == (
+        "Today: nothing to practise. Tomorrow: 0 due again, 0 new"
+    )
+
+
+def test_days_practised_of_the_last_week_and_accuracy_apart() -> None:
+    day = practice_day()
+
+    def on(days_ago: int) -> str:
+        return (datetime.now(UTC) - timedelta(days=days_ago)).isoformat()
+
+    attempts = [
+        ("p1", on(9), False),
+        ("p1", on(6), True),
+        ("p2", on(6), True),
+        ("p2", on(0), False),
+    ]
+    answers = [("c1", on(2), True), ("c1", on(0), True)]
+    assert days_practised(attempts, answers, day) == 3  # 6 days ago, 2 days ago, today
+    reviews, first = accuracy(attempts, answers)
+    assert (reviews.right, reviews.tried) == (2, 3)
+    assert (first.right, first.tried) == (2, 3)
