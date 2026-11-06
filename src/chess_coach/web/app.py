@@ -363,13 +363,21 @@ def _line(line: review.Line) -> dict:
         "label": line.label,
         "start": line.start,
         "plies": [
-            {"san": p.san, "uci": p.uci, "fen": p.fen, "number": p.number, "engine": p.engine}
+            {
+                "san": p.san,
+                "uci": p.uci,
+                "fen": p.fen,
+                "number": p.number,
+                "engine": p.engine,
+                "note": p.note,
+            }
             for p in line.plies
         ],
         "score": line.score.text if line.score else None,
         "why": line.why,
         "faults": line.faults,
         "ideas": line.ideas,
+        "punishes": line.punishes,
     }
 
 
@@ -1000,6 +1008,12 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             store.save_coach_attempt(card, uci, correct, now)
         return True, kind, card
 
+    def punishment_json(fen: str, move: chess.Move, c: training.Check) -> dict | None:
+        """The line after a wrong move, when there is an engine to give one."""
+        if c.ok or c.reply is None or c.best is None:
+            return None
+        return _line(review.punishment(fen, move.uci(), c.best.uci(), analyst))
+
     def check_json(board: chess.Board, move: chess.Move, stored: chess.Move | None) -> dict:
         """What the page says about a move in opening training, in chess terms."""
         c = training.check_move(board, move, analyst, stored)
@@ -1010,6 +1024,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             mate = None if c.reply.mate is None else -c.reply.mate
             score = review.Score(-c.reply.cp, mate).text
         return {
+            "line": punishment_json(fen, move, c),
             "ok": c.ok,
             "uci": move.uci(),
             "san": board.san(move),
@@ -1083,6 +1098,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             "loss": None if check is None or check.loss is None else round(check.loss / 100, 1),
             "faults": reasons.faults,
             "ideas": reasons.ideas,
+            "line": punishment_json(board.fen(), move, check) if move and check else None,
             "next_due": saved.due if saved else None,
         }
 

@@ -102,3 +102,9 @@ button.chip.on { background: var(--accent); border-color: var(--accent); color: 
 .verdict.inaccuracy { background: #f4e3c1; color: #7a5a12; }
 .verdict.mistake, .verdict.blunder { background: #f6d5d9; color: var(--bad); }
 #coach-feedback { margin: 10px 0; }
+.line-title { margin: 12px 0 4px; font-size: 16px; }
+.line-steps { display: grid; gap: 1px; margin: 8px 0; }
+button.line-step { display: block; width: 100%; padding: 3px 8px; border: 0; border-radius: 4px; background: none; text-align: left; font-size: 14px; font-weight: 400; line-height: 1.35; color: var(--muted); }
+button.line-step b { color: var(--ink); }
+button.line-step.theirs b { color: var(--threat); }
+button.line-step.on { background: var(--soft); color: var(--ink); }

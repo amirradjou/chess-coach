@@ -730,6 +730,33 @@ Left as they are:
 - Two numbers can print alike after rounding (5.04% and 4.96%).
 - Colour isn't in the reference, so the card can't show that the gap is in White games (docs/NEXT.md).
 
+## A wrong move shows what happens next (2026-11-05, branch `feat/opening-why-wrong`)
+
+Asked for by the owner while trying Learn openings: a wrong move only said "it gives away 1.4", with
+nothing to show why. The engine's line was already computed for the check and thrown away.
+
+- `review.punishment` builds that line and says what it costs, without naming the better move, so
+  you can still try again. No extra engine calls: `check_move` already asked for both positions.
+- `principles.line_notes` says what each move does, from the board alone: taking, hitting, check,
+  mate, then for quiet moves castling, moving out of attack, protecting, developing, a pawn into the
+  centre. A move the board has nothing to say about gets no note: nothing is invented.
+- `principles.line_leaves` says what the line leaves you with beyond the move itself (castling gone,
+  doubled or isolated pawns, behind in development), since a position can cost you with material
+  level. On 3...Nd4 in the Italian the real cost is doubled d-pawns, not the knight, which is traded.
+- It only says "How they punish it" when you lose material, get mated or end up clearly worse (-1 or
+  below). Otherwise it says "What happens next" and that there's no quick punishment: 5.Nf3 in the
+  Danish goes from +1.4 to -0.1 and nothing is taken. Winning material and still going wrong is said
+  too ("but that isn't enough").
+- On the page the line plays itself at 1.8 s a move until you touch it. Step 0 is the position you
+  answered from, so "Try again", Home or a click on the board go back there. The first answer is the
+  one recorded, as before. Without an engine there is no line and the page says what it did.
+- A due opening card in Today gets the same line through the steps Practice already has. `today
+  --cli` doesn't: it still gives the faults and the move to learn.
+
+The line is one line, the engine's best play. It doesn't answer "what if I take the knight?": for
+that, Explore. Looking at real positions showed Stockfish answering 2...f6 with 3.Nxe5 or 3.d4
+depending on depth, so no test or text assumes which.
+
 ## Remaining (in order)
 
 1. ~~Fresh puzzles from the full analysis~~: done 2026-10-31. `puzzles prune` removed 83

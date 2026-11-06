@@ -432,6 +432,7 @@ async function answerCard(uci) {
   if (drill !== card) return; // you moved on: the answer is saved, and this board is gone
   drill.solving = false;
   drill.arrow = r.target?.uci ?? null;
+  if (r.line) Object.assign(drill, { lines: [r.line], line: 0, ply: 0 }); // starts on the move to learn
   const also = r.correct && r.target && r.target.san !== r.answer ? ` The move to remember here: ${r.target.san}.` : "";
   fill($("#feedback"),
     r.correct
@@ -439,8 +440,9 @@ async function answerCard(uci) {
       : [
         r.answer ? [el("b", { class: "played" }, `${r.answer} isn't it`), r.loss !== null ? `: it gives away ${r.loss}. ` : ". "] : null,
         r.target ? ["The move: ", el("b", { class: "better" }, r.target.san), ". "] : null,
+        r.line ? "Below: what happens if you play yours. " : null,
       ],
-    reasons(r.faults),
+    r.line ? null : reasons(r.faults),
     el("br"), el("span", { class: "muted small" }, `Next time: ${r.next_due}.`),
   );
   buttons({ next: true });
@@ -497,7 +499,7 @@ async function guessThreat(uci) {
 // The position on show: the puzzle itself (ply 0) or the position after `ply` moves of a line,
 // with the line's next move as an arrow.
 function shown() {
-  if (drill.puzzle.kind === "card") {
+  if (drill.puzzle.kind === "card" && !drill.ply) {
     return { fen: drill.puzzle.fen, last: drill.puzzle.last, next: drill.arrow, color: "best" };
   }
   const line = drill.lines[drill.line];
@@ -570,6 +572,9 @@ function drawLines() {
       "button",
       { class: `chip${p.engine ? " engine" : ""}${li === drill.line && i + 1 === drill.ply ? " on" : ""}`, onclick: () => { drill.line = li; drill.ply = i + 1; draw(); } },
       i === 0 || !p.number.endsWith("...") ? `${p.number}${p.san}` : p.san))),
+    li === drill.line && line.plies[drill.ply - 1]?.note
+      ? el("div", { class: "small" }, el("b", {}, `${line.plies[drill.ply - 1].number}${line.plies[drill.ply - 1].san}`), ` ${line.plies[drill.ply - 1].note}`)
+      : null,
     line.why && li === drill.line ? el("div", { class: "why" }, line.why) : null,
     li === drill.line ? reasons([...(line.faults || []), ...(line.ideas || [])]) : null,
   )));
@@ -713,7 +718,7 @@ async function openCoach() {
   fill($("#coach-opening"), [["white", "With White"], ["black", "With Black"]].map(([color, label]) => (o[color].length
     ? el("optgroup", { label }, o[color].map((x) => el("option", { value: `${color}|${x.family}` }, optionLabel(x))))
     : null)));
-  coach = { openings: o, color: null, family: null, mode: "explore", path: [], node: null, from: null, check: null, reveal: false, deck: null, card: 0, pending: null, cards: null, answered: false };
+  coach = { openings: o, color: null, family: null, mode: "explore", path: [], node: null, from: null, check: null, reveal: false, deck: null, card: 0, pending: null, cards: null, answered: false, drawn: 0, line: null, lineTimer: null };
   await pickOpening();
 }
 $("#coach-opening").addEventListener("change", pickOpening);
@@ -785,6 +790,7 @@ for (const b of document.querySelectorAll("#coach .modes button")) {
 }
 
 function coachStart() {
+  endLine();
   coach.pending = null;
   return coach.mode === "punish" ? nextMistake() : coachGo([]);
 }
@@ -792,6 +798,7 @@ function coachStart() {
 // Load the position after `path`; the path and node change together, and the board ignores
 // clicks until they have, so a move is never judged against the previous position.
 async function coachGo(path, note) {
+  endLine();
   const q = new URLSearchParams({ family: coach.family, color: coach.color, path: path.join(",") });
   coach.loading = true;
   let node;
@@ -819,7 +826,9 @@ async function coachGo(path, note) {
 async function coachDraw() {
   const n = coach.node;
   const arrow = coach.mode === "explore" ? n.best?.uci : coach.reveal ? n.target?.uci : null;
+  const token = ++coach.drawn;
   const svg = await boardSvg({ fen: n.fen, last: n.path.at(-1)?.uci, next: arrow, color: "best" }, coach.color);
+  if (token !== coach.drawn) return; // a later step of the line took over
   coach.from = null;
   fill($("#coach-board"), boardNode(svg, "board"));
   $("#coach-board svg").addEventListener("click", onCoachBoard);
@@ -906,6 +915,7 @@ function restartButton() {
 
 async function onCoachBoard(evt) {
   if (coach.loading) return;
+  if (coach.line && coach.line.ply !== 0) return lineStep("first"); // moves are answers from the position
   const svg = evt.currentTarget;
   const sq = squareAt(svg, evt, coach.color);
   if (!sq) return;
@@ -925,19 +935,27 @@ async function onCoachBoard(evt) {
     return coachGo([...coach.path, uci], [el("b", { class: "better" }, `${usual.san}: good.`),
       ` Your usual move here (${games(usual.games)}${scored(usual, ", ")}), and a sound one.`]);
   }
+  endLine();
+  const at = coach.node;
+  fill($("#coach-feedback"), el("span", { class: "muted small" }, "Checking your move…"));
   let r;
+  coach.loading = true;
   try {
     r = await api("/api/coach/check", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fen: coach.node.fen, uci, best: coach.node.best?.uci }),
+      body: JSON.stringify({ fen: at.fen, uci, best: at.best?.uci }),
     });
   } catch (err) {
     return fill($("#coach-feedback"), "That isn't a legal move here.");
+  } finally {
+    coach.loading = false;
   }
+  if (coach.node !== at) return; // you went elsewhere while the engine looked
   coach.check = r;
   record(r.uci, r.ok);
   if (!r.ok) {
+    if (r.line) return showPunishment(r);
     return fill($("#coach-feedback"),
       el("b", { class: "played" }, `${r.san} isn't it`),
       r.loss !== null ? `: it gives away ${r.loss} against the best move.` : ".",
@@ -952,7 +970,90 @@ async function onCoachBoard(evt) {
   await coachGo([...coach.path, r.uci], coach.mode === "punish" ? [...praise, el("div", {}, restartButton())] : praise);
 }
 
+// -- after a wrong move: what happens next, played out on the board -----------------------------
+// The engine's line after your move, with what each move does. Step 0 is the position you answered
+// from, where you can try again; the line plays itself until you touch it.
+const LINE_STEP_MS = 1800;
+
+function stopLine() {
+  clearTimeout(coach.lineTimer);
+  coach.lineTimer = null;
+}
+
+function endLine() {
+  stopLine();
+  coach.line = null;
+}
+
+function showPunishment(r) {
+  const line = r.line;
+  const usual = coach.node.moves.find((m) => m.uci === r.uci);
+  coach.line = { plies: line.plies, ply: 1 };
+  const step = (to, label, glyph) => el("button", { title: label, "aria-label": label, onclick: () => lineStep(to) }, glyph);
+  fill($("#coach-feedback"),
+    el("b", { class: "played" }, `${r.san} isn't it`),
+    r.loss !== null ? `: it gives away ${r.loss} against the best move.` : ".",
+    usual ? el("div", { class: "small" }, `You've played it in ${games(usual.games)}${scored(usual)}.`) : null,
+    el("h3", { class: "line-title" }, line.punishes ? "How they punish it" : "What happens next"),
+    el("div", { class: "why" }, line.why),
+    reasons(line.faults),
+    el("div", { class: "steps" },
+      step("first", "Back to the position (Home)", "⏮"),
+      step("prev", "Back (←)", "◀"),
+      step("next", "Forward (→)", "▶"),
+      step("last", "End of the line (End)", "⏭"),
+      el("button", { class: "primary", onclick: () => lineStep("first") }, "Try again")),
+    el("div", { id: "coach-line", class: "line-steps" }, line.plies.map((p, i) => el("button",
+      { class: `line-step${i % 2 ? " theirs" : ""}`, onclick: () => lineStep(i + 1) },
+      el("b", {}, `${p.number}${p.san}`), p.note ? ` ${p.note}` : ""))),
+    el("div", { id: "coach-line-where", class: "muted small" }));
+  lineShow(1);
+  linePlay();
+}
+
+function linePlay() {
+  const l = coach.line;
+  if (!l || l.ply >= l.plies.length) return;
+  coach.lineTimer = setTimeout(() => {
+    lineShow(l.ply + 1);
+    linePlay();
+  }, LINE_STEP_MS);
+}
+
+function lineStep(to) {
+  const l = coach.line;
+  if (!l) return;
+  stopLine();
+  const ply = typeof to === "number" ? to : { first: 0, prev: Math.max(0, l.ply - 1), next: Math.min(l.plies.length, l.ply + 1), last: l.plies.length }[to];
+  lineShow(ply);
+}
+
+async function lineShow(ply) {
+  const l = coach.line;
+  l.ply = ply;
+  for (const [i, b] of [...$("#coach-line").children].entries()) b.classList.toggle("on", i + 1 === ply);
+  fill($("#coach-line-where"), ply === 0 ? "Back at the position: play another move, or show the move." : null);
+  if (ply === 0) return coachDraw();
+  const p = l.plies[ply - 1];
+  fill($("#coach-path"), el("span", { class: "muted small" }, `after ${p.number}${p.san}: the engine's line, not your game`));
+  const token = ++coach.drawn;
+  // The next move as an arrow: orange when it's theirs, blue when it's yours.
+  const svg = await boardSvg({ fen: p.fen, last: p.uci, next: l.plies[ply]?.uci, color: ply % 2 ? "threat" : "tried" }, coach.color);
+  if (token !== coach.drawn) return;
+  coach.from = null;
+  fill($("#coach-board"), boardNode(svg, "board"));
+  $("#coach-board svg").addEventListener("click", onCoachBoard);
+}
+
+document.addEventListener("keydown", (e) => {
+  const keys = { ArrowLeft: "prev", ArrowRight: "next", Home: "first", End: "last" };
+  if ($("#coach").hidden || !coach?.line || !keys[e.key] || e.target.closest("select, input, textarea")) return;
+  e.preventDefault();
+  lineStep(keys[e.key]);
+});
+
 $("#coach-show").addEventListener("click", async () => {
+  endLine();
   record("?", false);
   coach.reveal = true;
   await coachDraw();

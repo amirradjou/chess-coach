@@ -294,6 +294,10 @@ across 8+ games.
     punishments come first in the deck, training steers their replies towards positions that are
     due, and each opening shows "you've found 3 of 7 punishments" and how many are due. Each
     position and move also shows where the games through it stand after both sides' 10th moves.
+    A wrong move in training plays out what happens next on the board, from the engine's line:
+    "If you play 5.Qd5, they answer 5...Nxd5, taking your queen on d5. By 9...Bd7 you have lost the
+    queen." Each move says what it does, in chess terms worked out from the board, and you can
+    step through the line and try again. Where there is no real punishment it says so.
   - **Progress**: month by month, your rating and practice week by week (pick the speed), and
     your puzzle solve rate per theme.
 - `puzzles make --openings` turns those opening fixes into drills; any move within 30 cp of the
