@@ -14,7 +14,7 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 from rich.table import Table
 
 from chess_coach import __version__
-from chess_coach.config import Settings
+from chess_coach.config import Settings, better_database, config_file
 from chess_coach.db import Store
 from chess_coach.models import Game, Judgement
 from chess_coach.util import parse_since, practice_day
@@ -39,7 +39,12 @@ RatedOption = Annotated[bool, typer.Option("--rated", help="Rated games only.")]
 def main(
     ctx: typer.Context,
     db: Annotated[
-        Path | None, typer.Option("--db", help="SQLite file (default: data/chess-coach.db).")
+        Path | None,
+        typer.Option(
+            "--db",
+            help="SQLite file. Default: CHESS_COACH_DB, then db in "
+            "~/.config/chess-coach/config.toml, then data/chess-coach.db.",
+        ),
     ] = None,
 ) -> None:
     """A coach that reads your games and trains you on your own mistakes."""
@@ -1199,6 +1204,14 @@ def today_command(
     import webbrowser
 
     settings: Settings = ctx.obj
+    # Before Store opens it: an empty default database shouldn't hide the one you meant.
+    if (other := better_database(settings.db_path)) is not None:
+        path, count = other
+        console.print(
+            f"[yellow]{settings.db_path} has no puzzles, but {path} has {count}.[/yellow] Use it "
+            f'with --db, or put db = "{path.resolve()}" in {config_file()}.',
+            highlight=False,
+        )
     with Store(settings.db_path) as store:
         if status:
             console.print(_today_status(store), highlight=False)

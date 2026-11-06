@@ -1,7 +1,9 @@
 """Practice: what gets served, what is remembered, and which day it counts for."""
 
 import socket
+import sqlite3
 import time
+import tomllib
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -13,6 +15,7 @@ from typer.testing import CliRunner
 
 from chess_coach.cli import app
 from chess_coach.coach.repertoire import Fix
+from chess_coach.config import Settings, find_stockfish
 from chess_coach.db import Store
 from chess_coach.engine.stockfish import LineEval
 from chess_coach.models import CoachCard, Color, Game, Judgement, MoveFact, Phase, Puzzle, Speed
@@ -543,3 +546,79 @@ def test_drill_serves_due_again_then_new(tmp_path: Path) -> None:
     assert "Puzzle 1 of 1" in result.output and "Solved 0 of 1." in result.output
     with Store(db) as store:  # it was the one due again, not the new one
         assert [a[0] for a in store.attempts()] == ["lichess:g1:1", "lichess:g1:1"]
+
+
+def _config(home: Path, text: str) -> None:
+    path = home / ".config" / "chess-coach" / "config.toml"
+    path.parent.mkdir(parents=True)
+    path.write_text(text)
+
+
+def test_the_database_comes_from_the_flag_then_env_then_config(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert Settings().db_path == Path("data/chess-coach.db")
+
+    _config(tmp_path, 'db = "~/games/mine.db"\n')
+    assert Settings().db_path == tmp_path / "games" / "mine.db"
+
+    monkeypatch.setenv("CHESS_COACH_DB", "/from/env.db")
+    assert Settings().db_path == Path("/from/env.db")
+
+    flagged = tmp_path / "flag.db"
+    result = runner.invoke(app, ["--db", str(flagged), "today", "--status"])
+    assert result.exit_code == 0 and flagged.exists()
+    assert not (tmp_path / "games").exists() and not Path("/from/env.db").exists()
+
+
+def test_a_broken_config_file_is_an_error_not_another_database(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _config(tmp_path, "db = not toml\n")
+    with pytest.raises(tomllib.TOMLDecodeError):
+        Settings()
+
+
+def test_stockfish_is_found_from_the_checkout_in_any_directory(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("STOCKFISH_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+    engine = tmp_path / "checkout" / ".stockfish" / "stockfish"
+    engine.parent.mkdir(parents=True)
+    engine.write_text("")
+    engine.chmod(0o755)
+    monkeypatch.setattr("chess_coach.config.REPO_ROOT", tmp_path / "checkout")
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    assert find_stockfish() == engine
+
+
+def test_today_points_at_the_database_you_meant_without_touching_it(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    real = data / "mine.db"
+    _practice_db(real, 3)
+    with Store(real) as store:  # as an older version left it, so a migration would show
+        store.conn.execute("DROP TABLE threats")
+        store.conn.commit()
+    with Store(data / "backup.db"):
+        pass  # no puzzles: never suggested
+    (data / "junk.db").write_text("not a database")
+    before = real.read_bytes()
+
+    result = runner.invoke(app, ["--db", str(data / "chess-coach.db"), "today", "--status"])
+    assert result.exit_code == 0, result.output
+    joined = " ".join(result.output.split())
+    assert "has no puzzles, but" in joined and "mine.db has 3" in joined
+    assert "backup.db" not in joined and "junk.db" not in joined
+    assert "config.toml" in joined
+    assert joined.endswith("Today: nothing to practise. Tomorrow: 0 due again, 0 new")
+
+    assert real.read_bytes() == before
+    tables = sqlite3.connect(f"file:{real}?mode=ro", uri=True).execute(
+        "SELECT name FROM sqlite_master WHERE name = 'threats'"
+    )
+    assert tables.fetchall() == []
+
+
+def test_no_hint_when_the_database_has_puzzles(tmp_path: Path) -> None:
+    db = tmp_path / "a.db"
+    _practice_db(db, 1)
+    _practice_db(tmp_path / "b.db", 3)
+    result = runner.invoke(app, ["--db", str(db), "today", "--status"])
+    assert "has no puzzles" not in result.output
