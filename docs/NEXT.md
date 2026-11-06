@@ -6,7 +6,8 @@ what was built and why; this file is the to-do list until these branches are mer
 ## Branches, in merge order
 
 Each one builds on the one before it, so the PRs go in this order (merge commits, not squash).
-No PRs are open yet. Open them in this order once the merge check below is done.
+PRs 1-3 are open, each based on the branch before it. This branch gets its PR when the card is
+built.
 
 | # | Branch | What it holds | State |
 |---|--------|---------------|-------|
@@ -31,14 +32,20 @@ After the merges, on a fresh copy of the database, the new commands and the APIs
 numbers as each branch on its own. Threats match with `--threads 1`; 2 threads relabel about
 100 rows. Puzzles are 525 after dedupe.
 
-**Not finished: the independent check of the two merges.** It was stopped partway. Before
-opening the PRs:
-- Diff each merge against both parents. The first pass listed the lines each merge dropped
-  (`lost1.txt`, `lost2.txt` in `~/.cache/chess-coach-research/session-2026-11-01/w1/`); they
-  look like intended resolutions, but nobody has confirmed them.
-- Run the suite at each merge commit.
-- Open a fresh copy twice: every migration runs once and the second open changes nothing.
-- Walk every tab in a browser at 1280 px and 375 px with no console errors.
+**The independent check of the two merges is done (2026-11-05); they are sound.**
+- Every function and module-level statement each side changed was compared with both parents
+  (AST, then the source of everything that differed: 9 definitions in the first merge, 15 in the
+  second). All are the unions and resolutions the merge commits describe; nothing was lost.
+- Test ids, routes and CLI options at each merge are the union of both parents. The one id that
+  disappears, `test_wilson_lower`, became `test_wilson_interval`, which holds all its assertions.
+- The suite passes at every merge and at both parents of each (231, then 261).
+- A fresh copy of the database opened twice: the first open adds the `threats` table and
+  `punish_*` tags on 228 puzzles; the second changes nothing. Attempts unchanged, no foreign key
+  problems, and the real database's hash did not move.
+- Every tab at 1280 px and 375 px, with the threat question and each Learn openings mode: no
+  console errors or failed requests. One defect, fixed in `feat/repeat-mistakes`: How each
+  opening comes out made the page scroll sideways on a phone (as Rating and practice by week
+  already did on main). A wide table now scrolls by itself.
 
 ## What the research found (two rounds, 2026-10-31 and 2026-11-01)
 
