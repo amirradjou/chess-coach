@@ -12,7 +12,8 @@
     <h1>Chess coach</h1>
     <p id="summary" class="muted">Working out your patterns (a few seconds the first time)…</p>
     <nav>
-      <button data-tab="mistakes" class="on">What you get wrong</button>
+      <button data-tab="today" class="on">Today <span id="today-count" class="small"></span></button>
+      <button data-tab="mistakes">What you get wrong</button>
       <button data-tab="practice">Practice</button>
       <button data-tab="openings">Your openings</button>
       <button data-tab="coach">Learn openings</button>
@@ -20,12 +21,13 @@
     </nav>
   </header>
   <main>
-    <section id="mistakes"></section>
-    <section id="practice" hidden>
+    <section id="mistakes" hidden></section>
+    <section id="practice">
       <div class="toolbar">
-        <label>Practise <select id="tag"><option value="">everything</option></select></label>
+        <label id="tag-filter">Practise <select id="tag"><option value="">everything</option></select></label>
         <span id="due" class="muted"></span>
       </div>
+      <div id="today-done" hidden></div>
       <div class="drill">
         <div class="boardcol">
           <div id="board" class="board big"></div>
@@ -44,7 +46,7 @@
             <button id="skip" hidden>Skip the question</button>
             <button id="retry" hidden>Try again</button>
             <button id="giveup">Show the answer</button>
-            <button id="next" class="primary" hidden>Next puzzle</button>
+            <button id="next" class="primary" hidden>Next</button>
           </div>
           <div id="lines"></div>
           <p class="muted small">Click a piece, then its square. A wrong move shows their best reply and what

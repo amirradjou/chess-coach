@@ -1,8 +1,11 @@
 from datetime import UTC, date, datetime, timedelta
 
+import chess
+
 from chess_coach.coach import training
 from chess_coach.coach import tree as optree
 from chess_coach.db import Store
+from chess_coach.engine.stockfish import LineEval
 from chess_coach.models import CoachCard
 from chess_coach.util import practice_day
 
@@ -106,3 +109,82 @@ def test_due_cards_come_first_and_are_counted(tmp_path):
     assert (cards["found"], cards["due"], cards["due_paths"]) == (0, 1, [NF6])
     (deck_card,) = client.get("/api/coach/punish", params=Q).json()
     assert (deck_card["state"], deck_card["found"]) == ("due", False)
+
+
+def _due_card(db, path=NF6, kind="punish"):
+    """A card you answered and missed long ago, due today."""
+    card = CoachCard("Italian Game", "white", list(path), kind, "2026-01-01")
+    with Store(db) as store:
+        store.save_coach_attempt(card, "g1f3", False, datetime(2026, 1, 1, 12, tzinfo=UTC))
+    return card
+
+
+def test_today_serves_a_due_opening_card_without_naming_the_move(tmp_path):
+    client = _client(tmp_path, no_engine)
+    card = _due_card(tmp_path / "coach.db")
+    got = client.get("/api/today/next").json()
+    assert (got["done"], got["kind"], got["id"], got["punish"]) == (False, "card", card.id, True)
+    assert (got["side"], got["opening"], got["last"]) == ("white", "Italian Game", "g8f6")
+    assert got["line"].startswith("1. e4 e5") and "e5" not in got["line"].split()[-1:]
+    assert "target" not in got and "solution" not in got
+
+
+def test_answering_a_due_card_in_today_records_it_once(tmp_path):
+    client = _client(tmp_path, no_engine)
+    card = _due_card(tmp_path / "coach.db")
+    assert client.post("/api/today/card", json={"id": "nope", "uci": "e4e5"}).status_code == 404
+    assert client.post("/api/today/card", json={"id": card.id, "uci": "a1a8"}).status_code == 400
+
+    # Without an engine the stored best move decides: 5.e5, the punishment
+    r = client.post("/api/today/card", json={"id": card.id, "uci": "e4e5"}).json()
+    assert r["correct"] and r["answer"] == "e5" and r["target"]["san"] == "e5"
+    assert r["next_due"] == (_today() + timedelta(days=1)).isoformat()
+    with Store(tmp_path / "coach.db") as store:
+        assert len(store.coach_attempts()) == 2  # January's miss and today's answer
+    after = client.get("/api/today/next").json()
+    assert after["done"] and after["progress"]["done"] == 1
+
+    # A second answer the same day changes nothing
+    client.post("/api/today/card", json={"id": card.id, "uci": "?"})
+    with Store(tmp_path / "coach.db") as store:
+        assert len(store.coach_attempts()) == 2
+
+
+def test_asking_to_see_a_cards_move_is_a_miss_that_shows_it(tmp_path):
+    client = _client(tmp_path, no_engine)
+    card = _due_card(tmp_path / "coach.db")
+    r = client.post("/api/today/card", json={"id": card.id, "uci": "?"}).json()
+    assert not r["correct"] and r["answer"] is None and r["target"]["san"] == "e5"
+    assert r["next_due"] == (_today() + timedelta(days=1)).isoformat()
+
+
+def test_on_your_own_line_your_usual_sound_move_is_right(tmp_path):
+    root = optree.build(*games_and_facts())
+    path = NXC3[:0]  # the start: your 1.e4 is your move in every game
+    node = optree.walk(root, path)
+    board = chess.Board()
+    played = chess.Move.from_uci("e2e4")
+    judged = training.judge(training.LINE, node, board, played, lambda fen: None)
+    assert judged.correct and judged.target == played and judged.check is None
+    assert training.kind_at(root, path) == training.LINE
+    assert training.kind_at(root, NF6) == training.PUNISH
+
+
+def test_check_move_uses_the_engine_within_its_margin_and_the_stored_move_without():
+    board = chess.Board()
+    e4, a3 = chess.Move.from_uci("e2e4"), chess.Move.from_uci("a2a3")
+    answers = {board.fen(): LineEval(30, None, e4)}
+
+    def after(cp):
+        def analyse(fen):
+            return answers.get(fen) or LineEval(cp, None, None)
+
+        return analyse
+
+    # You keep 10 of the 30: within the margin. You fall to -30: out of it.
+    assert training.check_move(board, a3, after(-10)).ok
+    assert not training.check_move(board, a3, after(30)).ok
+    assert training.check_move(board, e4, after(30)).ok  # the engine's move always stands
+    assert not training.check_move(board, a3, lambda fen: None, e4).ok
+    assert training.check_move(board, e4, lambda fen: None, e4).ok
+    assert training.check_move(board, a3, lambda fen: None).ok  # nothing to compare it with

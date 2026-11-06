@@ -51,7 +51,10 @@ const tagName = (t) => TAG_NAMES[t] ?? t.replaceAll("_", " ");
 const loaded = {};
 function show(tab, arg) {
   for (const b of document.querySelectorAll("nav button")) b.classList.toggle("on", b.dataset.tab === tab);
-  for (const s of document.querySelectorAll("main section")) s.hidden = s.id !== tab;
+  // Today is Practice's board, served from today's session
+  const section = tab === "today" ? "practice" : tab;
+  for (const s of document.querySelectorAll("main section")) s.hidden = s.id !== section;
+  if (tab === "today") return openToday();
   if (tab === "practice") return openPractice(arg);
   if (tab === "coach") return openCoach();
   if (!loaded[tab]) loaded[tab] = { mistakes: loadMistakes, openings: loadOpenings, progress: loadProgress }[tab]();
@@ -253,8 +256,10 @@ const boards = new Map(); // board URL -> SVG text, for this puzzle
 let drill = null;
 let drawn = 0;
 
+let todayMode = true;
+
 function fresh(puzzle) {
-  return { puzzle, solving: true, tries: [], result: null, lines: [], line: 0, ply: 0, from: null, asking: false, threat: null };
+  return { puzzle, solving: true, tries: [], result: null, lines: [], line: 0, ply: 0, from: null, asking: false, threat: null, arrow: null };
 }
 
 function squareAt(svg, evt, side) {
@@ -289,7 +294,15 @@ function mark(svg, sq, side) {
   svg.append(r);
 }
 
+async function openToday() {
+  todayMode = true;
+  $("#tag-filter").hidden = true;
+  await nextPuzzle();
+}
+
 async function openPractice(tag) {
+  todayMode = false;
+  $("#tag-filter").hidden = false;
   const tags = await api("/api/drill/tags");
   const select = $("#tag");
   const keep = tag ?? select.value;
@@ -314,8 +327,13 @@ async function nextPuzzle() {
   fill($("#lines"));
   $("#steps").hidden = true;
   buttons({});
+  $("#today-done").hidden = true;
+  $("#practice .drill").hidden = false;
+  if (todayMode) return nextToday();
+  countToday();
   const tag = $("#tag").value;
   const p = await api("/api/drill/next" + (tag ? `?tag=${encodeURIComponent(tag)}` : ""));
+  if (todayMode) return; // you moved on to Today while this came back
   if (p.done) {
     fill($("#board"));
     $("#prompt").textContent = p.puzzles
@@ -328,6 +346,103 @@ async function nextPuzzle() {
   $("#due").textContent = `${p.again} due again · ${p.new} new`;
   if (p.ask_threat) return askThreat(p);
   await startPuzzle();
+}
+
+// -- today ---------------------------------------------------------------------------------
+function showProgress(p) {
+  $("#today-count").textContent = p.total ? `${p.done} of ${p.total}` : "";
+}
+
+// The tab's count, when you practise elsewhere: an answer counts wherever you gave it.
+async function countToday() {
+  showProgress((await api("/api/today/next")).progress);
+}
+
+async function nextToday() {
+  const p = await api("/api/today/next");
+  if (!todayMode) return; // you moved on to Practice while this came back
+  showProgress(p.progress);
+  if (p.done) {
+    $("#due").textContent = "";
+    return todayDone(p);
+  }
+  drill = fresh(p);
+  $("#due").textContent = `${p.progress.done} of ${p.progress.total} · ${p.progress.again} due again · ${p.progress.new} new · about ${p.progress.minutes} min`;
+  if (p.kind === "card") return startCard();
+  if (p.ask_threat) return askThreat(p);
+  await startPuzzle();
+}
+
+function rightOf({ right, tried }) {
+  return tried ? `${right} of ${tried} right (${Math.round((100 * right) / tried)}%)` : "none yet";
+}
+
+function todayDone(p) {
+  $("#practice .drill").hidden = true;
+  const panel = $("#today-done");
+  panel.hidden = false;
+  const more = el("button", { class: "primary" }, "Practise more");
+  more.addEventListener("click", () => show("practice"));
+  const heading = p.progress.done
+    ? `Done for today: ${p.progress.done} practised.`
+    : p.puzzles ? "Nothing to practise today." : "No puzzles yet.";
+  fill(panel,
+    el("h2", {}, heading),
+    p.puzzles
+      ? [
+        el("p", {}, `Tomorrow: ${p.tomorrow.again} due again, ${p.tomorrow.new} new.`),
+        el("p", {}, `You practised on ${p.days.practised} of the last ${p.days.of} days.`),
+        el("p", {}, `Reviews: ${rightOf(p.reviews)}. First tries: ${rightOf(p.first)}.`),
+        el("p", { class: "muted small" }, "A first try shows what you already knew; a review shows whether the practice stuck."),
+        p.tomorrow.new ? el("div", { class: "buttons" }, more) : null,
+      ]
+      : el("p", {}, "Run ", el("code", {}, "chess-coach sync"), " to bring in your games and make puzzles from your mistakes."),
+  );
+}
+
+// An opening position that is due again, from Learn openings. One answer, then the move to learn.
+async function startCard() {
+  const p = drill.puzzle;
+  drill.asking = false;
+  fill($("#prompt"),
+    p.punish
+      ? el("span", {}, `Your ${p.opening}: their last move was a mistake you've met before. Punish it.`)
+      : el("span", {}, `Your ${p.opening}: what do you play here?`),
+    p.line ? [el("br"), el("span", { class: "muted small" }, p.line)] : null,
+    el("br"), el("span", { class: "muted small" }, `${p.side === "white" ? "White" : "Black"} to move · opening training`),
+    p.opening_idea ? el("span", { class: "idea" }, el("b", {}, `${p.opening}: `), p.opening_idea) : null,
+  );
+  buttons({ giveup: true });
+  await draw();
+}
+
+async function answerCard(uci) {
+  let r;
+  try {
+    r = await api("/api/today/card", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: drill.puzzle.id, uci }),
+    });
+  } catch (err) {
+    fill($("#feedback"), "That isn't a legal move here. Try again.");
+    return;
+  }
+  drill.solving = false;
+  drill.arrow = r.target?.uci ?? null;
+  const also = r.correct && r.target && r.target.san !== r.answer ? ` The move to remember here: ${r.target.san}.` : "";
+  fill($("#feedback"),
+    r.correct
+      ? [el("b", { class: "better" }, `${r.answer}: good.`), also]
+      : [
+        r.answer ? [el("b", { class: "played" }, `${r.answer} isn't it`), r.loss !== null ? `: it gives away ${r.loss}. ` : ". "] : null,
+        r.target ? ["The move: ", el("b", { class: "better" }, r.target.san), ". "] : null,
+      ],
+    reasons(r.faults),
+    el("br"), el("span", { class: "muted small" }, `Next time: ${r.next_due}.`),
+  );
+  buttons({ next: true });
+  await draw();
 }
 
 function puzzlePrompt(p) {
@@ -380,6 +495,9 @@ async function guessThreat(uci) {
 // The position on show: the puzzle itself (ply 0) or the position after `ply` moves of a line,
 // with the line's next move as an arrow.
 function shown() {
+  if (drill.puzzle.kind === "card") {
+    return { fen: drill.puzzle.fen, last: drill.puzzle.last, next: drill.arrow, color: "best" };
+  }
   const line = drill.lines[drill.line];
   const before = drill.ply > 0 ? line.plies[drill.ply - 1] : null;
   if (!line && drill.puzzle.ask_threat) {
@@ -465,6 +583,7 @@ async function onBoard(evt) {
   mark(svg, null);
   if (uci.slice(0, 2) === uci.slice(2)) return;
   if (drill.asking) return guessThreat(uci);
+  if (drill.puzzle.kind === "card") return drill.solving ? answerCard(uci) : undefined;
   if (!drill.solving) return explore(uci);
   if (drill.ply !== 0) {
     // While solving, answers are moves from the puzzle position.
@@ -560,7 +679,11 @@ async function explore(uci) {
 
 $("#retry").addEventListener("click", () => { drill.ply = 0; draw(); });
 $("#skip").addEventListener("click", () => { fill($("#feedback")); startPuzzle(); });
-$("#giveup").addEventListener("click", () => (drill.result ? reveal(null) : answer("?")));
+$("#giveup").addEventListener("click", () => {
+  if (!drill) return;
+  if (drill.puzzle.kind === "card") return answerCard("?");
+  return drill.result ? reveal(null) : answer("?");
+});
 $("#next").addEventListener("click", nextPuzzle);
 
 // -- learn openings ------------------------------------------------------------------------
@@ -951,4 +1074,6 @@ function trendSection(t) {
   ];
 }
 
-show("mistakes");
+// Today first, and fast. The header's summary comes from What you get wrong, whose first read takes
+// seconds: it starts once there is something to practise on the board.
+show("today").finally(() => { loaded.mistakes ??= loadMistakes(); });

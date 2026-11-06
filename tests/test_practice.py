@@ -462,3 +462,29 @@ def test_days_practised_of_the_last_week_and_accuracy_apart() -> None:
     reviews, first = accuracy(attempts, answers)
     assert (reviews.right, reviews.tried) == (2, 3)
     assert (first.right, first.tried) == (2, 3)
+
+
+def test_today_serves_a_puzzle_then_says_how_practice_is_going(tmp_path: Path) -> None:
+    db = tmp_path / "c.db"
+    _practice_db(db, 2)
+    client = TestClient(create_app(db))
+    first = client.get("/api/today/next").json()
+    assert (first["done"], first["kind"]) == (False, "puzzle") and first["played"] == "Nf3"
+    assert first["progress"] == {"done": 0, "total": 2, "again": 0, "new": 2, "minutes": 1}
+
+    client.post("/api/drill/answer", json={"id": first["id"], "uci": "e2e4"})  # right
+    second = client.get("/api/today/next").json()
+    assert second["id"] != first["id"] and second["progress"]["done"] == 1
+
+    client.post("/api/drill/answer", json={"id": second["id"], "uci": "?"})  # a miss
+    done = client.get("/api/today/next").json()
+    assert done["done"] and done["progress"]["done"] == 2 and done["puzzles"] == 2
+    # A first solve comes back after a day too (SM-2), and no new ones are left
+    assert done["tomorrow"] == {"again": 2, "new": 0}
+    assert done["days"] == {"practised": 1, "of": 7}
+    assert done["first"] == {"right": 1, "tried": 2} and done["reviews"] == {"right": 0, "tried": 0}
+
+
+def test_today_works_on_an_empty_database(tmp_path: Path) -> None:
+    done = TestClient(create_app(tmp_path / "c.db")).get("/api/today/next").json()
+    assert done["done"] and done["puzzles"] == 0 and done["progress"]["total"] == 0
