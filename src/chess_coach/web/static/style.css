@@ -70,6 +70,8 @@ select { min-width: 0; max-width: 100%; text-overflow: ellipsis; }
 .score .d { background: #b8b2a3; }
 .score .l { background: var(--bad); }
 table { border-collapse: collapse; width: 100%; font-size: 14px; }
+/* A wide table scrolls by itself on a phone, so the page doesn't scroll sideways. */
+@media (max-width: 640px) { table { display: block; overflow-x: auto; } }
 th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--line); }
 th:first-child, td:first-child { text-align: left; }
 code { font-size: 14px; }
