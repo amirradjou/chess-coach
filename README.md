@@ -34,36 +34,36 @@ to day.
 
 <table>
   <tr>
-    <td width="50%">
+    <td width="50%" valign="top">
       <b>Today</b><br>
       Ten things a day, reviews first. Short enough to finish.<br><br>
       <a href="docs/screenshots/today.png"><img src="docs/screenshots/today.png" alt="Today's practice session on a board"></a>
     </td>
-    <td width="50%">
+    <td width="50%" valign="top">
       <b>What you get wrong</b><br>
       The mistakes you repeat, shown on your own games.<br><br>
       <a href="docs/screenshots/mistakes.png"><img src="docs/screenshots/mistakes.png" alt="Repeated mistakes on boards, with what to learn"></a>
     </td>
   </tr>
   <tr>
-    <td width="50%">
+    <td width="50%" valign="top">
       <b>Practice</b><br>
       Puzzles made from your mistakes. See the best line next to what you played.<br><br>
       <a href="docs/screenshots/practice.png"><img src="docs/screenshots/practice.png" alt="A puzzle from a game, with the best line and the game's line"></a>
     </td>
-    <td width="50%">
+    <td width="50%" valign="top">
       <b>Your openings</b><br>
       Your score, your usual line, and the moves worth changing.<br><br>
       <a href="docs/screenshots/openings.png"><img src="docs/screenshots/openings.png" alt="Opening cards with scores and moves to improve"></a>
     </td>
   </tr>
   <tr>
-    <td width="50%">
+    <td width="50%" valign="top">
       <b>Learn openings</b><br>
       Your openings as a tree of your games, with the mistakes opponents keep making and how to punish them.<br><br>
       <a href="docs/screenshots/learn-openings.png"><img src="docs/screenshots/learn-openings.png" alt="The opening tree, with how often each move came up"></a>
     </td>
-    <td width="50%">
+    <td width="50%" valign="top">
       <b>Progress</b><br>
       How often you go wrong early in a game, compared with public players at each rating.<br><br>
       <a href="docs/screenshots/progress.png"><img src="docs/screenshots/progress.png" alt="Early-game error rates against opponents and stronger players"></a>
@@ -73,13 +73,7 @@ to day.
 
 ## How it works
 
-```mermaid
-flowchart LR
-    A[Your games] --> B[Stockfish checks every move]
-    B --> C[Mistakes you repeat]
-    C --> D[Puzzles and opening drills]
-    D --> E[Today's practice]
-```
+![Your games go to Stockfish, which finds the mistakes you repeat. They become puzzles and opening drills, then today's practice.](docs/screenshots/how-it-works.svg)
 
 - Stockfish decides what counts as a mistake. The explanations are worked out from the board, so
   no AI is needed. An AI summary is optional.
