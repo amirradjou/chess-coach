@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
@@ -14,10 +15,12 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 from rich.table import Table
 
 from chess_coach import __version__
-from chess_coach.config import Settings, better_database, config_file
+from chess_coach.config import ConfigError, Settings, better_database, config_file
 from chess_coach.db import Store
 from chess_coach.models import Game, Judgement
 from chess_coach.util import parse_since, practice_day
+
+UCI_MOVE = re.compile(r"[a-h][1-8][a-h][1-8][qrbn]?")  # not SAN such as e8=Q or R1a3
 
 app = typer.Typer(no_args_is_help=True)
 import_app = typer.Typer(no_args_is_help=True, help="Pull games into the local database.")
@@ -48,10 +51,12 @@ def main(
     ] = None,
 ) -> None:
     """A coach that reads your games and trains you on your own mistakes."""
-    settings = Settings()
-    if db is not None:
-        settings.db_path = db
-    ctx.obj = settings
+    try:
+        # With --db the config file isn't read at all, so a broken one can't get in the way.
+        ctx.obj = Settings(db_path=db) if db is not None else Settings()
+    except ConfigError as exc:
+        console.print(str(exc), style="red", markup=False, highlight=False)
+        raise typer.Exit(code=1) from exc
 
 
 @app.command()
@@ -855,7 +860,7 @@ def _ask_move(board) -> tuple[str, object | None]:
         try:
             move = (
                 chess.Move.from_uci(answer)
-                if len(answer) in (4, 5) and answer[1].isdigit()
+                if UCI_MOVE.fullmatch(answer)
                 else board.parse_san(answer)
             )
         except ValueError:
@@ -937,7 +942,10 @@ def _card_turn(store: Store, card, title: str, analyse) -> bool:
     target = board.san(judged.target) if judged.target else None
     if judged.correct:
         console.print(f"[green]{board.san(move)}: good.[/green]")
-    if not judged.correct or (target and move and target != board.san(move)):
+    if target is None:
+        if not judged.correct:
+            console.print("[yellow]No move is known for this position.[/yellow]")
+    elif not judged.correct or target != board.san(move):
         console.print(f"[yellow]The move to remember: {target}.[/yellow]")
     now = datetime.now(UTC)
     if not store.coach_answered(card.id, practice_day(now).isoformat()):
@@ -1257,7 +1265,7 @@ def today_command(
 
     settings: Settings = ctx.obj
     # Before Store opens it: an empty default database shouldn't hide the one you meant.
-    if (other := better_database(settings.db_path)) is not None:
+    if not status and (other := better_database(settings.db_path)) is not None:
         path, count = other
         console.print(
             f"[yellow]{settings.db_path} has no puzzles, but {path} has {count}.[/yellow] Use it "

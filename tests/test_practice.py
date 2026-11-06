@@ -3,7 +3,6 @@
 import socket
 import sqlite3
 import time
-import tomllib
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -13,7 +12,8 @@ import pytest
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
-from chess_coach.cli import app
+from chess_coach.cli import _ask_move, app
+from chess_coach.coach.progress import weekly
 from chess_coach.coach.repertoire import Fix
 from chess_coach.config import Settings, find_stockfish
 from chess_coach.db import Store
@@ -570,11 +570,24 @@ def test_the_database_comes_from_the_flag_then_env_then_config(tmp_path: Path, m
     assert not (tmp_path / "games").exists() and not Path("/from/env.db").exists()
 
 
-def test_a_broken_config_file_is_an_error_not_another_database(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("text", ["db = not toml\n", "db = 3\n"])
+def test_a_broken_config_file_is_an_error_not_another_database(
+    tmp_path: Path, monkeypatch, text: str
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _config(tmp_path, text)
+    result = runner.invoke(app, ["today", "--status"])
+    assert result.exit_code == 1
+    assert "config.toml" in " ".join(result.output.split())
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert not (tmp_path / "data").exists()  # no other database was opened instead
+
+
+def test_with_db_a_broken_config_file_doesnt_matter(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     _config(tmp_path, "db = not toml\n")
-    with pytest.raises(tomllib.TOMLDecodeError):
-        Settings()
+    result = runner.invoke(app, ["--db", str(tmp_path / "c.db"), "today", "--status"])
+    assert result.exit_code == 0, result.output
 
 
 def test_stockfish_is_found_from_the_checkout_in_any_directory(tmp_path: Path, monkeypatch) -> None:
@@ -601,7 +614,7 @@ def test_today_points_at_the_database_you_meant_without_touching_it(tmp_path: Pa
     (data / "junk.db").write_text("not a database")
     before = real.read_bytes()
 
-    result = runner.invoke(app, ["--db", str(data / "chess-coach.db"), "today", "--status"])
+    result = runner.invoke(app, ["--db", str(data / "chess-coach.db"), "today", "--cli"])
     assert result.exit_code == 0, result.output
     joined = " ".join(result.output.split())
     assert "has no puzzles, but" in joined and "mine.db has 3" in joined
@@ -622,3 +635,42 @@ def test_no_hint_when_the_database_has_puzzles(tmp_path: Path) -> None:
     _practice_db(tmp_path / "b.db", 3)
     result = runner.invoke(app, ["--db", str(db), "today", "--status"])
     assert "has no puzzles" not in result.output
+
+
+def test_today_status_is_one_line_even_with_a_better_database_beside_it(tmp_path: Path) -> None:
+    _practice_db(tmp_path / "mine.db", 2)
+    result = runner.invoke(app, ["--db", str(tmp_path / "empty.db"), "today", "--status"])
+    assert result.exit_code == 0, result.output
+    assert len(result.output.strip().splitlines()) == 1
+
+
+def test_the_weekly_table_counts_an_answer_in_the_practice_days_week(toronto) -> None:
+    # Sunday 21:00 in Toronto is already Monday, and the next ISO week, in UTC.
+    sunday_night = datetime(2026, 11, 2, 2, 0, tzinfo=UTC).isoformat()
+    # Monday 03:00 in Toronto still counts for Sunday: the day changes at 4 am.
+    small_hours = datetime(2026, 11, 2, 8, 0, tzinfo=UTC).isoformat()
+    weeks = weekly(
+        [],
+        "blitz",
+        [("p", sunday_night, True), ("q", small_hours, False)],
+        [("c", sunday_night, True)],
+        today=date(2026, 11, 1),
+        weeks=1,
+    )
+    assert [(w.label, w.puzzles, w.solved, w.answers) for w in weeks] == [("2026-W44", 2, 1, 1)]
+
+
+@pytest.mark.parametrize(
+    ("fen", "typed", "uci"),
+    [
+        ("3k4/4P3/8/8/8/8/8/4K3 w - - 0 1", "e8=Q", "e7e8q"),  # SAN with a promotion
+        ("3k4/4P3/8/8/8/8/8/4K3 w - - 0 1", "e7e8q", "e7e8q"),  # the same move in UCI
+        ("4k3/8/8/R7/8/8/8/R3K3 w - - 0 1", "R1a3", "a1a3"),  # SAN naming the rank
+        ("4k3/8/8/R7/8/8/8/R3K3 w - - 0 1", "a1a3", "a1a3"),
+        (START, "Nf3", "g1f3"),
+    ],
+)
+def test_a_move_can_be_typed_in_san_or_uci(monkeypatch, fen: str, typed: str, uci: str) -> None:
+    monkeypatch.setattr("typer.prompt", lambda _text: typed)
+    answer, played = _ask_move(chess.Board(fen))
+    assert answer == typed and played is not None and played.uci() == uci

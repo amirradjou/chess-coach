@@ -417,17 +417,19 @@ async function startCard() {
 }
 
 async function answerCard(uci) {
+  const card = drill;
   let r;
   try {
     r = await api("/api/today/card", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: drill.puzzle.id, uci }),
+      body: JSON.stringify({ id: card.puzzle.id, uci }),
     });
   } catch (err) {
-    fill($("#feedback"), "That isn't a legal move here. Try again.");
+    if (drill === card) fill($("#feedback"), "That isn't a legal move here. Try again.");
     return;
   }
+  if (drill !== card) return; // you moved on: the answer is saved, and this board is gone
   drill.solving = false;
   drill.arrow = r.target?.uci ?? null;
   const also = r.correct && r.target && r.target.san !== r.answer ? ` The move to remember here: ${r.target.san}.` : "";
@@ -574,6 +576,7 @@ function drawLines() {
 }
 
 async function onBoard(evt) {
+  if (!drill) return; // the next item is on its way; the old board is still showing
   const svg = evt.currentTarget;
   const sq = squareAt(svg, evt, drill.puzzle.side);
   if (!sq) return;

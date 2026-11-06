@@ -19,14 +19,25 @@ def config_file() -> Path:
     return Path.home() / ".config" / "chess-coach" / "config.toml"
 
 
+class ConfigError(Exception):
+    """The config file can't be used. It is an error to see, not a reason to quietly use another
+    database."""
+
+
 def configured_db() -> Path | None:
-    """The `db` set in the config file. One that can't be read is an error to see, not a reason to
-    quietly use another database."""
+    """The `db` set in the config file, if any."""
     path = config_file()
     if not path.is_file():
         return None
-    db = tomllib.loads(path.read_text()).get("db")
-    return Path(db).expanduser() if db else None
+    try:
+        db = tomllib.loads(path.read_text()).get("db")
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"{path} can't be read: {exc}") from exc
+    if db is None:
+        return None
+    if not isinstance(db, str):
+        raise ConfigError(f'{path}: db must be a path in quotes, such as db = "~/games.db"')
+    return Path(db).expanduser()
 
 
 def default_db() -> Path:

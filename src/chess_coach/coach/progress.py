@@ -12,6 +12,7 @@ from statistics import mean
 
 from chess_coach.models import Game, MoveFact, Puzzle
 from chess_coach.patterns.features import ERRORS, counted, is_bullet, result_of, rushed
+from chess_coach.util import practice_day
 
 TREND_WEEKS = 12  # weeks in the rating trend
 EFFECT_WEEKS = 4  # weeks needed with and without practice before comparing them
@@ -40,7 +41,7 @@ class Period:
         return self.points / self.decided if self.decided else None
 
 
-def _label(when: datetime, by: str) -> str:
+def _label(when: date, by: str) -> str:
     if by == "week":
         year, week, _ = when.isocalendar()
         return f"{year}-W{week:02d}"
@@ -159,11 +160,11 @@ def weekly(
         if w.rating is not None and i > 0:
             w.change = w.rating - rated[i - 1][1]
     for _, at, correct in puzzle_attempts:
-        if (w := rows.get(_label(datetime.fromisoformat(at), "week"))) is not None:
+        if (w := rows.get(_label(practice_day(datetime.fromisoformat(at)), "week"))) is not None:
             w.puzzles += 1
             w.solved += correct
     for _, at, correct in coach_attempts:
-        if (w := rows.get(_label(datetime.fromisoformat(at), "week"))) is not None:
+        if (w := rows.get(_label(practice_day(datetime.fromisoformat(at)), "week"))) is not None:
             w.answers += 1
             w.right += correct
     return list(rows.values())
