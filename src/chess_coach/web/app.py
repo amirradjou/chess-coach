@@ -30,6 +30,11 @@ from chess_coach.coach.habits import (
     from_pressure,
     missed_kinds,
 )
+from chess_coach.coach.levels import MAX_PLY as LEVELS_MAX_PLY
+from chess_coach.coach.levels import Rate as LevelRate
+from chess_coach.coach.levels import Report as LevelReport
+from chess_coach.coach.levels import headline as level_headline
+from chess_coach.coach.levels import report as level_report
 from chess_coach.coach.principles import Reasons, allows, explain, opening_idea, their_threat
 from chess_coach.coach.progress import (
     periods,
@@ -401,6 +406,46 @@ class CoachAnswer(BaseModel):
     path: list[str]  # UCI moves from the start to the position you answered
     uci: str  # your move, or "?" when you asked to see it
     correct: bool  # judged by the page: your usual sound move, or /api/coach/check
+
+
+def _level_rate(r: LevelRate) -> dict | None:
+    if not r.moves:
+        return None
+    return {
+        "rate": round(r.rate * 100, 1),
+        "low": round(r.low * 100, 1),
+        "high": round(r.high * 100, 1),
+        "moves": r.moves,
+    }
+
+
+def _levels(rep: LevelReport) -> dict:
+    return {
+        "headline": level_headline(rep),
+        "built": rep.built,
+        "speeds": [
+            {
+                "speed": s.speed,
+                "games": s.games,
+                "left_out": s.left_out_note,
+                "controls": s.controls,
+                "rating": s.rating,
+                "stale": s.stale_note,
+                "rows": [
+                    {
+                        "segment": r.segment,
+                        "you": _level_rate(r.you),
+                        "them": _level_rate(r.them),
+                        "above": None if r.above is None else round(r.above * 100, 1),
+                        "gap": r.gap,
+                        "sentence": r.sentence,
+                    }
+                    for r in s.rows
+                ],
+            }
+            for s in rep.speeds
+        ],
+    }
 
 
 def _pct(value: float | None) -> int | None:
@@ -1104,9 +1149,17 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
         speeds = trend_speeds(games)
         chosen = speed if speed in speeds else (speeds[0] if speeds else None)
         today = practice_day()
+
+        def next_level() -> dict:
+            with Store(db_path) as store:
+                early = list(store.iter_moves(max_ply=LEVELS_MAX_PLY))
+            return _levels(level_report(games, early, today))
+
+        levels = cached("levels", (len(games), len(moves), today.toordinal()), next_level)
         weeks = weekly(games, chosen, attempts, answers, today=today) if chosen else []
         effect = practice_effect(weeks)
         return {
+            "levels": levels,
             "trend": {
                 "speeds": speeds,
                 "speed": chosen,

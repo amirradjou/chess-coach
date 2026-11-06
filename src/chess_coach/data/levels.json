@@ -1,0 +1,2395 @@
+{
+ "source": "https://database.lichess.org/standard/lichess_db_standard_rated_2026-09.pgn.zst (Lichess open database, CC0)",
+ "slice_bytes": 2000000000,
+ "slice": {
+  "games_scanned": 6118393,
+  "first_game_utc": "2026.09.01 00:00:00",
+  "last_game_utc": "2026.09.03 02:03:15",
+  "filters": {
+   "bullet": {
+    "abandoned": 971,
+    "analysed ([%eval])": 73121,
+    "eligible": 1324193,
+    "in a band": 1398285
+   },
+   "blitz": {
+    "abandoned": 221,
+    "analysed ([%eval])": 105300,
+    "eligible": 664567,
+    "excluded player": 3,
+    "in a band": 770091
+   }
+  }
+ },
+ "built": "2026-11-01",
+ "yardstick": {
+  "engine": "Stockfish 19, depth 12, 1 thread, hash 64 MB, through chess_coach.engine.analysis.analyze_game (start position, then the position after each ply), the pipeline `analyze` uses",
+  "plies": {
+   "bullet": 20,
+   "blitz": 40
+  },
+  "error": "wp_loss >= 20 (mistake or blunder; Lichess's win-probability model, mates clamped to +-10000, the engine's best move and forced moves lose nothing)",
+  "inaccuracy": "wp_loss >= 10 (inaccuracy or worse)",
+  "sample": "per speed and band, the games with the smallest blake2b-64 hash of the game id among games with both players in the band, no [%eval] in the moves (not analysed on Lichess) and Termination not \"Abandoned\""
+ },
+ "rules": {
+  "counted": "bullet: only moves 1-10 count (patterns.features.counted)",
+  "rushed": "moves made short on time are left out, for both players: under 15 s left in bullet, otherwise under 10% of the base time (patterns.features.rushed)",
+  "moves": "move number = (ply + 1) // 2; both colours; White's first move included",
+  "results": "never used",
+  "clock10": "bullet: mean share of the base time left after each player's 10th move, every player-game that reached it, [mean, n]",
+  "design_effect": "per row, [errors, inaccuracies]: the variance of the rate with games as clusters over the binomial p(1-p)/n; divide n by it before a Wilson interval, since moves of one game are alike"
+ },
+ "segments": {
+  "bullet": [
+   "1-5",
+   "6-10"
+  ],
+  "blitz": [
+   "1-5",
+   "6-10",
+   "11-20"
+  ]
+ },
+ "speeds": {
+  "blitz": {
+   "time_controls": [
+    "300+3",
+    "180+2"
+   ],
+   "bands": [
+    {
+     "lo": 900,
+     "hi": 1100,
+     "games": 1000,
+     "eligible": 44417,
+     "players": 1762,
+     "mean_elo": 1010.0,
+     "rows": {
+      "1-5": {
+       "errors": [
+        202,
+        9952
+       ],
+       "inaccuracies": [
+        659,
+        9952
+       ],
+       "design_effect": [
+        1.75,
+        1.83
+       ]
+      },
+      "6-10": {
+       "errors": [
+        778,
+        9600
+       ],
+       "inaccuracies": [
+        1717,
+        9600
+       ],
+       "design_effect": [
+        1.56,
+        1.75
+       ]
+      },
+      "11-20": {
+       "errors": [
+        1555,
+        16305
+       ],
+       "inaccuracies": [
+        3122,
+        16305
+       ],
+       "design_effect": [
+        2.04,
+        2.51
+       ]
+      }
+     },
+     "by_time_control": {
+      "300+3": {
+       "games": 519,
+       "rows": {
+        "1-5": {
+         "errors": [
+          96,
+          5180
+         ],
+         "inaccuracies": [
+          337,
+          5180
+         ]
+        },
+        "6-10": {
+         "errors": [
+          383,
+          5026
+         ],
+         "inaccuracies": [
+          886,
+          5026
+         ]
+        },
+        "11-20": {
+         "errors": [
+          761,
+          8640
+         ],
+         "inaccuracies": [
+          1588,
+          8640
+         ]
+        }
+       }
+      },
+      "180+2": {
+       "games": 481,
+       "rows": {
+        "1-5": {
+         "errors": [
+          106,
+          4772
+         ],
+         "inaccuracies": [
+          322,
+          4772
+         ]
+        },
+        "6-10": {
+         "errors": [
+          395,
+          4574
+         ],
+         "inaccuracies": [
+          831,
+          4574
+         ]
+        },
+        "11-20": {
+         "errors": [
+          794,
+          7665
+         ],
+         "inaccuracies": [
+          1534,
+          7665
+         ]
+        }
+       }
+      }
+     }
+    },
+    {
+     "lo": 1000,
+     "hi": 1200,
+     "games": 1000,
+     "eligible": 60271,
+     "players": 1813,
+     "mean_elo": 1106.8,
+     "rows": {
+      "1-5": {
+       "errors": [
+        146,
+        9940
+       ],
+       "inaccuracies": [
+        566,
+        9940
+       ],
+       "design_effect": [
+        1.48,
+        1.75
+       ]
+      },
+      "6-10": {
+       "errors": [
+        674,
+        9577
+       ],
+       "inaccuracies": [
+        1618,
+        9577
+       ],
+       "design_effect": [
+        1.51,
+        1.91
+       ]
+      },
+      "11-20": {
+       "errors": [
+        1523,
+        16575
+       ],
+       "inaccuracies": [
+        3154,
+        16575
+       ],
+       "design_effect": [
+        1.86,
+        2.25
+       ]
+      }
+     },
+     "by_time_control": {
+      "300+3": {
+       "games": 476,
+       "rows": {
+        "1-5": {
+         "errors": [
+          62,
+          4739
+         ],
+         "inaccuracies": [
+          267,
+          4739
+         ]
+        },
+        "6-10": {
+         "errors": [
+          315,
+          4599
+         ],
+         "inaccuracies": [
+          761,
+          4599
+         ]
+        },
+        "11-20": {
+         "errors": [
+          727,
+          8088
+         ],
+         "inaccuracies": [
+          1512,
+          8088
+         ]
+        }
+       }
+      },
+      "180+2": {
+       "games": 524,
+       "rows": {
+        "1-5": {
+         "errors": [
+          84,
+          5201
+         ],
+         "inaccuracies": [
+          299,
+          5201
+         ]
+        },
+        "6-10": {
+         "errors": [
+          359,
+          4978
+         ],
+         "inaccuracies": [
+          857,
+          4978
+         ]
+        },
+        "11-20": {
+         "errors": [
+          796,
+          8487
+         ],
+         "inaccuracies": [
+          1642,
+          8487
+         ]
+        }
+       }
+      }
+     }
+    },
+    {
+     "lo": 1100,
+     "hi": 1300,
+     "games": 1000,
+     "eligible": 78103,
+     "players": 1851,
+     "mean_elo": 1205.7,
+     "rows": {
+      "1-5": {
+       "errors": [
+        117,
+        9924
+       ],
+       "inaccuracies": [
+        503,
+        9924
+       ],
+       "design_effect": [
+        1.28,
+        1.61
+       ]
+      },
+      "6-10": {
+       "errors": [
+        630,
+        9589
+       ],
+       "inaccuracies": [
+        1519,
+        9589
+       ],
+       "design_effect": [
+        1.76,
+        2.06
+       ]
+      },
+      "11-20": {
+       "errors": [
+        1516,
+        16754
+       ],
+       "inaccuracies": [
+        3116,
+        16754
+       ],
+       "design_effect": [
+        1.94,
+        2.33
+       ]
+      }
+     },
+     "by_time_control": {
+      "300+3": {
+       "games": 453,
+       "rows": {
+        "1-5": {
+         "errors": [
+          46,
+          4499
+         ],
+         "inaccuracies": [
+          219,
+          4499
+         ]
+        },
+        "6-10": {
+         "errors": [
+          295,
+          4351
+         ],
+         "inaccuracies": [
+          676,
+          4351
+         ]
+        },
+        "11-20": {
+         "errors": [
+          653,
+          7657
+         ],
+         "inaccuracies": [
+          1390,
+          7657
+         ]
+        }
+       }
+      },
+      "180+2": {
+       "games": 547,
+       "rows": {
+        "1-5": {
+         "errors": [
+          71,
+          5425
+         ],
+         "inaccuracies": [
+          284,
+          5425
+         ]
+        },
+        "6-10": {
+         "errors": [
+          335,
+          5238
+         ],
+         "inaccuracies": [
+          843,
+          5238
+         ]
+        },
+        "11-20": {
+         "errors": [
+          863,
+          9097
+         ],
+         "inaccuracies": [
+          1726,
+          9097
+         ]
+        }
+       }
+      }
+     }
+    },
+    {
+     "lo": 1200,
+     "hi": 1400,
+     "games": 1000,
+     "eligible": 95411,
+     "players": 1848,
+     "mean_elo": 1305.9,
+     "rows": {
+      "1-5": {
+       "errors": [
+        104,
+        9957
+       ],
+       "inaccuracies": [
+        411,
+        9957
+       ],
+       "design_effect": [
+        1.4,
+        1.58
+       ]
+      },
+      "6-10": {
+       "errors": [
+        526,
+        9668
+       ],
+       "inaccuracies": [
+        1326,
+        9668
+       ],
+       "design_effect": [
+        1.84,
+        1.95
+       ]
+      },
+      "11-20": {
+       "errors": [
+        1351,
+        16925
+       ],
+       "inaccuracies": [
+        2973,
+        16925
+       ],
+       "design_effect": [
+        1.83,
+        2.13
+       ]
+      }
+     },
+     "by_time_control": {
+      "300+3": {
+       "games": 434,
+       "rows": {
+        "1-5": {
+         "errors": [
+          39,
+          4321
+         ],
+         "inaccuracies": [
+          159,
+          4321
+         ]
+        },
+        "6-10": {
+         "errors": [
+          229,
+          4189
+         ],
+         "inaccuracies": [
+          563,
+          4189
+         ]
+        },
+        "11-20": {
+         "errors": [
+          539,
+          7332
+         ],
+         "inaccuracies": [
+          1219,
+          7332
+         ]
+        }
+       }
+      },
+      "180+2": {
+       "games": 566,
+       "rows": {
+        "1-5": {
+         "errors": [
+          65,
+          5636
+         ],
+         "inaccuracies": [
+          252,
+          5636
+         ]
+        },
+        "6-10": {
+         "errors": [
+          297,
+          5479
+         ],
+         "inaccuracies": [
+          763,
+          5479
+         ]
+        },
+        "11-20": {
+         "errors": [
+          812,
+          9593
+         ],
+         "inaccuracies": [
+          1754,
+          9593
+         ]
+        }
+       }
+      }
+     }
+    },
+    {
+     "lo": 1300,
+     "hi": 1500,
+     "games": 1000,
+     "eligible": 109816,
+     "players": 1854,
+     "mean_elo": 1402.6,
+     "rows": {
+      "1-5": {
+       "errors": [
+        83,
+        9964
+       ],
+       "inaccuracies": [
+        357,
+        9964
+       ],
+       "design_effect": [
+        1.44,
+        1.6
+       ]
+      },
+      "6-10": {
+       "errors": [
+        452,
+        9721
+       ],
+       "inaccuracies": [
+        1192,
+        9721
+       ],
+       "design_effect": [
+        1.78,
+        1.96
+       ]
+      },
+      "11-20": {
+       "errors": [
+        1272,
+        17266
+       ],
+       "inaccuracies": [
+        3029,
+        17266
+       ],
+       "design_effect": [
+        1.95,
+        2.18
+       ]
+      }
+     },
+     "by_time_control": {
+      "300+3": {
+       "games": 404,
+       "rows": {
+        "1-5": {
+         "errors": [
+          33,
+          4028
+         ],
+         "inaccuracies": [
+          134,
+          4028
+         ]
+        },
+        "6-10": {
+         "errors": [
+          182,
+          3937
+         ],
+         "inaccuracies": [
+          479,
+          3937
+         ]
+        },
+        "11-20": {
+         "errors": [
+          450,
+          7033
+         ],
+         "inaccuracies": [
+          1164,
+          7033
+         ]
+        }
+       }
+      },
+      "180+2": {
+       "games": 596,
+       "rows": {
+        "1-5": {
+         "errors": [
+          50,
+          5936
+         ],
+         "inaccuracies": [
+          223,
+          5936
+         ]
+        },
+        "6-10": {
+         "errors": [
+          270,
+          5784
+         ],
+         "inaccuracies": [
+          713,
+          5784
+         ]
+        },
+        "11-20": {
+         "errors": [
+          822,
+          10233
+         ],
+         "inaccuracies": [
+          1865,
+          10233
+         ]
+        }
+       }
+      }
+     }
+    },
+    {
+     "lo": 1400,
+     "hi": 1600,
+     "games": 1000,
+     "eligible": 118272,
+     "players": 1859,
+     "mean_elo": 1504.2,
+     "rows": {
+      "1-5": {
+       "errors": [
+        95,
+        9958
+       ],
+       "inaccuracies": [
+        364,
+        9958
+       ],
+       "design_effect": [
+        1.3,
+        1.63
+       ]
+      },
+      "6-10": {
+       "errors": [
+        421,
+        9742
+       ],
+       "inaccuracies": [
+        1153,
+        9742
+       ],
+       "design_effect": [
+        1.84,
+        1.99
+       ]
+      },
+      "11-20": {
+       "errors": [
+        1258,
+        17499
+       ],
+       "inaccuracies": [
+        2948,
+        17499
+       ],
+       "design_effect": [
+        1.84,
+        2.12
+       ]
+      }
+     },
+     "by_time_control": {
+      "300+3": {
+       "games": 371,
+       "rows": {
+        "1-5": {
+         "errors": [
+          33,
+          3683
+         ],
+         "inaccuracies": [
+          150,
+          3683
+         ]
+        },
+        "6-10": {
+         "errors": [
+          160,
+          3613
+         ],
+         "inaccuracies": [
+          449,
+          3613
+         ]
+        },
+        "11-20": {
+         "errors": [
+          420,
+          6603
+         ],
+         "inaccuracies": [
+          1036,
+          6603
+         ]
+        }
+       }
+      },
+      "180+2": {
+       "games": 629,
+       "rows": {
+        "1-5": {
+         "errors": [
+          62,
+          6275
+         ],
+         "inaccuracies": [
+          214,
+          6275
+         ]
+        },
+        "6-10": {
+         "errors": [
+          261,
+          6129
+         ],
+         "inaccuracies": [
+          704,
+          6129
+         ]
+        },
+        "11-20": {
+         "errors": [
+          838,
+          10896
+         ],
+         "inaccuracies": [
+          1912,
+          10896
+         ]
+        }
+       }
+      }
+     }
+    },
+    {
+     "lo": 1500,
+     "hi": 1700,
+     "games": 1000,
+     "eligible": 121795,
+     "players": 1839,
+     "mean_elo": 1599.5,
+     "rows": {
+      "1-5": {
+       "errors": [
+        75,
+        9946
+       ],
+       "inaccuracies": [
+        304,
+        9946
+       ],
+       "design_effect": [
+        1.39,
+        1.6
+       ]
+      },
+      "6-10": {
+       "errors": [
+        400,
+        9797
+       ],
+       "inaccuracies": [
+        1069,
+        9797
+       ],
+       "design_effect": [
+        1.71,
+        2.04
+       ]
+      },
+      "11-20": {
+       "errors": [
+        1160,
+        18064
+       ],
+       "inaccuracies": [
+        2917,
+        18064
+       ],
+       "design_effect": [
+        1.7,
+        2.0
+       ]
+      }
+     },
+     "by_time_control": {
+      "300+3": {
+       "games": 332,
+       "rows": {
+        "1-5": {
+         "errors": [
+          21,
+          3289
+         ],
+         "inaccuracies": [
+          108,
+          3289
+         ]
+        },
+        "6-10": {
+         "errors": [
+          141,
+          3250
+         ],
+         "inaccuracies": [
+          359,
+          3250
+         ]
+        },
+        "11-20": {
+         "errors": [
+          356,
+          6046
+         ],
+         "inaccuracies": [
+          893,
+          6046
+         ]
+        }
+       }
+      },
+      "180+2": {
+       "games": 668,
+       "rows": {
+        "1-5": {
+         "errors": [
+          54,
+          6657
+         ],
+         "inaccuracies": [
+          196,
+          6657
+         ]
+        },
+        "6-10": {
+         "errors": [
+          259,
+          6547
+         ],
+         "inaccuracies": [
+          710,
+          6547
+         ]
+        },
+        "11-20": {
+         "errors": [
+          804,
+          12018
+         ],
+         "inaccuracies": [
+          2024,
+          12018
+         ]
+        }
+       }
+      }
+     }
+    },
+    {
+     "lo": 1600,
+     "hi": 1800,
+     "games": 1000,
+     "eligible": 117710,
+     "players": 1849,
+     "mean_elo": 1695.1,
+     "rows": {
+      "1-5": {
+       "errors": [
+        36,
+        9967
+       ],
+       "inaccuracies": [
+        212,
+        9967
+       ],
+       "design_effect": [
+        1.25,
+        1.3
+       ]
+      },
+      "6-10": {
+       "errors": [
+        317,
+        9837
+       ],
+       "inaccuracies": [
+        1002,
+        9837
+       ],
+       "design_effect": [
+        1.53,
+        1.94
+       ]
+      },
+      "11-20": {
+       "errors": [
+        1118,
+        18122
+       ],
+       "inaccuracies": [
+        2849,
+        18122
+       ],
+       "design_effect": [
+        1.81,
+        2.04
+       ]
+      }
+     },
+     "by_time_control": {
+      "300+3": {
+       "games": 303,
+       "rows": {
+        "1-5": {
+         "errors": [
+          5,
+          3022
+         ],
+         "inaccuracies": [
+          63,
+          3022
+         ]
+        },
+        "6-10": {
+         "errors": [
+          78,
+          2997
+         ],
+         "inaccuracies": [
+          289,
+          2997
+         ]
+        },
+        "11-20": {
+         "errors": [
+          290,
+          5513
+         ],
+         "inaccuracies": [
+          817,
+          5513
+         ]
+        }
+       }
+      },
+      "180+2": {
+       "games": 697,
+       "rows": {
+        "1-5": {
+         "errors": [
+          31,
+          6945
+         ],
+         "inaccuracies": [
+          149,
+          6945
+         ]
+        },
+        "6-10": {
+         "errors": [
+          239,
+          6840
+         ],
+         "inaccuracies": [
+          713,
+          6840
+         ]
+        },
+        "11-20": {
+         "errors": [
+          828,
+          12609
+         ],
+         "inaccuracies": [
+          2032,
+          12609
+         ]
+        }
+       }
+      }
+     }
+    },
+    {
+     "lo": 1700,
+     "hi": 1900,
+     "games": 1000,
+     "eligible": 106685,
+     "players": 1837,
+     "mean_elo": 1795.6,
+     "rows": {
+      "1-5": {
+       "errors": [
+        32,
+        9970
+       ],
+       "inaccuracies": [
+        171,
+        9970
+       ],
+       "design_effect": [
+        1.22,
+        1.42
+       ]
+      },
+      "6-10": {
+       "errors": [
+        247,
+        9817
+       ],
+       "inaccuracies": [
+        804,
+        9817
+       ],
+       "design_effect": [
+        1.54,
+        1.82
+       ]
+      },
+      "11-20": {
+       "errors": [
+        992,
+        17965
+       ],
+       "inaccuracies": [
+        2649,
+        17965
+       ],
+       "design_effect": [
+        1.81,
+        2.09
+       ]
+      }
+     },
+     "by_time_control": {
+      "300+3": {
+       "games": 261,
+       "rows": {
+        "1-5": {
+         "errors": [
+          6,
+          2610
+         ],
+         "inaccuracies": [
+          52,
+          2610
+         ]
+        },
+        "6-10": {
+         "errors": [
+          60,
+          2588
+         ],
+         "inaccuracies": [
+          210,
+          2588
+         ]
+        },
+        "11-20": {
+         "errors": [
+          235,
+          4723
+         ],
+         "inaccuracies": [
+          649,
+          4723
+         ]
+        }
+       }
+      },
+      "180+2": {
+       "games": 739,
+       "rows": {
+        "1-5": {
+         "errors": [
+          26,
+          7360
+         ],
+         "inaccuracies": [
+          119,
+          7360
+         ]
+        },
+        "6-10": {
+         "errors": [
+          187,
+          7229
+         ],
+         "inaccuracies": [
+          594,
+          7229
+         ]
+        },
+        "11-20": {
+         "errors": [
+          757,
+          13242
+         ],
+         "inaccuracies": [
+          2000,
+          13242
+         ]
+        }
+       }
+      }
+     }
+    },
+    {
+     "lo": 1800,
+     "hi": 2000,
+     "games": 1000,
+     "eligible": 84999,
+     "players": 1795,
+     "mean_elo": 1892.7,
+     "rows": {
+      "1-5": {
+       "errors": [
+        25,
+        9972
+       ],
+       "inaccuracies": [
+        141,
+        9972
+       ],
+       "design_effect": [
+        1.3,
+        1.55
+       ]
+      },
+      "6-10": {
+       "errors": [
+        214,
+        9857
+       ],
+       "inaccuracies": [
+        696,
+        9857
+       ],
+       "design_effect": [
+        1.78,
+        1.95
+       ]
+      },
+      "11-20": {
+       "errors": [
+        891,
+        18301
+       ],
+       "inaccuracies": [
+        2489,
+        18301
+       ],
+       "design_effect": [
+        1.72,
+        1.93
+       ]
+      }
+     },
+     "by_time_control": {
+      "300+3": {
+       "games": 205,
+       "rows": {
+        "1-5": {
+         "errors": [
+          2,
+          2044
+         ],
+         "inaccuracies": [
+          25,
+          2044
+         ]
+        },
+        "6-10": {
+         "errors": [
+          31,
+          2032
+         ],
+         "inaccuracies": [
+          134,
+          2032
+         ]
+        },
+        "11-20": {
+         "errors": [
+          179,
+          3768
+         ],
+         "inaccuracies": [
+          512,
+          3768
+         ]
+        }
+       }
+      },
+      "180+2": {
+       "games": 795,
+       "rows": {
+        "1-5": {
+         "errors": [
+          23,
+          7928
+         ],
+         "inaccuracies": [
+          116,
+          7928
+         ]
+        },
+        "6-10": {
+         "errors": [
+          183,
+          7825
+         ],
+         "inaccuracies": [
+          562,
+          7825
+         ]
+        },
+        "11-20": {
+         "errors": [
+          712,
+          14533
+         ],
+         "inaccuracies": [
+          1977,
+          14533
+         ]
+        }
+       }
+      }
+     }
+    },
+    {
+     "lo": 1900,
+     "hi": 2100,
+     "games": 1000,
+     "eligible": 61143,
+     "players": 1726,
+     "mean_elo": 1992.3,
+     "rows": {
+      "1-5": {
+       "errors": [
+        18,
+        9986
+       ],
+       "inaccuracies": [
+        112,
+        9986
+       ],
+       "design_effect": [
+        1.32,
+        1.55
+       ]
+      },
+      "6-10": {
+       "errors": [
+        160,
+        9920
+       ],
+       "inaccuracies": [
+        561,
+        9920
+       ],
+       "design_effect": [
+        1.81,
+        1.85
+       ]
+      },
+      "11-20": {
+       "errors": [
+        800,
+        18433
+       ],
+       "inaccuracies": [
+        2313,
+        18433
+       ],
+       "design_effect": [
+        1.75,
+        1.86
+       ]
+      }
+     },
+     "by_time_control": {
+      "300+3": {
+       "games": 205,
+       "rows": {
+        "1-5": {
+         "errors": [
+          2,
+          2050
+         ],
+         "inaccuracies": [
+          11,
+          2050
+         ]
+        },
+        "6-10": {
+         "errors": [
+          28,
+          2047
+         ],
+         "inaccuracies": [
+          104,
+          2047
+         ]
+        },
+        "11-20": {
+         "errors": [
+          156,
+          3856
+         ],
+         "inaccuracies": [
+          456,
+          3856
+         ]
+        }
+       }
+      },
+      "180+2": {
+       "games": 795,
+       "rows": {
+        "1-5": {
+         "errors": [
+          16,
+          7936
+         ],
+         "inaccuracies": [
+          101,
+          7936
+         ]
+        },
+        "6-10": {
+         "errors": [
+          132,
+          7873
+         ],
+         "inaccuracies": [
+          457,
+          7873
+         ]
+        },
+        "11-20": {
+         "errors": [
+          644,
+          14577
+         ],
+         "inaccuracies": [
+          1857,
+          14577
+         ]
+        }
+       }
+      }
+     }
+    },
+    {
+     "lo": 2000,
+     "hi": 2200,
+     "games": 1000,
+     "eligible": 40740,
+     "players": 1635,
+     "mean_elo": 2090.4,
+     "rows": {
+      "1-5": {
+       "errors": [
+        10,
+        9982
+       ],
+       "inaccuracies": [
+        91,
+        9982
+       ],
+       "design_effect": [
+        1.39,
+        1.58
+       ]
+      },
+      "6-10": {
+       "errors": [
+        126,
+        9939
+       ],
+       "inaccuracies": [
+        484,
+        9939
+       ],
+       "design_effect": [
+        1.7,
+        1.77
+       ]
+      },
+      "11-20": {
+       "errors": [
+        747,
+        18751
+       ],
+       "inaccuracies": [
+        2193,
+        18751
+       ],
+       "design_effect": [
+        1.78,
+        2.04
+       ]
+      }
+     },
+     "by_time_control": {
+      "300+3": {
+       "games": 163,
+       "rows": {
+        "1-5": {
+         "errors": [
+          0,
+          1621
+         ],
+         "inaccuracies": [
+          9,
+          1621
+         ]
+        },
+        "6-10": {
+         "errors": [
+          16,
+          1609
+         ],
+         "inaccuracies": [
+          79,
+          1609
+         ]
+        },
+        "11-20": {
+         "errors": [
+          103,
+          3095
+         ],
+         "inaccuracies": [
+          306,
+          3095
+         ]
+        }
+       }
+      },
+      "180+2": {
+       "games": 837,
+       "rows": {
+        "1-5": {
+         "errors": [
+          10,
+          8361
+         ],
+         "inaccuracies": [
+          82,
+          8361
+         ]
+        },
+        "6-10": {
+         "errors": [
+          110,
+          8330
+         ],
+         "inaccuracies": [
+          405,
+          8330
+         ]
+        },
+        "11-20": {
+         "errors": [
+          644,
+          15656
+         ],
+         "inaccuracies": [
+          1887,
+          15656
+         ]
+        }
+       }
+      }
+     }
+    },
+    {
+     "lo": 2100,
+     "hi": 2300,
+     "games": 1000,
+     "eligible": 23989,
+     "players": 1446,
+     "mean_elo": 2186.6,
+     "rows": {
+      "1-5": {
+       "errors": [
+        8,
+        9971
+       ],
+       "inaccuracies": [
+        66,
+        9971
+       ],
+       "design_effect": [
+        0.99,
+        1.37
+       ]
+      },
+      "6-10": {
+       "errors": [
+        95,
+        9885
+       ],
+       "inaccuracies": [
+        428,
+        9885
+       ],
+       "design_effect": [
+        1.85,
+        2.09
+       ]
+      },
+      "11-20": {
+       "errors": [
+        651,
+        18911
+       ],
+       "inaccuracies": [
+        2007,
+        18911
+       ],
+       "design_effect": [
+        1.66,
+        1.96
+       ]
+      }
+     },
+     "by_time_control": {
+      "300+3": {
+       "games": 66,
+       "rows": {
+        "1-5": {
+         "errors": [
+          0,
+          655
+         ],
+         "inaccuracies": [
+          4,
+          655
+         ]
+        },
+        "6-10": {
+         "errors": [
+          3,
+          649
+         ],
+         "inaccuracies": [
+          18,
+          649
+         ]
+        },
+        "11-20": {
+         "errors": [
+          38,
+          1251
+         ],
+         "inaccuracies": [
+          104,
+          1251
+         ]
+        }
+       }
+      },
+      "180+2": {
+       "games": 934,
+       "rows": {
+        "1-5": {
+         "errors": [
+          8,
+          9316
+         ],
+         "inaccuracies": [
+          62,
+          9316
+         ]
+        },
+        "6-10": {
+         "errors": [
+          92,
+          9236
+         ],
+         "inaccuracies": [
+          410,
+          9236
+         ]
+        },
+        "11-20": {
+         "errors": [
+          613,
+          17660
+         ],
+         "inaccuracies": [
+          1903,
+          17660
+         ]
+        }
+       }
+      }
+     }
+    },
+    {
+     "lo": 2200,
+     "hi": 2400,
+     "games": 1000,
+     "eligible": 12709,
+     "players": 1278,
+     "mean_elo": 2283.9,
+     "rows": {
+      "1-5": {
+       "errors": [
+        8,
+        9984
+       ],
+       "inaccuracies": [
+        61,
+        9984
+       ],
+       "design_effect": [
+        1.24,
+        1.44
+       ]
+      },
+      "6-10": {
+       "errors": [
+        57,
+        9926
+       ],
+       "inaccuracies": [
+        308,
+        9926
+       ],
+       "design_effect": [
+        1.41,
+        1.78
+       ]
+      },
+      "11-20": {
+       "errors": [
+        528,
+        19003
+       ],
+       "inaccuracies": [
+        1822,
+        19003
+       ],
+       "design_effect": [
+        1.38,
+        1.84
+       ]
+      }
+     },
+     "by_time_control": {
+      "300+3": {
+       "games": 24,
+       "rows": {
+        "1-5": {
+         "errors": [
+          0,
+          240
+         ],
+         "inaccuracies": [
+          0,
+          240
+         ]
+        },
+        "6-10": {
+         "errors": [
+          0,
+          240
+         ],
+         "inaccuracies": [
+          2,
+          240
+         ]
+        },
+        "11-20": {
+         "errors": [
+          21,
+          462
+         ],
+         "inaccuracies": [
+          53,
+          462
+         ]
+        }
+       }
+      },
+      "180+2": {
+       "games": 976,
+       "rows": {
+        "1-5": {
+         "errors": [
+          8,
+          9744
+         ],
+         "inaccuracies": [
+          61,
+          9744
+         ]
+        },
+        "6-10": {
+         "errors": [
+          57,
+          9686
+         ],
+         "inaccuracies": [
+          306,
+          9686
+         ]
+        },
+        "11-20": {
+         "errors": [
+          507,
+          18541
+         ],
+         "inaccuracies": [
+          1769,
+          18541
+         ]
+        }
+       }
+      }
+     }
+    }
+   ]
+  },
+  "bullet": {
+   "time_controls": [
+    "60+0"
+   ],
+   "bands": [
+    {
+     "lo": 900,
+     "hi": 1100,
+     "games": 1200,
+     "eligible": 34591,
+     "players": 1731,
+     "mean_elo": 1013.9,
+     "rows": {
+      "1-5": {
+       "errors": [
+        343,
+        11930
+       ],
+       "inaccuracies": [
+        974,
+        11930
+       ],
+       "design_effect": [
+        1.51,
+        1.78
+       ]
+      },
+      "6-10": {
+       "errors": [
+        996,
+        11537
+       ],
+       "inaccuracies": [
+        2154,
+        11537
+       ],
+       "design_effect": [
+        1.83,
+        1.99
+       ]
+      }
+     },
+     "clock10": [
+      0.7407,
+      2277
+     ]
+    },
+    {
+     "lo": 1000,
+     "hi": 1200,
+     "games": 1200,
+     "eligible": 52336,
+     "players": 1870,
+     "mean_elo": 1109.2,
+     "rows": {
+      "1-5": {
+       "errors": [
+        323,
+        11942
+       ],
+       "inaccuracies": [
+        896,
+        11942
+       ],
+       "design_effect": [
+        1.49,
+        1.84
+       ]
+      },
+      "6-10": {
+       "errors": [
+        915,
+        11619
+       ],
+       "inaccuracies": [
+        2001,
+        11619
+       ],
+       "design_effect": [
+        1.75,
+        1.86
+       ]
+      }
+     },
+     "clock10": [
+      0.7669,
+      2294
+     ]
+    },
+    {
+     "lo": 1100,
+     "hi": 1300,
+     "games": 1200,
+     "eligible": 73404,
+     "players": 1926,
+     "mean_elo": 1207.9,
+     "rows": {
+      "1-5": {
+       "errors": [
+        248,
+        11942
+       ],
+       "inaccuracies": [
+        782,
+        11942
+       ],
+       "design_effect": [
+        1.36,
+        1.81
+       ]
+      },
+      "6-10": {
+       "errors": [
+        871,
+        11564
+       ],
+       "inaccuracies": [
+        1938,
+        11564
+       ],
+       "design_effect": [
+        1.92,
+        2.04
+       ]
+      }
+     },
+     "clock10": [
+      0.7864,
+      2275
+     ]
+    },
+    {
+     "lo": 1200,
+     "hi": 1400,
+     "games": 1200,
+     "eligible": 99292,
+     "players": 1965,
+     "mean_elo": 1306.8,
+     "rows": {
+      "1-5": {
+       "errors": [
+        241,
+        11949
+       ],
+       "inaccuracies": [
+        780,
+        11949
+       ],
+       "design_effect": [
+        1.67,
+        1.9
+       ]
+      },
+      "6-10": {
+       "errors": [
+        769,
+        11639
+       ],
+       "inaccuracies": [
+        1815,
+        11639
+       ],
+       "design_effect": [
+        1.89,
+        1.93
+       ]
+      }
+     },
+     "clock10": [
+      0.8055,
+      2288
+     ]
+    },
+    {
+     "lo": 1300,
+     "hi": 1500,
+     "games": 1200,
+     "eligible": 127632,
+     "players": 2039,
+     "mean_elo": 1406.7,
+     "rows": {
+      "1-5": {
+       "errors": [
+        219,
+        11934
+       ],
+       "inaccuracies": [
+        723,
+        11934
+       ],
+       "design_effect": [
+        1.67,
+        1.92
+       ]
+      },
+      "6-10": {
+       "errors": [
+        750,
+        11666
+       ],
+       "inaccuracies": [
+        1777,
+        11666
+       ],
+       "design_effect": [
+        1.72,
+        1.88
+       ]
+      }
+     },
+     "clock10": [
+      0.8214,
+      2300
+     ]
+    },
+    {
+     "lo": 1400,
+     "hi": 1600,
+     "games": 1200,
+     "eligible": 157431,
+     "players": 2068,
+     "mean_elo": 1506.2,
+     "rows": {
+      "1-5": {
+       "errors": [
+        230,
+        11883
+       ],
+       "inaccuracies": [
+        720,
+        11883
+       ],
+       "design_effect": [
+        1.71,
+        1.91
+       ]
+      },
+      "6-10": {
+       "errors": [
+        705,
+        11538
+       ],
+       "inaccuracies": [
+        1718,
+        11538
+       ],
+       "design_effect": [
+        1.68,
+        1.96
+       ]
+      }
+     },
+     "clock10": [
+      0.8348,
+      2273
+     ]
+    },
+    {
+     "lo": 1500,
+     "hi": 1700,
+     "games": 1200,
+     "eligible": 191389,
+     "players": 2083,
+     "mean_elo": 1604.2,
+     "rows": {
+      "1-5": {
+       "errors": [
+        217,
+        11903
+       ],
+       "inaccuracies": [
+        653,
+        11903
+       ],
+       "design_effect": [
+        1.63,
+        1.77
+       ]
+      },
+      "6-10": {
+       "errors": [
+        672,
+        11663
+       ],
+       "inaccuracies": [
+        1662,
+        11663
+       ],
+       "design_effect": [
+        1.62,
+        1.82
+       ]
+      }
+     },
+     "clock10": [
+      0.8435,
+      2309
+     ]
+    },
+    {
+     "lo": 1600,
+     "hi": 1800,
+     "games": 1200,
+     "eligible": 221300,
+     "players": 2091,
+     "mean_elo": 1704.9,
+     "rows": {
+      "1-5": {
+       "errors": [
+        177,
+        11974
+       ],
+       "inaccuracies": [
+        613,
+        11974
+       ],
+       "design_effect": [
+        1.5,
+        1.79
+       ]
+      },
+      "6-10": {
+       "errors": [
+        571,
+        11771
+       ],
+       "inaccuracies": [
+        1487,
+        11771
+       ],
+       "design_effect": [
+        1.65,
+        1.93
+       ]
+      }
+     },
+     "clock10": [
+      0.8531,
+      2328
+     ]
+    },
+    {
+     "lo": 1700,
+     "hi": 1900,
+     "games": 1200,
+     "eligible": 241993,
+     "players": 2122,
+     "mean_elo": 1801.7,
+     "rows": {
+      "1-5": {
+       "errors": [
+        178,
+        11969
+       ],
+       "inaccuracies": [
+        625,
+        11969
+       ],
+       "design_effect": [
+        1.41,
+        1.75
+       ]
+      },
+      "6-10": {
+       "errors": [
+        566,
+        11767
+       ],
+       "inaccuracies": [
+        1444,
+        11767
+       ],
+       "design_effect": [
+        1.75,
+        2.01
+       ]
+      }
+     },
+     "clock10": [
+      0.8615,
+      2332
+     ]
+    },
+    {
+     "lo": 1800,
+     "hi": 2000,
+     "games": 1200,
+     "eligible": 250655,
+     "players": 2114,
+     "mean_elo": 1902.6,
+     "rows": {
+      "1-5": {
+       "errors": [
+        158,
+        11959
+       ],
+       "inaccuracies": [
+        573,
+        11959
+       ],
+       "design_effect": [
+        1.45,
+        1.71
+       ]
+      },
+      "6-10": {
+       "errors": [
+        467,
+        11776
+       ],
+       "inaccuracies": [
+        1310,
+        11776
+       ],
+       "design_effect": [
+        1.62,
+        1.87
+       ]
+      }
+     },
+     "clock10": [
+      0.8726,
+      2338
+     ]
+    },
+    {
+     "lo": 1900,
+     "hi": 2100,
+     "games": 1200,
+     "eligible": 236784,
+     "players": 2079,
+     "mean_elo": 1996.9,
+     "rows": {
+      "1-5": {
+       "errors": [
+        128,
+        11963
+       ],
+       "inaccuracies": [
+        507,
+        11963
+       ],
+       "design_effect": [
+        1.43,
+        1.73
+       ]
+      },
+      "6-10": {
+       "errors": [
+        442,
+        11804
+       ],
+       "inaccuracies": [
+        1279,
+        11804
+       ],
+       "design_effect": [
+        1.71,
+        1.88
+       ]
+      }
+     },
+     "clock10": [
+      0.8754,
+      2340
+     ]
+    },
+    {
+     "lo": 2000,
+     "hi": 2200,
+     "games": 1200,
+     "eligible": 205347,
+     "players": 2046,
+     "mean_elo": 2094.5,
+     "rows": {
+      "1-5": {
+       "errors": [
+        123,
+        11968
+       ],
+       "inaccuracies": [
+        452,
+        11968
+       ],
+       "design_effect": [
+        1.58,
+        1.79
+       ]
+      },
+      "6-10": {
+       "errors": [
+        400,
+        11846
+       ],
+       "inaccuracies": [
+        1279,
+        11846
+       ],
+       "design_effect": [
+        1.64,
+        1.8
+       ]
+      }
+     },
+     "clock10": [
+      0.8796,
+      2349
+     ]
+    },
+    {
+     "lo": 2100,
+     "hi": 2300,
+     "games": 1200,
+     "eligible": 162092,
+     "players": 1972,
+     "mean_elo": 2190.1,
+     "rows": {
+      "1-5": {
+       "errors": [
+        96,
+        11977
+       ],
+       "inaccuracies": [
+        368,
+        11977
+       ],
+       "design_effect": [
+        1.35,
+        1.56
+       ]
+      },
+      "6-10": {
+       "errors": [
+        345,
+        11857
+       ],
+       "inaccuracies": [
+        1098,
+        11857
+       ],
+       "design_effect": [
+        1.57,
+        1.79
+       ]
+      }
+     },
+     "clock10": [
+      0.8863,
+      2354
+     ]
+    },
+    {
+     "lo": 2200,
+     "hi": 2400,
+     "games": 1200,
+     "eligible": 116766,
+     "players": 1841,
+     "mean_elo": 2291.4,
+     "rows": {
+      "1-5": {
+       "errors": [
+        91,
+        11973
+       ],
+       "inaccuracies": [
+        368,
+        11973
+       ],
+       "design_effect": [
+        1.36,
+        1.7
+       ]
+      },
+      "6-10": {
+       "errors": [
+        275,
+        11814
+       ],
+       "inaccuracies": [
+        933,
+        11814
+       ],
+       "design_effect": [
+        1.59,
+        1.77
+       ]
+      }
+     },
+     "clock10": [
+      0.8879,
+      2343
+     ]
+    }
+   ]
+  }
+ }
+}

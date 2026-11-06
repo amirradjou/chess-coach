@@ -177,6 +177,8 @@ class Digest:
     repeats: list[Repeat] = field(default_factory=list)
     # Ignored threats and unsafe moves, yours against your opponents' (once `threats` has run).
     threats: ThreatReport | None = None
+    # One line: your gap to public players 300 points above you (coach.levels.headline).
+    next_level: str | None = None
 
 
 def build(
@@ -193,6 +195,7 @@ def build(
     puzzles: Sequence[Puzzle] = (),
     threats: Mapping[tuple[str, int], ThreatFact] | None = None,
     errors: Sequence[MoveFact] = (),
+    next_level: str | None = None,
 ) -> Digest:
     """The digest of the analysed games in `games`. `moves` are the user's; `gifts`
     (Store.gifts, both players' moves) adds When they blunder; `replies`
@@ -238,6 +241,7 @@ def build(
         punish=report(analysed, gifts) if gifts is not None else None,
         repeats=[r for r in again if since is None or (r.last and r.last >= since)],
         threats=threat_report(analysed, errors, threats) if threats else None,
+        next_level=next_level,
     )
 
 
@@ -456,6 +460,8 @@ def render(d: Digest, top: int = 5) -> str:
             out.append(f"| {what} | {m.moves} | {m.games} | {example} | {tip} |")
         out.append("")
 
+    if d.next_level:
+        out += ["## The next level", "", d.next_level, ""]
     if d.threats is not None and d.threats.you:
         out += _threats(d.threats)
     if d.punish is not None and d.punish.gifts:

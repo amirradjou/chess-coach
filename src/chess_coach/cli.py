@@ -417,6 +417,8 @@ def digest(
     With --since (e.g. 7d for a weekly digest) only those games count, compared with the ones
     before."""
     from chess_coach.coach.digest import build, render
+    from chess_coach.coach.levels import MAX_PLY, headline
+    from chess_coach.coach.levels import report as levels_report
     from chess_coach.coach.punish import GIFT_WP_LOSS
     from chess_coach.patterns.features import ERRORS
 
@@ -428,6 +430,7 @@ def digest(
         replies, puzzles = store.replies_to_errors(), store.puzzles()
         threats = store.threats()
         errors = list(store.iter_moves(judgements=ERRORS)) if threats else []
+        early = list(store.iter_moves(max_ply=MAX_PLY))
     built = build(
         games,
         moves,
@@ -439,6 +442,7 @@ def digest(
         puzzles=puzzles,
         threats=threats,
         errors=errors,
+        next_level=headline(levels_report(games, early, practice_day())),
     )
     text = render(built, top=top)
     if narrate:
@@ -1162,6 +1166,52 @@ def repeats(
         console.print(f"  It has a puzzle ({r.puzzle})." if r.puzzle else "  No puzzle for it yet.")
         for url in r.urls[:3]:
             console.print(f"  [dim]{url}[/dim]")
+
+
+def _percent(rate) -> str:
+    return f"{rate.rate:.1%} ({rate.low:.1%}-{rate.high:.1%})" if rate.moves else "-"
+
+
+@app.command()
+def levels(ctx: typer.Context) -> None:
+    """How often you go wrong early in a game, against public Lichess players by rating, from your
+    last 12 months. Says so when your games can't place you."""
+    from chess_coach.coach.levels import MAX_PLY, headline
+    from chess_coach.coach.levels import report as levels_report
+
+    settings: Settings = ctx.obj
+    with Store(settings.db_path) as store:
+        all_games = list(store.iter_games())
+        early = list(store.iter_moves(max_ply=MAX_PLY))
+    rep = levels_report(all_games, early, practice_day())
+    if not rep.speeds:
+        console.print("No analysed bullet or blitz games yet: run `chess-coach analyze`.")
+        return
+    if line := headline(rep):
+        console.print(line, highlight=False)
+    for s in rep.speeds:
+        rated = f", your median rating {s.rating}" if s.rating else ""
+        title = f"{s.speed.capitalize()}: {s.games} games at {' or '.join(s.controls)}{rated}"
+        table = Table(title=title, title_justify="left")
+        for column in ("moves", "you", "your opponents", "300 points above you"):
+            table.add_column(column, justify="left" if column == "moves" else "right")
+        for r in s.rows:
+            above = "-" if r.above is None else f"{r.above:.1%}"
+            table.add_row(r.segment, _percent(r.you), _percent(r.them), above)
+        console.print(table)
+        for r in s.rows:
+            console.print(r.sentence, highlight=False)
+        if note := s.left_out_note:
+            console.print(f"[dim]{note}[/dim]", highlight=False)
+        if note := s.stale_note:
+            console.print(f"[dim]{note}[/dim]", highlight=False)
+    console.print(
+        f"\n[dim]From your last 12 months. Mistakes and blunders (20+ points of win probability), "
+        "with 95% intervals. The "
+        f"public games are unanalysed Lichess games, scored the same way (built {rep.built}). "
+        "`digest` has this in one line.[/dim]",
+        highlight=False,
+    )
 
 
 def _today_status(store: Store) -> str:
