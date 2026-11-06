@@ -15,44 +15,45 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from itertools import combinations
 
+from chess_coach.models import Game, MoveFact
 from chess_coach.patterns.features import GameRow, MoveRow
 
 Feature = tuple[str, str]
 
 
+def wilson(hits: int, n: int, z: float = 1.96) -> tuple[float, float]:
+    """The Wilson score interval for hits/n (95% by default)."""
+    if n == 0:
+        return 0.0, 1.0
+    p = hits / n
+    centre = p + z * z / (2 * n)
+    margin = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))
+    scale = 1 + z * z / n
+    # The bounds lie in [0, 1], but rounding can put one a hair outside: 0 of 5 gave -3e-17,
+    # which prints as "-0%".
+    return max(0.0, (centre - margin) / scale), min(1.0, (centre + margin) / scale)
+
+
 def wilson_lower(hits: int, n: int, z: float = 1.96) -> float:
     """Lower bound of the Wilson score interval for hits/n."""
-    return _wilson(hits, n, z, -1)
+    return wilson(hits, n, z)[0]
 
 
 def wilson_upper(hits: int, n: int, z: float = 1.96) -> float:
     """Upper bound of the Wilson score interval for hits/n."""
-    return _wilson(hits, n, z, 1)
-
-
-def _wilson(hits: int, n: int, z: float, side: int) -> float:
-    if n == 0:
-        return 0.0 if side < 0 else 1.0
-    p = hits / n
-    centre = p + z * z / (2 * n)
-    margin = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))
-    # The bounds lie in [0, 1], but rounding can put one a hair outside: 0 of 5 gave -3e-17,
-    # which prints as "-0%".
-    return min(1.0, max(0.0, (centre + side * margin) / (1 + z * z / n)))
+    return wilson(hits, n, z)[1]
 
 
 def newcombe(hits1: int, n1: int, hits2: int, n2: int, z: float = 1.96) -> tuple[float, float]:
     """95% interval for hits1/n1 - hits2/n2, from the two Wilson intervals (Newcombe's hybrid
-    score method, which behaves near 0% and 100% where the plain normal one doesn't)."""
-    p1 = hits1 / n1 if n1 else 0.0
-    p2 = hits2 / n2 if n2 else 0.0
-    low1, high1 = wilson_lower(hits1, n1, z), wilson_upper(hits1, n1, z)
-    low2, high2 = wilson_lower(hits2, n2, z), wilson_upper(hits2, n2, z)
+    score method, which behaves near 0% and 100% where the plain normal one doesn't). With no
+    chances on one side there is no rate to compare: (-1, 1)."""
+    if n1 == 0 or n2 == 0:
+        return -1.0, 1.0
+    p1, p2 = hits1 / n1, hits2 / n2
+    (low1, high1), (low2, high2) = wilson(hits1, n1, z), wilson(hits2, n2, z)
     d = p1 - p2
-    return (
-        d - math.sqrt((p1 - low1) ** 2 + (high2 - p2) ** 2),
-        d + math.sqrt((high1 - p1) ** 2 + (p2 - low2) ** 2),
-    )
+    return d - math.hypot(p1 - low1, high2 - p2), d + math.hypot(high1 - p1, p2 - low2)
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +70,23 @@ class Evidence:
     fen: str = ""
     uci: str = ""
     best_uci: str = ""
+
+    @classmethod
+    def of(cls, fact: MoveFact, game: Game) -> Evidence:
+        """One move of `game` as an example, with its position for the board."""
+        return cls(
+            fact.game_id,
+            fact.ply,
+            fact.move_number,
+            fact.color.value,
+            fact.san,
+            fact.best_san,
+            fact.wp_loss,
+            game.move_url(fact.ply),
+            fact.fen_before,
+            fact.uci,
+            fact.best_move,
+        )
 
     @property
     def move(self) -> str:
@@ -155,22 +173,7 @@ def _mine(
 def _evidence(rows: Sequence[MoveRow], limit: int, errors_only: bool = True) -> list[Evidence]:
     pool = [r for r in rows if r.error] if errors_only else list(rows)
     worst = sorted(pool, key=lambda r: (-r.fact.wp_loss, r.fact.game_id, r.fact.ply))[:limit]
-    return [
-        Evidence(
-            r.fact.game_id,
-            r.fact.ply,
-            r.fact.move_number,
-            r.fact.color.value,
-            r.fact.san,
-            r.fact.best_san,
-            r.fact.wp_loss,
-            r.game.move_url(r.fact.ply),
-            r.fact.fen_before,
-            r.fact.uci,
-            r.fact.best_move,
-        )
-        for r in worst
-    ]
+    return [Evidence.of(r.fact, r.game) for r in worst]
 
 
 def mine_moves(

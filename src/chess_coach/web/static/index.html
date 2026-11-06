@@ -41,6 +41,7 @@
           <p id="prompt"></p>
           <p id="feedback"></p>
           <div class="buttons">
+            <button id="skip" hidden>Skip the question</button>
             <button id="retry" hidden>Try again</button>
             <button id="giveup">Show the answer</button>
             <button id="next" class="primary" hidden>Next puzzle</button>
@@ -48,7 +49,8 @@
           <div id="lines"></div>
           <p class="muted small">Click a piece, then its square. A wrong move shows their best reply and what
             it costs; try again from the start, or show the answer. Then step through the lines with ◀ ▶ (or the
-            arrow keys) and play any move on the board to see what the engine answers. Scores are for you:
+            arrow keys) and play any move on the board to see what the engine answers. A puzzle from a threat you
+            ignored first asks what their last move threatens (orange). Scores are for you:
             +1.0 is a pawn up, #3 is mate in 3, #-3 is mate against you; grey moves are the engine's.</p>
         </div>
       </div>

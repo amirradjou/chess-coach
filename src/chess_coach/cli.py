@@ -227,9 +227,10 @@ def sync(
     ] = 200,
 ) -> None:
     """Bring the coach up to date in one step: new games from the accounts you've imported,
-    analysed, and puzzles from them."""
+    analysed, puzzles from them, and their threats before every mistake not checked yet."""
     from datetime import UTC, datetime
 
+    from chess_coach.engine.threats import DEPTH as THREAT_DEPTH
     from chess_coach.puzzles.make import make, make_opening_fixes
     from chess_coach.sources import chesscom, lichess
 
@@ -275,6 +276,10 @@ def sync(
             with console.status("Making puzzles from your new mistakes..."):
                 made = make(store, engine, limit=puzzles)
                 fixes = make_opening_fixes(store, engine)
+            checked = 0
+            if todo := _threats_todo(store):  # the first sync also checks the older backlog
+                console.print(f"Looking for their threats before {todo} mistakes and blunders")
+                checked = _check_threats(store, engine, todo, depth=THREAT_DEPTH)
         total = len(store.puzzles())
         today = datetime.now(UTC).date().isoformat()
         due = len(store.due(today))
@@ -283,6 +288,10 @@ def sync(
     console.print(
         f"Analysed {len(pending)} games. Checked {made.checked + fixes.checked} moves, made "
         f"[green]{made.made + fixes.made}[/green] puzzles ({total} in all)."
+    )
+    console.print(
+        f"Looked for their threats before {checked} mistakes and blunders not checked before "
+        "(yours and your opponents'): `chess-coach threats` shows how your mistakes happen."
     )
     console.print(
         f"Due today: {due} puzzles (`chess-coach drill`) and {cards} opening positions "
@@ -405,6 +414,7 @@ def digest(
     before."""
     from chess_coach.coach.digest import build, render
     from chess_coach.coach.punish import GIFT_WP_LOSS
+    from chess_coach.patterns.features import ERRORS
 
     settings: Settings = ctx.obj
     with Store(settings.db_path) as store:
@@ -412,6 +422,8 @@ def digest(
         moves = list(store.iter_moves(user_only=True))
         gifts = store.gifts(GIFT_WP_LOSS)
         replies, puzzles = store.replies_to_errors(), store.puzzles()
+        threats = store.threats()
+        errors = list(store.iter_moves(judgements=ERRORS)) if threats else []
     built = build(
         games,
         moves,
@@ -421,6 +433,8 @@ def digest(
         gifts=gifts,
         replies=replies,
         puzzles=puzzles,
+        threats=threats,
+        errors=errors,
     )
     text = render(built, top=top)
     if narrate:
@@ -563,6 +577,108 @@ def _rates_table(
             gap,
         )
     return table
+
+
+@app.command()
+def threats(
+    ctx: typer.Context,
+    depth: Annotated[int, typer.Option(help="Search depth per position.")] = 12,
+    threads: Annotated[int | None, typer.Option(help="Engine threads.")] = None,
+    limit: Annotated[int | None, typer.Option(help="Stop after this many moves.")] = None,
+) -> None:
+    """What was their threat? Before every counted mistake and blunder, yours and your
+    opponents', the mover passes and the engine finds what the other side threatened. Mistakes
+    split into ignored threats and unsafe moves, compared with your opponents'. Resumable."""
+    settings: Settings = ctx.obj
+    with Store(settings.db_path) as store:
+        todo = _threats_todo(store, limit)
+        if todo:
+            with _engine(settings, threads) as engine:
+                console.print(f"Using {engine.name} at depth {depth} for {todo} moves")
+                _check_threats(store, engine, todo, depth=depth, limit=limit)
+        _threat_summary(store)
+
+
+def _threats_todo(store: Store, limit: int | None = None) -> int:
+    """How many mistakes and blunders (yours and your opponents') a threat check has left."""
+    from chess_coach.coach.threats import pending
+    from chess_coach.patterns.features import ERRORS
+
+    todo = len(pending(store.iter_games(), store.iter_moves(judgements=ERRORS), store.threats()))
+    return min(todo, limit) if limit is not None else todo
+
+
+def _check_threats(store: Store, engine, todo: int, *, depth: int, limit: int | None = None) -> int:
+    """Look for their threats before the `todo` mistakes and blunders not checked yet, with a
+    progress bar; returns how many were checked."""
+    import logging
+
+    from chess_coach.coach.threats import check
+
+    logging.getLogger("chess.engine").setLevel(logging.ERROR)
+    progress = Progress(
+        TextColumn("checking"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        TimeRemainingColumn(),
+        console=console,
+    )
+    with progress:
+        task = progress.add_task("check", total=todo)
+
+        def on_check(done: int, total: int) -> None:
+            progress.update(task, completed=done, total=total)
+
+        return check(store, engine, depth=depth, limit=limit, on_check=on_check)
+
+
+def _threat_summary(store: Store) -> None:
+    from chess_coach.coach.threats import NO_GAP, gap, percent, report
+    from chess_coach.patterns.features import ERRORS
+
+    games = list(store.iter_games())
+    r = report(games, store.iter_moves(judgements=ERRORS), store.threats())
+    if not r.you:
+        if r.unchecked:
+            console.print(
+                f"[yellow]{r.unchecked} mistakes and blunders not checked yet[/yellow] "
+                "(yours and your opponents'): run `chess-coach threats` to check them."
+            )
+        elif not any(g.analyzed_depth for g in games):
+            console.print("No analysed games yet. Run `chess-coach analyze` first.")
+        else:
+            console.print(
+                "None of your mistakes and blunders count here: in bullet only the first 10 "
+                "moves count, and moves made short on time are left out."
+            )
+        return
+    table = Table(
+        title=f"How your mistakes happen: {r.you} of your mistakes and blunders, "
+        f"{r.them} of your opponents'",
+        caption="Share of the mistakes and blunders, with its 95% interval. In bullet only the "
+        "first 10 moves count; moves made short on time are left out.",
+    )
+    for column in ("what happened", "you", "your opponents", "compared"):
+        table.add_column(
+            column, justify="left" if column in ("what happened", "compared") else "right"
+        )
+    for s in r.steps:
+        table.add_row(s.title, percent(s.you), percent(s.them), f"{s.verdict} ({gap(s)})")
+    console.print(table)
+    mine = [s for s in r.steps if s.yours]
+    for s in mine:
+        console.print(f"[bold]{s.title}[/bold] is a step to work on. Practise: {s.tip}.")
+    if not mine:
+        console.print(NO_GAP)
+    for s in r.steps:
+        for e in s.examples[:2]:
+            where = f" [dim]{e.evidence.url}[/dim]" if e.evidence.url else ""
+            console.print(f"  {s.title}, {e.evidence.move}: {e.why}{where}")
+    if r.unchecked:
+        console.print(
+            f"[yellow]{r.unchecked} mistakes and blunders not checked yet:[/yellow] run "
+            "`chess-coach threats` to check them."
+        )
 
 
 def _engine(settings: Settings, threads: int | None):

@@ -6,6 +6,7 @@
   --line: #e1ded6;
   --accent: #2a9d8f;
   --bad: #d1495b;
+  --threat: #e07a1f;
   --soft: #eef6f4;
 }
 @media (prefers-color-scheme: dark) {
@@ -50,6 +51,7 @@ nav button.on { color: var(--ink); border-bottom-color: var(--accent); font-weig
 .board.big { max-width: 420px; width: 100%; cursor: pointer; }
 .played { color: var(--bad); font-weight: 600; }
 .better { color: var(--accent); font-weight: 600; }
+.threat { color: var(--threat); font-weight: 600; }
 button, select {
   font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink);
   border-radius: 6px; padding: 6px 12px; cursor: pointer;

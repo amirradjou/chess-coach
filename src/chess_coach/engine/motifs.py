@@ -55,6 +55,29 @@ def value(piece: chess.Piece | None) -> int:
     return PIECE_VALUES[piece.piece_type] if piece else 0
 
 
+def material(board: chess.Board, color: chess.Color) -> int:
+    """`color`'s material minus the other side's, in the usual points (pawn 1 ... queen 9)."""
+    return sum(
+        PIECE_VALUES[p.piece_type] * (1 if p.color == color else -1)
+        for p in board.piece_map().values()
+    )
+
+
+def after_move(board: chess.Board, move: chess.Move) -> chess.Board:
+    """The position after `move` (legal in `board`), with only that move in its history."""
+    after = board.copy(stack=False)
+    after.push(move)
+    return after
+
+
+def pass_turn(board: chess.Board) -> chess.Board:
+    """The same position with the other side to move, as if the side to move had passed. Built
+    from the FEN, so there is no null move in its history: UCI has none to send an engine."""
+    turn = board.copy(stack=False)
+    turn.push(chess.Move.null())
+    return chess.Board(turn.fen())
+
+
 def hangs_piece(board: chess.Board, capture: chess.Move | None, owner: chess.Color) -> str | None:
     """'hanging_piece' / 'hanging_pawn' when `capture` wins material outright for the opponent."""
     if capture is None or not board.is_capture(capture) or board.is_en_passant(capture):

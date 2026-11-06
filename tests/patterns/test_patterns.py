@@ -14,6 +14,7 @@ from chess_coach.patterns.mining import (
     mine_moves,
     motif_counts,
     newcombe,
+    wilson,
     wilson_lower,
     wilson_upper,
 )
@@ -220,3 +221,19 @@ def test_digest_command(tmp_path: Path):
     assert "**In the endgame**" in out.read_text()
     empty = CliRunner().invoke(app, ["--db", str(tmp_path / "empty.db"), "digest"])
     assert "No analysed games yet" in empty.output
+
+
+def test_wilson_interval_and_the_difference_of_two_rates():
+    low, high = wilson(20, 100)
+    assert low == pytest.approx(0.1333, abs=1e-4) and high == pytest.approx(0.2888, abs=1e-4)
+    assert wilson_lower(20, 100) == low and wilson(0, 0) == (0.0, 1.0)
+    # never a hair outside 0-100%: rounding gave 0 of 5 a lower bound of -3e-17
+    for n in range(1, 500):
+        assert 0.0 <= wilson(0, n)[0] < 1e-9 and 1 - 1e-9 < wilson(n, n)[1] <= 1.0
+    # the same share in both: the difference's interval straddles zero
+    low, high = newcombe(180, 1000, 180, 1000)
+    assert low < 0 < high and low == pytest.approx(-high)
+    # 30% against 15% on a thousand each: clearly more
+    low, high = newcombe(300, 1000, 150, 1000)
+    assert 0.11 < low < 0.15 < high < 0.19
+    assert newcombe(1, 0, 1, 10) == (-1.0, 1.0)
