@@ -1039,6 +1039,7 @@ async function loadProgress(speed) {
   const rows = p.periods.map((r) => el("tr", {}, el("td", {}, r.label), el("td", {}, r.games), el("td", {}, r.score === null ? "–" : `${r.score}%`),
     el("td", {}, `${r.error_rate}%`), el("td", {}, r.acpl)));
   fill($("#progress"),
+    levelsSection(p.levels),
     el("h2", {}, "Your games by month"),
     el("p", { class: "muted" }, "In bullet only your first 10 moves count, and the score leaves bullet out: the clock decides those games."),
     el("table", {}, el("tr", {}, ["month", "games", "score", "mistakes + blunders", "average cp loss"].map((h) => el("th", {}, h))), rows),
@@ -1051,6 +1052,34 @@ async function loadProgress(speed) {
           p.tags.map((t) => el("tr", {}, el("td", {}, tagName(t.tag)), el("td", {}, t.attempts), el("td", {}, `${t.rate}%`)))))
       : el("p", { class: "muted" }, "No attempts yet: try the Practice tab."),
   );
+}
+
+// How often you go wrong early in a game, against public players by rating. The sentences come
+// from the server, which only says what the interval allows.
+function levelsSection(l) {
+  if (!l.speeds.length) return null;
+  const rate = (x) => (x
+    ? [`${x.rate}%`, el("div", { class: "muted small" }, `${x.low}–${x.high}%`)]
+    : "–");
+  return [
+    el("h2", {}, "The next level"),
+    l.headline ? el("p", {}, l.headline) : null,
+    l.speeds.map((s) => el("div", { class: "card" },
+      el("b", {}, `${s.speed[0].toUpperCase()}${s.speed.slice(1)}`),
+      el("span", { class: "muted" }, `: ${s.games} games at ${s.controls.join(" or ")}${s.rating ? `, your rating about ${s.rating}` : ""}`),
+      el("table", {},
+        el("tr", {}, ["moves", "you", "your opponents", "300 points above you"].map((h) => el("th", {}, h))),
+        s.rows.map((r) => el("tr", {},
+          el("td", {}, r.segment),
+          el("td", {}, rate(r.you)),
+          el("td", {}, rate(r.them)),
+          el("td", {}, r.above === null ? "–" : `${r.above}%`)))),
+      s.rows.map((r) => el("p", { class: "small" }, r.sentence)),
+      s.other_games ? el("p", { class: "muted small" }, `${s.other_games} more games at other time controls aren't counted: the public games have no yardstick for them.`) : null,
+      s.stale ? el("p", { class: "muted small" }, s.stale) : null,
+    )),
+    el("p", { class: "muted small" }, `From your last 12 months. Mistakes and blunders (20+ points of win probability), with 95% intervals. The public games are unanalysed Lichess games, scored the same way (built ${l.built}).`),
+  ];
 }
 
 // Your rating week by week (read from your games; bullet left out) next to the practice you did.
