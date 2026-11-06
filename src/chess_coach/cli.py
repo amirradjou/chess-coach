@@ -1203,8 +1203,8 @@ def levels(ctx: typer.Context) -> None:
             console.print(r.sentence, highlight=False)
         if s.other_games:
             console.print(
-                f"[dim]{s.other_games} more games at other time controls aren't counted: the "
-                "public games have no yardstick for them.[/dim]"
+                f"[dim]{s.other_games} more game{'s' if s.other_games != 1 else ''} at other time "
+                "controls aren't counted: the public games have no yardstick for them.[/dim]"
             )
         if note := s.stale_note:
             console.print(f"[dim]{note}[/dim]", highlight=False)

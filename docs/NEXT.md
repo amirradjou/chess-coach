@@ -1,51 +1,39 @@
-# Next steps (written 2026-11-02)
+# Next steps (written 2026-11-02, updated 2026-11-05)
 
 Where the work after `sync` (#15) stands, and what comes next. docs/PLAN.md stays the record of
 what was built and why; this file is the to-do list until these branches are merged.
 
 ## Branches, in merge order
 
-Each one builds on the one before it, so the PRs go in this order (merge commits, not squash).
-PRs 1-3 are open, each based on the branch before it. This branch gets its PR when the card is
-built.
+Each one builds on the one before it, and each PR is based on the branch before it, so its diff is
+only its own work. Merge in this order, with merge commits, not squash. If a base branch isn't
+deleted when its PR merges, retarget the next PR to `main` first.
 
-| # | Branch | What it holds | State |
-|---|--------|---------------|-------|
-| 1 | `feat/repeat-mistakes` | Repeated mistakes (`repeats`, digest, web, sync alert); the opening outcome by the engine eval after both sides' 10th moves; puzzle dedupe (`puzzles dedupe`, no copy stored at make time) | Built, reviewed twice, fixed, pushed |
-| 2 | `feat/punish-rate` | When they blunder: your punish rate against your opponents', split into partial misses (your reply gives back 10-20 points) and clear misses (20+), per kind, trend, openings | Built, reviewed twice, fixed, pushed |
-| 3 | `feat/threat-check` | What was their threat: `ignored_threat` / `unsafe_move` from a null-move search, `threats` command, "What do they threaten?" in Practice | Built, reviewed, fixed, pushed |
-| 4 | `feat/next-level` | So far only the public reference ladder (`scripts/level_reference.py`, `src/chess_coach/data/levels.json`) and this file | Card not built |
+| PR | Branch | What it holds |
+|----|--------|---------------|
+| #16 | `feat/repeat-mistakes` | Repeated mistakes, the opening eval after both sides' 10th moves, puzzle dedupe |
+| #17 | `feat/punish-rate` | When they blunder: your punish rate against your opponents', partial and clear misses |
+| #18 | `feat/threat-check` | What was their threat: ignored threats vs unsafe moves, "What do they threaten?" in Practice |
+| #19 | `feat/practice-today` | The practice bugs, and Today: 10 items a day from today's answers |
+| #20 | `feat/next-level` | The next-level card, and this file |
 
-The branches are stacked (2026-11-02): each one merges the one before it, so each PR's diff is
-only its own work.
-- `92c9787` merges repeat-mistakes into punish-rate (231 tests).
-- `8315494` merges punish-rate into threat-check (261 tests).
-- `8a1ec5a` merges threat-check into next-level, with no conflicts (261 tests).
+The independent check of the merges in #17 and #18 is done (2026-11-05); they are sound. Every
+function and module-level statement each side changed was compared with both parents, the test ids,
+routes and CLI options are the union of both, and the suite passes at each merge and at both parents
+of each. A fresh copy of the database opened twice changes nothing the second time. Every tab was
+walked at 1280 px and 375 px.
 
-The merge commits name every conflict and how it was resolved:
-- one Wilson bound and one Newcombe interval in `mining.py`;
-- `allows(captures=, yours=)`;
-- the digest order: threats, then When they blunder, then repeats;
-- `sync`: puzzles, then threats, then the repeat alerts.
+## After merging
 
-After the merges, on a fresh copy of the database, the new commands and the APIs give the same
-numbers as each branch on its own. Threats match with `--threads 1`; 2 threads relabel about
-100 rows. Puzzles are 525 after dedupe.
+On the real database, in this order:
 
-**The independent check of the two merges is done (2026-11-05); they are sound.**
-- Every function and module-level statement each side changed was compared with both parents
-  (AST, then the source of everything that differed: 9 definitions in the first merge, 15 in the
-  second). All are the unions and resolutions the merge commits describe; nothing was lost.
-- Test ids, routes and CLI options at each merge are the union of both parents. The one id that
-  disappears, `test_wilson_lower`, became `test_wilson_interval`, which holds all its assertions.
-- The suite passes at every merge and at both parents of each (231, then 261).
-- A fresh copy of the database opened twice: the first open adds the `threats` table and
-  `punish_*` tags on 228 puzzles; the second changes nothing. Attempts unchanged, no foreign key
-  problems, and the real database's hash did not move.
-- Every tab at 1280 px and 375 px, with the threat question and each Learn openings mode: no
-  console errors or failed requests. One defect, fixed in `feat/repeat-mistakes`: How each
-  opening comes out made the page scroll sideways on a phone (as Rating and practice by week
-  already did on main). A wide table now scrolls by itself.
+1. Back it up: `cp data/amirradjou.db data/amirradjou-before-today.db`. The first open adds the
+   `threats` table, `punish_*` tags on 228 puzzles, and renames 48 opening fixes.
+2. `uv run chess-coach --db data/amirradjou.db puzzles dedupe` (525 puzzles left of 544).
+3. `uv run chess-coach --db data/amirradjou.db sync`. The first one checks the backlog of 2,526
+   threats: roughly 8 minutes on the default 1 thread. `--threads 4` takes about 2, but more than
+   one thread relabels about 100 rows, and the numbers in the docs are from one.
+4. Set `db` in `~/.config/chess-coach/config.toml`, so `chess-coach today` works from anywhere.
 
 ## What the research found (two rounds, 2026-10-31 and 2026-11-01)
 
@@ -78,61 +66,9 @@ data).
 
 ## To build next
 
-### A. `feat/practice-today`, on top of `feat/threat-check`
+A (`feat/practice-today`) and B (the next-level card) are built: see docs/PLAN.md.
 
-Bugs first, each its own commit with a test that fails today:
-
-1. Re-adding a puzzle wipes its practice history: `Store.add_puzzle` uses `INSERT OR REPLACE`,
-   which deletes the row and its attempts and resets the review. Use
-   `ON CONFLICT(id) DO NOTHING`.
-2. Opening-fix drills reuse game-move ids (`<game>:<ply>`), so a fix and a game puzzle can
-   overwrite each other. Give fixes their own ids (`fix:<game>:<ply>`), with a one-off migration
-   that renames them in puzzles, reviews and attempts, like `_fix_lichess_ids`.
-3. Practice serves puzzles the bullet rule leaves out: 3 of the 5 practised puzzles are bullet
-   moves 12, 13 and 26 (kept by `puzzles prune` because they have attempts). Never serve a
-   puzzle `make.keep` rejects; keep its history.
-4. The practice day is the UTC date at about 11 places. Use one helper with a 4 am local
-   rollover.
-
-Then the session:
-
-- New puzzles are no longer due the day they are made. Practice reads "N due again · M new".
-- A "Today" session of 10 items: due reviews and due opening cards first (most overdue first),
-  then at most 5 new ones. New items come first from positions he reached in 2+ games, then
-  from games of the last 90 days, then the rest. There are never two new items from one game,
-  and never two from one game back to back. Session state comes from today's answers, with no
-  new table.
-- Web: a first, default Today tab ("4 of 10"), and a done panel showing tomorrow's counts, days
-  practised of the last 7, and accuracy on reviews vs first tries.
-- CLI: `chess-coach today` opens it (or `--cli` in the terminal; `--status` prints one line).
-  sync's last line becomes "Today: 10 to practise (about 5 min): 5 due again, 5 new".
-- The database comes from `--db`, then `CHESS_COACH_DB`, then `~/.config/chess-coach/config.toml`.
-  The default `data/chess-coach.db` holds only the 3 test games. Stockfish is also found from
-  the repo root, not just the working directory. Other database files are only ever opened
-  read-only, because `Store` migrates whatever it opens.
-- Remove the stale `LLM_PROVIDER=claude` / `ANTHROPIC_API_KEY` lines from `.env.example`.
-
-### B. The next-level card, on `feat/next-level`
-
-- `coach/levels.py` counts his counted, non-rushed moves with 20+ points lost in the same
-  segments as `levels.json`: bullet moves 1-5 and 6-10, blitz moves 1-5, 6-10 and 11-20, over
-  the last 12 months.
-  - Wilson intervals with n divided by the stored design effect.
-  - His opponents' rate in the same games.
-  - Blitz rows weighted to his time-control mix (`by_time_control`).
-  - Where he sits on the ladder ("you play moves 6-10 like players around 1400-1500").
-  - "Not enough games to place you" when his interval is wider than a 300-point step, and a
-    stale note for blitz (last game 2026-09-20).
-- Use a plain move-number split. A "book exit" split is meaningless here, because the opening
-  table's named lines end around move 2.
-- Shown in a Progress card, `chess-coach levels`, and one digest line. The wording comes from
-  code and never claims more than the interval allows.
-- Tests for the segmentation, the ladder lookup at its edges, the "not measurable" message, and
-  the JSON schema.
-- Rebuild the reference only when the engine changes. A rebuild means running the script again
-  (about 45 minutes), and his stored evals then need re-analysing too.
-
-### C. Later, once Today has been used for 2-3 weeks
+### Later, once Today has been used for 2-3 weeks
 
 - Whether practice carries over into games: the share of drilled positions he then plays right,
   drilled vs not yet drilled.
@@ -143,7 +79,10 @@ Then the session:
 
 - Does he play his daily bullet on the phone or on the laptop? That decides whether practice
   on the phone matters.
-- Are 10 items a day and a 4 am day change right?
+- Are 10 items a day and a 4 am day change right? Both are single constants
+  (`puzzles/today.py: SESSION`, `util.py: DAY_STARTS_AT_HOUR`).
+- The next-level card's 12-month window places bullet moves 6-10 only around 1200-1700: more games
+  would narrow it, but older ones may not show how the owner plays now. Is 12 months right?
 - Will he play blitz or rapid again? The blitz rows and the conversion work only matter if so.
 - `digest --narrate openrouter` sends the cited moves to openrouter.ai. Does that fit "my games
   stay on this machine"?

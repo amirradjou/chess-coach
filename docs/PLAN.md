@@ -669,6 +669,40 @@ working directory.
 
 Open, the owner's call: whether 10 items and 4 am are right (both are constants in one place).
 
+## The next level (2026-11-05, branch `feat/next-level`)
+
+Why: against the opponents in the owner's own games the owner is level almost everywhere, which
+rating matching nearly guarantees. So the reference is public Lichess games, scored by the app's own
+pipeline at depth 12 under the same rules (`scripts/level_reference.py`, `data/levels.json`, built
+from 2 GB of the 2026-09 dump; about 45 minutes, and only worth rebuilding when the engine changes,
+since the stored evals would need re-analysing too). On those games accuracy early on is what
+separates levels.
+
+`coach/levels.py`:
+- Counts counted, non-rushed mistakes and blunders (20+ points) in the reference's segments, by plain
+  move number, over the last 12 months, with the opponents in the same games. A "book exit" split
+  means nothing here: the opening table's named lines end around move 2.
+- Only games at the time controls the reference sampled: 60+0, and 300+3 and 180+2. Games at other
+  controls are named as left out, not mixed in. In the last 12 months that leaves 40 of the owner's 63
+  blitz games, all 180+2.
+- Blitz bands are weighted to the player's time-control mix, per segment (`by_time_control`).
+- 95% Wilson intervals use n over the design effect, the median of the public bands for that segment:
+  moves of one game are alike, and one player's games are too few to estimate it. Bullet moves 6-10
+  go from 3,605 moves to about 2,000 effective.
+- The ladder is pooled so it never rises with rating (sampled bands wobble), then read linearly. The
+  player's interval gives a range of ratings. Wider than a 300-point step: "not enough games to
+  place you", and the range the interval does allow, since that is still true and useful.
+- A gap is only called one when the interval's low end clears the rate at the median rating + 300.
+- A speed with no game for over 30 days says so and stays out of the headline.
+
+What it says on the owner's games (2026-11-05, rating about 1446 in bullet):
+- Bullet moves 6-10: 6.4% (5.4 to 7.5), opponents 5.8% (4.9 to 6.9), 300 points higher 4.8%: a
+  clear gap, and the one the digest names. Placed only around 1200-1700. This matches round 2 of the
+  research (6.35%), which used more games.
+- Bullet moves 1-5: 0.9% (0.6 to 1.4), above about 1800 and open-ended.
+- Blitz: 40 games in the window and the last on 2026-09-20. Nothing can be placed, and the card says
+  so.
+
 ## Remaining (in order)
 
 1. ~~Fresh puzzles from the full analysis~~: done 2026-10-31. `puzzles prune` removed 83

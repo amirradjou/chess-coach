@@ -1078,7 +1078,7 @@ function levelsSection(l) {
           el("td", {}, rate(r.them)),
           el("td", {}, r.above === null ? "–" : `${r.above}%`)))),
       s.rows.map((r) => el("p", { class: "small" }, r.sentence)),
-      s.other_games ? el("p", { class: "muted small" }, `${s.other_games} more games at other time controls aren't counted: the public games have no yardstick for them.`) : null,
+      s.other_games ? el("p", { class: "muted small" }, `${games(s.other_games).replace(" ", " more ")} at other time controls aren't counted: the public games have no yardstick for them.`) : null,
       s.stale ? el("p", { class: "muted small" }, s.stale) : null,
     )),
     el("p", { class: "muted small" }, `From your last 12 months. Mistakes and blunders (20+ points of win probability), with 95% intervals. The public games are unanalysed Lichess games, scored the same way (built ${l.built}).`),

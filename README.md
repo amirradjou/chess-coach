@@ -120,6 +120,7 @@ table for opening names. The web coach is FastAPI with plain JavaScript and pyth
 - **v7 (done)** — rating trend against practice: your rating week by week next to the puzzles
   and opening training you did.
 - **Today (done)** — a session you can finish: 10 items a day, reviews first, at most 5 new.
+- **The next level (done)** — your early-game errors against public Lichess players by rating.
 
 ## Status
 
@@ -209,6 +210,16 @@ across 8+ games.
   with three lines, and keeps a position only when one move is the only mate or beats the next
   best by 150 centipawns, so there is one answer to find. `puzzles list` shows them with their
   motif tags.
+- `levels` compares how often you make a mistake or blunder early in a game with public Lichess
+  players at each rating, from your last 12 months: bullet moves 1-5 and 6-10, blitz moves 1-5,
+  6-10 and 11-20. Your opponents can't show this, because rating matching makes you level with them
+  almost everywhere. The public games are scored the same way, with the same bullet and
+  short-on-time rules (`scripts/level_reference.py`), and what most separates one rating from the
+  next is accuracy early on. Your interval is read off that ladder as a range of ratings: wider
+  than 300 points, it says "not enough games to place you" and gives only the range it can. On the
+  author's bullet games, moves 6-10 are the clear gap: 6.4% (95% interval 5.4 to 7.5) against 4.8%
+  for players 300 points higher. Twelve months of games still only place the author around 1200-1700. The
+  card is also on Progress, with one line in the digest.
 - `today` opens the day's session in the browser (`--cli` for the terminal, `--status` for one
   line: "Today: 10 to practise (about 5 min): 5 due again, 5 new"). It is 10 items: what's due
   again and due opening positions first, most overdue first, then at most 5 new puzzles, from
@@ -349,6 +360,7 @@ uv run chess-coach punish                                        # when they blu
 uv run chess-coach puzzles make --limit 50                       # your mistakes as puzzles
 uv run chess-coach drill                                         # practise beyond today's session
 uv run chess-coach progress --by week
+uv run chess-coach levels                                        # your early errors against public players
 uv run chess-coach openings                                      # incl. the eval after both sides' 10th moves
 uv run chess-coach repeats                                       # the same mistake, same position
 uv run chess-coach puzzles make --openings                      # drills for your opening fixes
