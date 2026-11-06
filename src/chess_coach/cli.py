@@ -17,7 +17,7 @@ from chess_coach import __version__
 from chess_coach.config import Settings
 from chess_coach.db import Store
 from chess_coach.models import Game, Judgement
-from chess_coach.util import parse_since
+from chess_coach.util import parse_since, practice_day
 
 app = typer.Typer(no_args_is_help=True)
 import_app = typer.Typer(no_args_is_help=True, help="Pull games into the local database.")
@@ -228,7 +228,6 @@ def sync(
 ) -> None:
     """Bring the coach up to date in one step: new games from the accounts you've imported,
     analysed, puzzles from them, and their threats before every mistake not checked yet."""
-    from datetime import UTC, datetime
 
     from chess_coach.engine.threats import DEPTH as THREAT_DEPTH
     from chess_coach.puzzles.make import make, make_opening_fixes
@@ -281,7 +280,7 @@ def sync(
                 console.print(f"Looking for their threats before {todo} mistakes and blunders")
                 checked = _check_threats(store, engine, todo, depth=THREAT_DEPTH)
         total = len(store.puzzles())
-        today = datetime.now(UTC).date().isoformat()
+        today = practice_day().isoformat()
         due = len(store.due(today))
         cards = sum(c.due <= today for c in store.coach_cards())
         alerts = _repeat_alerts(store, new) if new else []
@@ -832,7 +831,8 @@ def drill(
     now = datetime.now(UTC)
     with Store(settings.db_path) as store:
         skip = set(left_out(store))
-        due = [p for p in store.due(now.date().isoformat(), tag) if p.id not in skip][:count]
+        day = practice_day(now)
+        due = [p for p in store.due(day.isoformat(), tag) if p.id not in skip][:count]
         if not due:
             console.print(
                 "Nothing due. Make more with `chess-coach puzzles make`, or come back tomorrow."
@@ -880,7 +880,7 @@ def drill(
                 console.print(f"[yellow]The move was {p.solution_san}.[/yellow] {line}")
             review = store.review(p.id)
             if review is not None:
-                after = schedule(review, correct, now.date())
+                after = schedule(review, correct, day)
                 store.save_attempt(after, answer, correct, now)
                 console.print(f"[dim]Next time: {after.due}.[/dim]")
             if game is not None and game.url:
@@ -910,7 +910,6 @@ def progress(
 ) -> None:
     """Your error rate, centipawn loss and score over time, how your puzzle practice goes, and
     your rating week by week next to the practice you did."""
-    from datetime import UTC, datetime
 
     from chess_coach.coach.progress import (
         periods,
@@ -952,7 +951,7 @@ def progress(
     trend = speed if speed in speeds else (speeds[0] if speeds else None)
     if trend is None:
         return
-    weeks = weekly(games, trend, attempts, answers, today=datetime.now(UTC).date())
+    weeks = weekly(games, trend, attempts, answers, today=practice_day())
     t = Table(
         title=f"Rating and practice by week ({trend})",
         caption="Your rating in your last game each week; bullet is left out.",

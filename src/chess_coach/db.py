@@ -21,6 +21,7 @@ from chess_coach.models import (
     Speed,
     ThreatFact,
 )
+from chess_coach.util import practice_day
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS games (
@@ -543,7 +544,7 @@ class Store:
             self.conn.execute(
                 "INSERT OR IGNORE INTO reviews (puzzle_id, due, interval, ease, reps, lapses) "
                 "VALUES (?, ?, 0, 2.5, 0, 0)",
-                (p.id, datetime.now(UTC).date().isoformat()),
+                (p.id, practice_day().isoformat()),
             )
 
     def set_puzzle_tags(self, puzzle_id: str, tags: list[str]) -> None:
@@ -656,12 +657,9 @@ class Store:
         return [(r[0], r[1], bool(r[2])) for r in rows]
 
     def coach_answered(self, card_id: str, day: str) -> bool:
-        """Whether you already answered this card on `day` (an ISO date, UTC like the times)."""
-        row = self.conn.execute(
-            "SELECT 1 FROM coach_attempts WHERE card_id = ? AND substr(at, 1, 10) = ? LIMIT 1",
-            (card_id, day),
-        ).fetchone()
-        return row is not None
+        """Whether you already answered this card on `day`, an ISO date (see util.practice_day)."""
+        rows = self.conn.execute("SELECT at FROM coach_attempts WHERE card_id = ?", (card_id,))
+        return any(practice_day(datetime.fromisoformat(r[0])).isoformat() == day for r in rows)
 
     def coach_last_answers(self, family: str, color: str) -> dict[str, bool]:
         """Card id -> whether your latest answer there was right, for one opening."""

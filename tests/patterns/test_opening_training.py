@@ -4,6 +4,7 @@ from chess_coach.coach import training
 from chess_coach.coach import tree as optree
 from chess_coach.db import Store
 from chess_coach.models import CoachCard
+from chess_coach.util import practice_day
 
 from .test_opening_tree import NXC3, _client, games_and_facts, no_engine
 
@@ -13,7 +14,7 @@ Q = {"family": "Italian Game", "color": "white"}
 
 
 def _today() -> date:
-    return datetime.now(UTC).date()  # the app schedules by the UTC day
+    return practice_day()
 
 
 def test_an_answer_schedules_the_card():
@@ -59,7 +60,7 @@ def test_cards_and_answers_are_stored(tmp_path):
         assert store.coach_cards("Danish", "white") == [later]
         assert store.coach_cards("Danish", "black") == []
         assert store.coach_last_answers("Danish", "white") == {card.id: True}
-        assert store.coach_answered(card.id, now.date().isoformat())
+        assert store.coach_answered(card.id, practice_day(now).isoformat())
         assert not store.coach_answered(card.id, "2020-01-01")
 
 

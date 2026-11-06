@@ -1,9 +1,12 @@
 """Practice: what gets served, what is remembered, and which day it counts for."""
 
-from datetime import UTC, datetime
+import time
+from datetime import UTC, date, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 import chess
+import pytest
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
@@ -11,9 +14,10 @@ from chess_coach.cli import app
 from chess_coach.coach.repertoire import Fix
 from chess_coach.db import Store
 from chess_coach.engine.stockfish import LineEval
-from chess_coach.models import Color, Game, Judgement, MoveFact, Phase, Puzzle, Speed
+from chess_coach.models import CoachCard, Color, Game, Judgement, MoveFact, Phase, Puzzle, Speed
 from chess_coach.puzzles.make import verify_fix
 from chess_coach.puzzles.srs import schedule
+from chess_coach.util import practice_day
 from chess_coach.web.app import create_app
 
 runner = CliRunner()
@@ -180,3 +184,50 @@ def test_practice_never_serves_a_puzzle_the_bullet_rule_leaves_out(tmp_path: Pat
         assert {p.id for p in store.puzzles()} == {late, early}
         assert sum(a[0] == late for a in store.attempts()) == 1
     assert client.get("/api/drill/next").json()["done"]
+
+
+@pytest.fixture
+def toronto(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("TZ", "America/Toronto")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+@pytest.mark.parametrize(
+    ("utc", "day"),
+    [
+        (datetime(2026, 11, 3, 8, 59, tzinfo=UTC), date(2026, 11, 2)),  # 03:59 local
+        (datetime(2026, 11, 3, 9, 0, tzinfo=UTC), date(2026, 11, 3)),  # 04:00 local
+        (
+            datetime(2026, 11, 4, 3, 0, tzinfo=UTC),
+            date(2026, 11, 3),
+        ),  # 22:00 local, UTC is next day
+    ],
+)
+def test_the_practice_day_is_local_and_changes_at_4_am(toronto, utc: datetime, day: date) -> None:
+    assert practice_day(utc) == day
+
+
+def test_one_opening_answer_counts_per_practice_day(toronto, tmp_path: Path) -> None:
+    card = CoachCard("Danish", "white", ["e2e4"], "line", "2026-11-03")
+    with Store(tmp_path / "c.db") as store:
+        # 22:00 local on the 3rd: the UTC date has already moved on to the 4th
+        store.save_coach_attempt(card, "e7e5", True, datetime(2026, 11, 4, 3, 0, tzinfo=UTC))
+        assert store.coach_answered(card.id, "2026-11-03")
+        assert not store.coach_answered(card.id, "2026-11-04")
+
+
+def test_a_late_evening_answer_is_scheduled_from_the_local_day(toronto, tmp_path: Path) -> None:
+    db = tmp_path / "c.db"
+    with Store(db) as store:
+        store.upsert_game(game("lichess:a"))
+        store.add_puzzle(puzzle("lichess:a", 1))
+    late = datetime(2026, 11, 4, 3, 0, tzinfo=UTC)  # 22:00 local on the 3rd
+    with patch("chess_coach.web.app.datetime", wraps=datetime) as clock:
+        clock.now.return_value = late
+        answered = TestClient(create_app(db)).post(
+            "/api/drill/answer", json={"id": "lichess:a:1", "uci": "e2e4"}
+        )
+    assert answered.json()["next_due"] == "2026-11-04"  # tomorrow, not the day after

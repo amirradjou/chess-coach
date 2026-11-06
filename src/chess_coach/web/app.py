@@ -76,6 +76,7 @@ from chess_coach.patterns.mining import Evidence
 from chess_coach.puzzles import review
 from chess_coach.puzzles.make import left_out
 from chess_coach.puzzles.srs import schedule
+from chess_coach.util import practice_day
 
 PLAYED = "#d1495b"  # your move
 BETTER = "#2a9d8f"  # the engine's move
@@ -574,7 +575,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
 
     @app.get("/api/drill/next")
     def drill_next(tag: str | None = None) -> dict:
-        today = datetime.now(UTC).date().isoformat()
+        today = practice_day().isoformat()
         with Store(db_path) as store:
             due = list(filter(served(store), store.due(today, tag)))
             if not due:
@@ -651,7 +652,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             correct = tried is not None and puzzle.is_right(tried.uci())
             due = schedule_now.due
             if a.record:
-                after = schedule(schedule_now, correct, now.date())
+                after = schedule(schedule_now, correct, practice_day(now))
                 store.save_attempt(after, a.uci, correct, now)
                 due = after.due
         out = {
@@ -815,7 +816,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
 
     @app.get("/api/coach/openings")
     def coach_openings() -> dict:
-        today = datetime.now(UTC).date().isoformat()
+        today = practice_day().isoformat()
         with Store(db_path) as store:
             games = list(store.iter_games())
             due = Counter((c.family, c.color) for c in store.coach_cards() if c.due <= today)
@@ -846,7 +847,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
     def coach_deck(family: str, color: str):
         """This opening's punish deck in practice order, its cards, and today's date."""
         root, _, _ = opening_tree(family, color)
-        today = datetime.now(UTC).date().isoformat()
+        today = practice_day().isoformat()
         with Store(db_path) as store:
             cards = store.coach_cards(family, color)
             last = store.coach_last_answers(family, color)
@@ -924,9 +925,10 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
         with Store(db_path) as store:
             before = store.coach_card(cid)
             # One answer a day counts, so going back over a line doesn't push a card away.
-            recorded = not store.coach_answered(cid, now.date().isoformat())
+            today = practice_day(now)
+            recorded = not store.coach_answered(cid, today.isoformat())
             if recorded:
-                card = training.answer(before, a.family, a.color, path, kind, a.correct, now.date())
+                card = training.answer(before, a.family, a.color, path, kind, a.correct, today)
                 store.save_coach_attempt(card, a.uci, a.correct, now)
             else:
                 card = before
@@ -972,7 +974,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
 
     @app.get("/api/drill/tags")
     def drill_tags() -> list[dict]:
-        today = datetime.now(UTC).date().isoformat()
+        today = practice_day().isoformat()
         with Store(db_path) as store:
             puzzles = list(filter(served(store), store.puzzles()))
             due = {p.id for p in store.due(today)}
@@ -995,7 +997,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             overall, tags = solve_rates(store.puzzles(), attempts)
         speeds = trend_speeds(games)
         chosen = speed if speed in speeds else (speeds[0] if speeds else None)
-        today = datetime.now(UTC).date()
+        today = practice_day()
         weeks = weekly(games, chosen, attempts, answers, today=today) if chosen else []
         effect = practice_effect(weeks)
         return {

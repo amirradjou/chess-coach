@@ -1,4 +1,3 @@
-from datetime import UTC, datetime
 from pathlib import Path
 
 import chess
@@ -11,6 +10,7 @@ from chess_coach.engine.stockfish import EngineNotFoundError, LineEval
 from chess_coach.models import Color, Judgement, MoveFact, Phase
 from chess_coach.patterns.features import kind_of, move_rows, piece_of
 from chess_coach.puzzles.make import make, verify_fix
+from chess_coach.util import practice_day
 from chess_coach.web.app import create_app
 
 from .test_patterns import game, planted
@@ -215,7 +215,7 @@ def test_drill_round_trip(tmp_path):
     assert not p["done"] and p["played"] == "Qh5" and p["side"] == "white" and "<svg" in p["svg"]
     assert client.post("/api/drill/answer", json={"id": p["id"], "uci": "e2e5"}).status_code == 400
     r = client.post("/api/drill/answer", json={"id": p["id"], "uci": "e2e4"}).json()
-    today = datetime.now(UTC).date().isoformat()  # the app schedules by the UTC day
+    today = practice_day().isoformat()
     assert r["correct"] and r["solution"] == "e4" and r["next_due"] > today
     q = client.get("/api/drill/next").json()
     miss = client.post("/api/drill/answer", json={"id": q["id"], "uci": "?"}).json()
