@@ -119,7 +119,7 @@ table for opening names. The web coach is FastAPI with plain JavaScript and pyth
   punishments you've found.
 - **v7 (done)** — rating trend against practice: your rating week by week next to the puzzles
   and opening training you did.
-- **Next** — keeping current: `sync` fetches, analyses and makes puzzles in one step.
+- **Today (done)** — a session you can finish: 10 items a day, reviews first, at most 5 new.
 
 ## Status
 
@@ -154,7 +154,7 @@ across 8+ games.
   the newest one stored for each Lichess and Chess.com account (all or nothing, so a failed
   download leaves no gap), analyses whatever isn't analysed yet, newest first, makes puzzles,
   looks for their threats before every mistake not checked yet (the first time, the whole
-  backlog), and says what came in and what's due. Bullet results aren't reported, by the rule
+  backlog), and ends with what's left to practise today. Bullet results aren't reported, by the rule
   above. When a new game repeats one of your repeated mistakes (see `repeats`) it says so: "You
   played 3...Bg7 again (12th time); it has a puzzle."
 - `stats` prints a per-game accuracy table and how often each motif shows up in your moves.
@@ -209,9 +209,18 @@ across 8+ games.
   with three lines, and keeps a position only when one move is the only mate or beats the next
   best by 150 centipawns, so there is one answer to find. `puzzles list` shows them with their
   motif tags.
-- `drill` shows each due puzzle as a board from your side, takes your answer in SAN or UCI,
-  shows the engine's line, and schedules the puzzle with SM-2: solved ones come back later and
-  later, missed ones tomorrow. Every attempt is kept.
+- `today` opens the day's session in the browser (`--cli` for the terminal, `--status` for one
+  line: "Today: 10 to practise (about 5 min): 5 due again, 5 new"). It is 10 items: what's due
+  again and due opening positions first, most overdue first, then at most 5 new puzzles, from
+  the positions you reached in 2 or more games, then your games of the last 90 days, then the
+  rest. Never two new ones from one game, and two from one game never in a row unless nothing
+  else is left. It is worked out from today's answers, so an answer given in Practice or Learn
+  openings counts too. The day changes at 4 am your time.
+- `drill` shows each puzzle due again, then new ones, as a board from your side, takes your
+  answer in SAN or UCI, shows the engine's line, and schedules the puzzle with SM-2: solved ones
+  come back later and later, missed ones tomorrow. Every attempt is kept. A new puzzle isn't
+  "due" until you've tried it, and a puzzle the bullet rule leaves out is never served, though
+  its history stays.
 - `progress --by month|week [--speed blitz]` shows your games, score, mistake rate and centipawn
   loss over time, and your puzzle solve rate overall and per tag.
 - `openings` lists the openings you score worst in (by your colour), the book line for the one
@@ -237,7 +246,11 @@ across 8+ games.
     opens the matching drills. Then the same mistake in the same position (as `repeats`), each on
     a board with their best answer. A small section compares your ignored threats and unsafe
     moves with your opponents', and *When they blunder* is `punish` on the page.
-  - **Practice**: due puzzles on a board you click (piece, then square), filtered by theme. A
+  - **Today** opens first: the day's session on Practice's board, with how far you are ("4 of
+    10"). When it's over, a panel gives tomorrow's counts, the days you practised of the last 7,
+    and how you do on reviews against first tries.
+  - **Practice**: every puzzle due again ("N due again · M new"), then new ones, on a board you
+    click (piece, then square), filtered by theme. A
     wrong move shows their best reply, what it costs in material and score, and lets you try
     again (only the first answer counts for the schedule). Once it's solved or shown you get the
     best line, each of your tries and your game move as lines to step through (◀ ▶ or the arrow
@@ -325,6 +338,7 @@ uv run chess-coach import lichess <username> --max 100 --rated   # LICHESS_TOKEN
 uv run chess-coach import chesscom <username> --since 3m
 uv run chess-coach import pgn games.pgn --user "<your name in the PGN>"
 uv run chess-coach sync                                          # later: fetch, analyse, make puzzles
+uv run chess-coach today                                         # today's practice, in the browser
 uv run chess-coach games                                         # what is stored
 uv run chess-coach analyze --depth 12 --threads 4
 uv run chess-coach stats
@@ -333,7 +347,7 @@ uv run chess-coach digest -o digest.md                           # patterns acro
 uv run chess-coach digest --since 7d                             # this week vs before
 uv run chess-coach punish                                        # when they blunder: you vs them
 uv run chess-coach puzzles make --limit 50                       # your mistakes as puzzles
-uv run chess-coach drill                                         # practise what is due
+uv run chess-coach drill                                         # practise beyond today's session
 uv run chess-coach progress --by week
 uv run chess-coach openings                                      # incl. the eval after both sides' 10th moves
 uv run chess-coach repeats                                       # the same mistake, same position
@@ -348,7 +362,14 @@ After the first import, `sync` keeps the coach current in one step: new games fr
 and Chess.com account already stored, analysis, puzzles from the new mistakes, and their threats
 before the mistakes not checked yet. Run it daily or weekly (`--threads 8` speeds it up).
 
-`--db <file>` picks another database (default `data/chess-coach.db`).
+`--db <file>` picks another database. Without it the database comes from `CHESS_COACH_DB`, then
+`db` in `~/.config/chess-coach/config.toml`, then `data/chess-coach.db`:
+
+```toml
+db = "~/Projects/chess-coach/data/mine.db"
+```
+
+If the database in use has no puzzles, `today` names a file beside it that has some.
 
 ## Development
 
