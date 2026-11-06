@@ -6,10 +6,21 @@ invent a pattern.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from chess_coach.coach.punish import (
+    KINDS,
+    Compare,
+    Gift,
+    Report,
+    headline,
+    label,
+    part_note,
+    report,
+    worst_title,
+)
 from chess_coach.coach.repeats import Repeat, repeats
 from chess_coach.models import Game, MoveFact, Puzzle
 from chess_coach.patterns.features import (
@@ -157,6 +168,8 @@ class Digest:
     # Moves played short on time are left out above; these are their mistakes that keep repeating.
     rushed_moves: int = 0
     pressure: list[MotifCount] = field(default_factory=list)
+    # When they blunder: your punish rate against your opponents' (with Store.gifts given).
+    punish: Report | None = None
     # The same mistake from the same position in 3+ games (with --since: played again since).
     repeats: list[Repeat] = field(default_factory=list)
 
@@ -170,11 +183,13 @@ def build(
     min_lift: float = 1.5,
     game_lift: float = 1.25,
     since: datetime | None = None,
+    gifts: Iterable[tuple[MoveFact, MoveFact]] | None = None,
     replies: Mapping[tuple[str, int], MoveFact] | None = None,
     puzzles: Sequence[Puzzle] = (),
 ) -> Digest:
-    """The digest's facts. `replies` (Store.replies_to_errors) and `puzzles` complete the repeated
-    mistakes with their punishment and their puzzle."""
+    """The digest's facts. `moves` are the user's; `gifts` (Store.gifts, both players' moves)
+    adds When they blunder; `replies` (Store.replies_to_errors) and `puzzles` complete the
+    repeated mistakes with their punishment and their puzzle."""
     analysed = [g for g in games if g.analyzed_depth]
     # Counted over every game: with --since, the ones played again in this digest's games
     again = repeats(analysed, moves, replies or {}, puzzles)
@@ -211,6 +226,7 @@ def build(
         bullet_games=sum(is_bullet(g) for g in analysed),
         rushed_moves=len(rrows),
         pressure=repeated_under_pressure(rrows),
+        punish=report(analysed, gifts) if gifts is not None else None,
         repeats=[r for r in again if since is None or (r.last and r.last >= since)],
     )
 
@@ -230,6 +246,88 @@ def _games_line(i: int, p: Pattern) -> str:
         f"{i}. **{describe(p.features)}**: lost {p.hits} of {p.n} ({p.rate:.0%} against your "
         f"usual {p.baseline:.0%}). For example: {games}."
     )
+
+
+def _miss(g: Gift) -> str:
+    """'[13.Bd3 after 12...Qd7 (best 13.Nxe5, -45.2%)](link): It lets Nxe5 take ...'. One
+    decimal, cut rather than rounded (Gift.given_back), so a partial miss never reads as 20."""
+    r = g.reply
+    text = (
+        f"{label(r)} after {label(g.blunder)} (best {label(r, r.best_san)}, -{g.given_back:.1f}%)"
+    )
+    linked = f"[{text}]({g.url})" if g.url else text
+    reasons = g.reasons()
+    return f"{linked}: {reasons[0]}" if reasons else linked
+
+
+def _row(c: Compare) -> str:
+    """'you 14.7% (83 of 563), them 8.2% (48 of 584): +6.5 points (95% interval +2.8 to +10.3)'"""
+    text = (
+        f"you {c.yours.rate:.1%} ({c.yours.missed} of {c.yours.n}), them {c.theirs.rate:.1%} "
+        f"({c.theirs.missed} of {c.theirs.n})"
+    )
+    if c.gap is None or c.interval is None:  # a side with no chances: no gap
+        return text
+    low, high = c.interval
+    zero = ", which includes zero" if c.verdict == "same" else ""
+    interval = f"95% interval {100 * low:+.1f} to {100 * high:+.1f}{zero}"
+    return f"{text}: {100 * c.gap:+.1f} points ({interval})"
+
+
+def _punish_lines(r: Report) -> list[str]:
+    out = [
+        "## When they blunder",
+        "",
+        "A blunder here is a move that loses 20+ points of win probability. Your reply keeps the "
+        "gift when it gives back under 10 points, takes only part of it at 10-20 (a partial "
+        "miss) and misses it at 20 or more (a clear miss). Your opponents' replies to your "
+        "blunders are the yardstick: players at your level with the same kind of chance.",
+        "",
+    ]
+    for s in r.groups:
+        if s.chances:
+            out += [
+                f"- **{s.label}**: {headline(s)}",
+                f"  - Partial (gave back 10-20 points): {_row(s.partial)}.",
+                f"  - Clear (gave back 20 or more): {_row(s.clear)}.",
+                f"  - Partial and clear together (gave back 10 or more): {_row(s.missed)}.",
+            ]
+    if r.partial_lesson:  # only where your partial gap clears zero
+        out += ["", f"What to learn: {r.partial_lesson}"]
+        if r.partials:
+            where = " and ".join(r.partial_focus).lower()
+            lines = [f"- {_miss(g)}" for g in r.partials]
+            out += ["", f"Where you took only part of it in {where}:", "", *lines]
+    # A kind of punishment one side never had to find can't be compared, so it is left out.
+    kinds = "; ".join(
+        f"{KINDS[c.label]}, you {c.yours.rate:.0%} of {c.yours.n} and them {c.theirs.rate:.0%} "
+        f"of {c.theirs.n}"
+        for c in r.kinds
+        if c.gap is not None
+    )
+    if kinds:
+        verdict = " ".join(r.lessons) or "No kind stands out against your opponents."
+        out += ["", f"Missed (partial or clear), by the move that punishes: {kinds}. {verdict}"]
+    focus = " and ".join(r.focus).lower()  # the groups where you miss more, if any
+    if r.families:  # only inside those groups, each with its own gap clear of zero
+        out += [
+            "",
+            f"In {focus}, counting partial and clear misses together, you miss more than your "
+            "opponents most in these openings (the examples are of the part behind most of each "
+            "gap):",
+            "",
+        ]
+        for f in r.families:
+            c = f.compare
+            out.append(
+                f"- **{c.label}**: you missed {c.yours.missed} of {c.yours.n}, they missed "
+                f"{c.theirs.missed} of {c.theirs.n}; {part_note(f.part)}."
+            )
+            out += [f"  - {_miss(g)}" for g in f.examples]
+    elif r.worst:  # otherwise examples of the gap, or your costliest misses
+        out += ["", f"{worst_title(r)}:", "", *(f"- {_miss(g)}" for g in r.worst)]
+    out.append("")
+    return out
 
 
 def _repeat_line(i: int, r: Repeat) -> str:
@@ -315,6 +413,8 @@ def render(d: Digest, top: int = 5) -> str:
             out.append(f"| {what} | {m.moves} | {m.games} | {example} | {tip} |")
         out.append("")
 
+    if d.punish is not None and d.punish.gifts:
+        out += _punish_lines(d.punish)
     if d.repeats:
         when = f", played again since {d.since}" if d.since else ""
         out += [
@@ -349,4 +449,17 @@ def render(d: Digest, top: int = 5) -> str:
         "the low end of its 95% interval is still above your usual rate. They are ranked by how "
         "many extra mistakes they cost you. Links open the game at the move on Lichess.",
     ]
+    if d.punish is not None and d.punish.gifts:
+        out += [
+            "",
+            "When they blunder is the exception: it also counts your opponents' replies to your "
+            "blunders, as the yardstick for yours. There you are only called worse or better than "
+            "your opponents (for partial or clear misses in a group of games, for a kind of "
+            "punishing move, or in an opening) when the 95% interval of the gap leaves out zero; "
+            "otherwise there is no clear difference, or too few chances to tell. Openings are "
+            "only looked at in a group where you miss more, partial and clear together, and with "
+            "10+ chances on each side, and an opening's interval allows for how many were looked "
+            "at. Partial misses are only shown where your partial gap clears zero. Examples stand "
+            "for a gap, so they are partial or clear misses, whichever is behind most of it.",
+        ]
     return "\n".join(out).rstrip() + "\n"

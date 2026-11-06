@@ -326,6 +326,215 @@ On the owner's games (a copy, 2,099 Lichess games at depth 12):
   both sides' moves to ply 20, measured the same way on 2026-11-01); both are cached after.
 - `sync` was not run for real (no network in this work); its alert is tested with a faked fetch.
 
+## When they blunder: punish rate against your opponents (2026-11-01, branch `feat/punish-rate`)
+
+- `coach/punish.py`: a gift is any move losing 20+ points of win probability (`Store.gifts`, a
+  self-join that pairs it with the next move, either side); the reply missed the punishment when
+  it carries `missed_tactic`, which the engine already sets for exactly that (an inaccuracy or
+  worse right after a 20+ move), so nothing is re-derived. That is partial and clear misses
+  together: the group headlines split them (next section). The mirror ("Luck") is the same over
+  your gifts and your opponents' replies, and is the yardstick: players at your level with the
+  same kind of chance. `features.counted` and `features.rushed` are applied to the replying move
+  on both sides (in bullet, opponents' replies after move 10 are out too).
+- Groups: bullet (moves 1-10) and everything slower together ("Blitz and rapid"; rapid alone is
+  too small; classical, correspondence or unknown-speed games count there too, and then the label
+  names them: `punish.group_names`). Each rate has a Wilson interval (`mining.wilson_lower` and
+  `wilson_upper`, the one clamped pair from the section above), the gap a Newcombe hybrid-score
+  interval (`mining.newcombe`); the sentence says
+  worse or better only when that interval leaves out zero, otherwise no clear difference, or too
+  few to tell (next section). A side with no chances has no rate, gap or interval ('–', `null` in
+  the API), never 0 of 0 read as 0%.
+- Kind of punishment from the reply's `best_san` (`features.punish_kind`: capture, check, quiet;
+  castling is quiet). A kind's lesson (`punish.LESSONS`) fires only when you miss that kind more
+  than your opponents do with the interval clear of zero; your quiet rate against your own
+  capture rate is never compared (everyone misses quiet punishments more).
+- Trend: stretches of games holding about 150 of your chances each, counted back from the newest
+  game; a stretch closes at the end of the game that brings it to 150 or more, and the oldest
+  holds what is left. Both rates in a stretch come from the same games. No month column (2026
+  months have 4-50 chances each).
+- Evidence: openings only inside the groups where you're worse, only with 10+ chances on each
+  side (`OPENING_CHANCES`), and only those whose own gap clears zero at 95% across all the
+  openings looked at (Bonferroni, `_clear_of_chance`), ranked by excess misses (yours minus your
+  n times their rate), each with examples of the part (partial or clear) behind most of its gap.
+  When no opening qualifies, the examples follow the gap of the worse groups the same way (none
+  when the partial examples already show it), or with no worse group they are your costliest
+  misses (next section). Boards show their blunder as the
+  last move, your reply in red and the punishment in green, with `Game.move_url` at the reply's
+  ply and `principles.allows(..., captures=True)`. That also names a capture of a piece that
+  was hanging or attacked by a cheaper piece ("It lets Nxh6 take their bishop on h6, which was
+  hanging ..."), with a new attack it makes, even after a blunder that gave check
+  (`principles.en_prise` is `hanging()` without its in-check guard). Only When they blunder passes
+  `captures`: the opening tree joins `allows` with `explain`, which already says the piece was
+  left hanging, so the tree's reasons are the same as on main.
+- Puzzle sub-tags: a puzzle with `missed_tactic` gets `punish_capture|punish_check|punish_quiet`
+  from its solution SAN (`features.punish_tag`); new ones in `make.verify`, existing ones by a
+  tiny Store migration on open (`Store._tag_punishments`, idempotent: it only touches puzzles
+  with `missed_tactic` and no `punish_` tag yet), not by `puzzles prune`. No new deck: the
+  Practice tag filter (and `drill --tag`) offers them.
+- Surfaces: `chess-coach punish [--since] [--examples]`, a *When they blunder* section in the
+  digest (only when the CLI passes `gifts`; the narrated summary and the eval harness don't get
+  it), and `GET /api/punish` (cached like the overview) rendered on What you get wrong, loaded
+  after the rest of the page, with practice buttons per sub-tag and a note that Learn openings'
+  punish deck covers only the first 8 moves. No engine anywhere.
+- On a copy of the owner's database (2,099 Lichess games, depth 12; 8,493 answered moves losing
+  20+, 2,398 of them with a counted, unhurried reply), about 0.2 s. Missed here is partial and
+  clear together; the split is in the next section:
+  - Bullet, moves 1-10: you missed 44.0% (248 of 563), they missed 36.3% (212 of 584): +7.7
+    points, 95% interval +2.1 to +13.4, the one real gap (most of it partial misses: +6.5 of the
+    +7.7 points; clear misses +1.2, -4.0 to +6.5, not shown to differ).
+  - Blitz and rapid: 36.0% (221 of 614) against 35.6% (227 of 637): +0.4, -4.9 to +5.7, no
+    clear difference.
+  - By kind: capture 33.1% (599) vs 29.1% (670), check 45.6% (68) vs 39.7% (73), quiet 47.1%
+    (510) vs 45.0% (478); no interval clears zero, so no kind lesson.
+  - Trend (8 stretches, 2018-10 to 2026-10): your rate 34.7-45.3%, theirs 30.6-40.6%; no
+    stretch's gap clears zero.
+  - Openings, as first built (each opening's own 95% interval): Danish Gambit Accepted 23/42 vs
+    12/42 (+26.2, 95% interval +5.1 to +44.3), Queen's Pawn Game 23/38 vs 12/37 (+28.1, +5.5 to
+    +47.0), Blackmar-Diemer Gambit 30/48 vs 26/62 (+20.6, +1.8 to +37.4); the Sicilian Defense
+    (22/44 vs 10/32, +18.8, -3.6 to +38.2) was not listed. They were not "where the bullet gap
+    comes from": of his 36.7 excess partial misses in bullet they hold 11.0, 3.9 and 1.6, and the
+    Queen's Pawn Game and the Blackmar-Diemer stand out mostly on clear misses. Since the third
+    review none is listed (13 openings with 10+ chances a side, z = 2.89; see "After the review
+    of the split"). The costliest misses are fianchetto reflexes, 2.Bh6 2...Bg7?? (2...Nxh6 wins
+    the bishop): clear misses, which show no clear difference from his opponents'.
+  - `--since 7d`: bullet 8 of 13 against 8 of 19 (+19.4, -14.4 to +47.5), too few to tell, so no
+    openings: just the three costliest misses.
+  - Puzzles: the migration tagged all 228 `missed_tactic` puzzles: 112 punish_capture, 95
+    punish_quiet, 21 punish_check.
+- After two reviews (2026-11-01), fixed: openings had been listed on a raw excess (1-of-1
+  samples, and from all games when no group was worse) under "where you miss more than your
+  opponents" (the per-opening interval that replaced it still let a 1 of 1 against 0 of 3
+  through: see "After the review of the split" below); `allows`' new capture clause had
+  repeated explain's hanging-piece reason on the opening tree (82 of 940 punishable opponent
+  mistakes there); a side with 0 chances read as 0%
+  (a "-100 points" gap); the capture of a checking piece got no reason (3 of the 469 counted
+  misses); the CLI said the engine's move "punished it" and every trend row held 150; any
+  non-bullet speed was labelled "Blitz and rapid"; and no test covered `digest`'s wiring.
+
+### Partial and clear misses (2026-11-01, after research round 2)
+
+Research round 2 (re-checked by both skeptics at depth 12 and 18) found that "missed" mixes two
+habits: on the owner's bullet games most of the gap is in replies that give back 10-20 points
+(+6.5 of the +7.7 points: he takes only part of the gift); replies that give back 20+ show no
+clear difference from his opponents' (+1.2, -4.0 to +6.5: not shown to differ, not shown to be
+zero). So each group now shows the two apart, and the headline says which one differs.
+
+- `Gift.outcome` from the reply's `wp_loss`: kept (< 10), partial (10 to < 20), clear (>= 20);
+  the bars are `evaluation.INACCURACY_WP_LOSS` and `MISTAKE_WP_LOSS`. `Split` holds one group's
+  partial and clear `Compare`s and the two together (`missed`: `compare` takes the predicate;
+  `missed` is the default), each
+  with Wilson intervals, a Newcombe interval for the gap and the same verdict rule (worse or
+  better only when the interval leaves out zero).
+- Checked first, on the copy: `missed_tactic` on the reply is exactly `wp_loss >= 10`, on all
+  8,493 answered gifts (3,494 tagged, every one 10+; 4,999 untagged, every one under 10) and on
+  the 2,398 counted ones (908 = 235 partial + 673 clear). The stored judgement agrees: partial =
+  inaccuracy (235), clear = mistake (248) or blunder (425). No counted reply sits exactly on 10.0
+  or 20.0; of all 8,493 answered gifts one does, lichess:dsJhaWUI ply 38 (bullet move 19, so not
+  counted) at exactly 20.0, a mistake, sorted as clear like its judgement. It holds by
+  construction too (`motifs.py` tags `missed_tactic` when the move before lost 20+ and this one
+  10+), so `missed` is partial plus clear. The parts below that use it can still stress another
+  part than a group's headline (an opening can stand out on clear misses inside a group whose gap
+  is partial), so examples come from the part behind most of the gap they stand for.
+- `headline(Split)`, a gap first (worse before better, partial before clear) and a gap only
+  when its interval clears zero. A level row keeps its numbers: "Clear misses: no clear
+  difference, 29.3% vs 28.1% (+1.2 points, 95% interval -4.0 to +6.5)", or "too few to tell"
+  while the interval still reaches 10 points either way (`UNSURE_GAP`); never "the same". Both
+  parts level: the two together are named when their interval clears zero ("When they blunder
+  you miss it more often than your opponents, partial and clear misses together: ... Apart,
+  neither is clear."), else "there is no clear difference between you and your opponents" or
+  "there are too few chances yet to tell you apart"; never "you do as well". Partial worse, clear
+  not: "When they blunder you often take only part of it: your reply gave back 10-20 points after
+  14.7% of their blunders (your opponents: 8.2%), +6.5 points (95% interval +2.8 to +10.3). Clear
+  misses: no clear difference, 29.3% vs 28.1% (+1.2 points, 95% interval -4.0 to +6.5)." Clear
+  gaps read "you miss it outright more (less) often".
+- `LESSONS["partial"]` ("After their slip, compare checks, captures and threats before your
+  usual move, and take the one that wins most.") is `Report.partial_lesson`, only when some
+  group's partial gap is worse (`partial_focus`); `Report.lessons` stays the kinds'. Examples:
+  `Report.partials`, typical partial misses in those groups (`typical`: ones whose blunder has a
+  reason in chess terms first, then those nearest the middle of the band, 15 points; the
+  costliest sit just under 20, where another engine depth may call them clear), in the existing
+  format (their blunder, your reply, the engine's move, `principles.allows(captures=True)`, the
+  link). Losses in examples show one decimal, cut rather than rounded (`Gift.given_back`):
+  rounding printed 19.96-19.99 as 20.0, the clear bar.
+- Which definition each part uses:
+  - partial / clear (`outcome`): the group headlines and their rows, the partial lesson, the
+    partial examples, and every example of a gap (`main_part`: the part with the bigger excess
+    over the opponents' rate, partial on a tie);
+  - missed, partial and clear together (`missed_tactic`): each group's third row, the headline
+    when neither part has a gap, the kinds table (and its lessons), the trend, the openings list
+    and its gate (a group where you miss more, then 10+ chances a side and a gap clear of zero
+    across the openings looked at), and the costliest misses shown when no group is worse. Their
+    titles say so ("Missed (partial or clear)", "partial and clear together"; the other example
+    headings name their part, `worst_title`);
+  - puzzle tags (`punish_capture|check|quiet`): every `missed_tactic` puzzle, and puzzles start
+    at 20 points lost (`make.MIN_WP_LOSS`), so all are clear misses: 228 of 228 on the copy. No
+    drill trains partial misses yet; the CLI's drill line says so, and the card's practice line
+    says the puzzles come from moves losing 20+.
+- Surfaces: the CLI prints both headlines and one table with a partial, a clear and a together
+  row per group, then the lesson and the examples; the digest puts the three rows under each
+  group's line, and lists each opening with its examples (no costliest misses next to them, as
+  in the CLI and on the card); `/api/punish` groups are `{label, headline, partial, clear,
+  missed}` (each a compare with `name`), plus `partial_focus`, `partial_lesson` and `partials`;
+  families carry `part` and `part_note`, and `worst_part` and `worst_title` say what `worst`
+  holds; the web card shows each group with its headline and a three-row table, then the lesson
+  and the boards.
+- On a fresh copy of the owner's database (same 2,398 counted chances):
+  - Bullet, moves 1-10: partial 14.7% (83 of 563) against 8.2% (48 of 584), +6.5, 95% interval
+    +2.8 to +10.3, worse; clear 29.3% (165 of 563) against 28.1% (164 of 584), +1.2, -4.0 to
+    +6.5, no clear difference; together 44.0% (248 of 563) against 36.3% (212 of 584), +7.7,
+    +2.1 to +13.4.
+  - Blitz and rapid: partial 8.8% (54 of 614) against 7.8% (50 of 637), +0.9, -2.1 to +4.1;
+    clear 27.2% (167 of 614) against 27.8% (177 of 637), -0.6, -5.5 to +4.4; no clear difference
+    on either (together +0.4, -4.9 to +5.7).
+  - Partial examples (bullet), typical since the third review: 9...Nxf3 after 9.Ngf3 (9...Nxd3
+    hits the bishop on f4; -14.8), 10.Qe1 after 9...Bd6 (10.g4 hits the bishop on h5; -15.4),
+    6...a6 after 6.c5 (6...c6 hits the knight on b5; -15.5). Before: 19.61, 19.57 and 19.38, the
+    edge of the band, the third with no reason.
+  - No opening is listed, and no other examples: the partial examples show the bullet gap.
+- How firm the partial gap is (research round 2): game-clustered +6.5 [+2.7, +10.0] over 681
+  games; at depth 18 (6,567 positions re-scored, game-clustered) +6.6 [+3.3, +10.0], with clear
+  +1.7 [-3.7, +7.1]. Public players' partial rates don't separate rating levels (bands A / B /
+  C: 9.8 / 10.3 / 9.7%), so it is a personal habit, not a level gap, and the wording stays away
+  from levels.
+- Caveats (here, not in the UI):
+  - In the 268 bullet games where both sides gave a counted gift, the partial gap is +2.6, 95%
+    interval -1.8 to +7.1 (39 of 351 against 31 of 365): inside the same games it is not clear.
+  - 11 of his 83 bullet partial misses come from the Danish Gambit Accepted: 11 of his 42
+    chances there, against his opponents' 0 of 42 (clear: 12 of 42 each). With the other two
+    Danish families it is 13 of 83 (Danish Gambit 2 of 7 against 0 of 3; Declined 0 of 1
+    against 0 of 5).
+  - The gap sits in his newer games: older half +3.3 [-1.9, +8.5], newer half +9.8 [+4.5,
+    +15.2]. A second depth-12 run with other engine settings shrinks it to +2.9 [-0.6, +6.6];
+    that run agrees with depth 18 less often (90.7% of reply classes against 94.8% for the
+    stored evals), but the 10-20 band does depend on the engine's settings.
+
+### After the review of the split (2026-11-01)
+
+Fixed, each with a test that fails on the code before it (numbers from a copy of the database):
+- Both parts level, together worse (`--since 90d`, bullet: partial +8.0, -0.0 to +17.8; clear
+  +11.4, -3.2 to +25.8; together 31 of 67 against 22 of 82, +19.4, +4.0 to +33.9): the headline
+  said "you do as well as your opponents" while the same section listed the openings where he
+  misses more. It now names the together gap, and the gate uses the same compare
+  (`Split.missed`).
+- A level row read "the same as theirs" with no interval, even on 3 of 13 against 1 of 19 (the
+  weekly digest: +17.8, -6.6 to +45.3). Now "no clear difference" or "too few to tell", with the
+  interval.
+- Every board under "where you miss more" was a clear miss (9 of 9), including both of the
+  Danish Gambit Accepted's, whose gap is all partial. Examples now come from the part behind
+  most of the gap they stand for, and the digest lists the openings with their examples instead
+  of the costliest misses.
+- The partial examples were the edge of the band (19.61, 19.57, 19.38, the last with no reason):
+  now typical ones with a reason.
+- Rounding printed 19.96-19.99 as 20.0 (there is an answered reply at 19.99, lichess:ur6JHTSf
+  ply 24, not counted): now cut to one decimal; the card printed 81.0 as "81".
+- The openings gate listed 1 of 1 against 0 of 3 (`--since 90d`, the English Opening) and tested
+  about 40 openings at 95% each (16 with 3 or fewer of his chances), so about one listing was
+  expected by chance. Now 10+ chances a side and a Bonferroni interval across the openings
+  looked at; on all his games none of the 13 looked at clears it (z = 2.89), and with `--since
+  90d` the Pirc Defense, the only one looked at, stays.
+- Wording: "the whole gap is in partial misses" is most of it (+6.5 of +7.7); "no reply sits
+  exactly on 10.0 or 20.0" holds for the counted replies, not for all answered ones.
+
 ## Remaining (in order)
 
 1. ~~Fresh puzzles from the full analysis~~: done 2026-10-31. `puzzles prune` removed 83

@@ -40,6 +40,13 @@ async function api(path, options) {
   return r.json();
 }
 
+const TAG_NAMES = {
+  punish_capture: "punish with a capture",
+  punish_check: "punish with a check",
+  punish_quiet: "punish with a quiet move",
+};
+const tagName = (t) => TAG_NAMES[t] ?? t.replaceAll("_", " ");
+
 // -- tabs ----------------------------------------------------------------------------------
 const loaded = {};
 function show(tab, arg) {
@@ -96,6 +103,7 @@ function repeatCard(r) {
 }
 
 async function loadMistakes() {
+  const punishing = api("/api/punish"); // its own request: the page doesn't wait for it
   const [o, tagList, repeated] = await Promise.all([api("/api/overview"), api("/api/drill/tags"), api("/api/repeats")]);
   const tags = new Set(tagList.map((t) => t.tag));
   $("#summary").textContent =
@@ -116,12 +124,96 @@ async function loadMistakes() {
     el("h2", {}, "When it happens"),
     el("p", { class: "muted" }, "Situations where your mistake rate is clearly above your own average."),
     o.situations.length ? o.situations.map((h) => habitCard(h, tags)) : el("p", {}, "No situation stands out yet: analyse more games."),
+    el("div", { id: "punish" }),
     o.pressure.length ? [
       el("h2", {}, "Short on time, but it keeps happening"),
       el("p", { class: "muted" }, "Fast moves are reflexes, so they only count here when the same mistake shows up again and again (15+ times across 8+ games)."),
       o.pressure.map((h) => habitCard(h, tags)),
     ] : null,
   );
+  punishing.then((p) => p.gifts && fill($("#punish"), punishSection(p, tagList)))
+    .catch((err) => fill($("#punish"), el("p", { class: "muted" }, `When they blunder: ${err.message}`)));
+}
+
+// -- when they blunder ---------------------------------------------------------------------
+// Your miss rate on their blunders next to theirs on yours (coach/punish.py), each with its 95%
+// interval; a gap is only called one when its interval leaves out zero.
+const signed = (n) => `${n > 0 ? "+" : ""}${n}`;
+const points = (n) => `${n > 0 ? "+" : ""}${n.toFixed(1)}`;
+
+function rateCell(r) {
+  return el("td", {}, r.n ? `${r.rate.toFixed(1)}% of ${r.n}` : "–",
+    r.n ? el("div", { class: "muted small" }, `${r.low.toFixed(1)}–${r.high.toFixed(1)}%`) : null);
+}
+
+// No gap when a side had no chances (0 of 0 is no rate).
+function gapCell(c) {
+  if (c.gap == null) return el("td", {}, "–");
+  return el("td", { class: c.verdict === "worse" ? "played" : c.verdict === "better" ? "better" : "" }, points(c.gap),
+    el("div", { class: "muted small" }, `${points(c.interval[0])} to ${points(c.interval[1])}`));
+}
+
+function rateTable(head, rows, sides = ["you missed", "they missed"]) {
+  return el("table", {},
+    el("tr", {}, [head, ...sides, "gap (95%)"].map((h) => el("th", {}, h))),
+    rows.map((c) => el("tr", {}, el("td", {}, c.name ?? c.label), rateCell(c.yours), rateCell(c.theirs), gapCell(c))));
+}
+
+function missExample(m) {
+  return el(
+    "div", { class: "example" },
+    boardNode(m.svg),
+    el("div", {}, "They played ", el("b", {}, m.theirs), " · you ", el("span", { class: "played" }, m.move),
+      " · punish with ", el("span", { class: "better" }, m.best),
+      el("span", { class: "muted small" }, ` · win chance −${m.loss.toFixed(1)}%`)),
+    reasons(m.reasons),
+    m.url ? el("a", { href: m.url, target: "_blank", rel: "noopener" }, "open the game") : null,
+  );
+}
+
+function punishSection(p, tagList) {
+  const drills = tagList.filter((t) => t.tag.startsWith("punish_"));
+  const focus = p.focus.length ? ` (${p.focus.join(", ").toLowerCase()})` : "";
+  return [
+    el("h2", {}, "When they blunder"),
+    el("p", { class: "muted" }, "A blunder here is a move that loses 20+ points of win probability. Your reply keeps the gift when it gives back under 10 points, takes only part of it at 10–20 (a partial miss) and misses it at 20 or more (a clear miss). Your opponents' replies to your blunders are the yardstick: players at your level with the same kind of chance. In bullet only moves 1–10 count, and replies made short on time don't."),
+    // Partial and clear misses apart (different habits, each with its own gap), then together.
+    p.groups.map((g) => el("div", { class: "card" }, el("h3", {}, g.label), el("div", {}, g.headline),
+      rateTable("your reply gave back", [g.partial, g.clear, g.missed], ["you", "they"]))),
+    p.partial_lesson ? [
+      el("div", { class: "lesson" }, el("b", {}, "What to learn: "), p.partial_lesson),
+      p.partials.length ? [
+        el("h3", {}, `Where you took only part of it (${p.partial_focus.join(", ").toLowerCase()})`),
+        el("div", { class: "examples" }, p.partials.map(missExample)),
+      ] : null,
+    ] : null,
+    el("h3", {}, "Missed, by the move that punishes"),
+    el("p", { class: "muted small" }, "Here, in the trend and in the openings below, a miss is partial or clear together: your reply gave back 10 points or more."),
+    rateTable("punishing move", p.kinds),
+    p.lessons.length
+      ? p.lessons.map((l) => el("div", { class: "lesson" }, el("b", {}, "What to learn: "), l))
+      : el("p", { class: "muted small" }, "No kind of punishing move stands out against your opponents: everyone misses some kinds more than others."),
+    drills.length ? el("p", {}, "Practise the punishments you missed outright (puzzles come from moves losing 20+ points): ", drills.flatMap((t) => [
+      el("button", { class: "chip", onclick: () => show("practice", t.tag) }, `${tagName(t.tag)} (${t.puzzles})`), " "])) : null,
+    p.trend.length > 1 ? [
+      el("h3", {}, "Over time"),
+      el("p", { class: "muted small" }, "Each row is a stretch of games holding about 150 of their blunders you could punish (the oldest may hold fewer); both rates in a row come from the same games."),
+      rateTable("games played", p.trend),
+    ] : null,
+    // Openings only where you clearly miss more (inside a group where you do), each with examples
+    // of the part behind most of its gap; otherwise the examples in p.worst (worst_title).
+    p.families.length ? [
+      el("h3", {}, `Where you miss more than your opponents, partial and clear together${focus}`),
+      p.families.map((f) => el("div", { class: "card" },
+        el("h3", {}, f.label),
+        el("div", { class: "muted" }, `You missed ${f.yours.missed} of ${f.yours.n} (${f.yours.rate.toFixed(1)}%); they missed ${f.theirs.missed} of ${f.theirs.n} (${f.theirs.rate.toFixed(1)}%): ${points(f.gap)} points (95% interval ${points(f.interval[0])} to ${points(f.interval[1])}); ${f.part_note}.`),
+        el("div", { class: "examples" }, f.examples.map(missExample)))),
+    ] : p.worst.length ? [
+      el("h3", {}, p.worst_title),
+      el("div", { class: "examples" }, p.worst.map(missExample)),
+    ] : null,
+    el("p", { class: "muted small" }, "Learn openings has a deck of the mistakes your opponents make in your openings' first 8 moves (Punish their mistakes); this counts every move that counts."),
+  ];
 }
 
 // -- practice ------------------------------------------------------------------------------
@@ -175,7 +267,7 @@ async function openPractice(tag) {
   const select = $("#tag");
   const keep = tag ?? select.value;
   fill(select, el("option", { value: "" }, "everything due"),
-    tags.map((t) => el("option", { value: t.tag }, `${t.tag.replaceAll("_", " ")} (${t.due} due of ${t.puzzles})`)));
+    tags.map((t) => el("option", { value: t.tag }, `${tagName(t.tag)} (${t.due} due of ${t.puzzles})`)));
   select.value = keep || "";
   await nextPuzzle();
 }
@@ -210,7 +302,7 @@ async function nextPuzzle() {
     p.opening_fix
       ? el("span", {}, `Your opening (${p.opening || ""}): here you usually play `, el("span", { class: "played" }, p.played), ". Find a better move.")
       : el("span", {}, "In the game you played ", el("span", { class: "played" }, p.played), ". Find the best move."),
-    el("br"), el("span", { class: "muted small" }, `${p.side === "white" ? "White" : "Black"} to move · ${p.tags.join(", ").replaceAll("_", " ")}`),
+    el("br"), el("span", { class: "muted small" }, `${p.side === "white" ? "White" : "Black"} to move · ${p.tags.map(tagName).join(", ")}`),
     p.opening_idea ? el("span", { class: "idea" }, el("b", {}, `${p.opening}: `), p.opening_idea) : null,
   );
   buttons({ giveup: true });
@@ -759,7 +851,7 @@ async function loadProgress(speed) {
       ? el("div", {},
         el("p", {}, `Solved ${p.puzzles.solved} of ${p.puzzles.attempts} attempts.`),
         el("table", {}, el("tr", {}, ["theme", "attempts", "solved"].map((h) => el("th", {}, h))),
-          p.tags.map((t) => el("tr", {}, el("td", {}, t.tag.replaceAll("_", " ")), el("td", {}, t.attempts), el("td", {}, `${t.rate}%`)))))
+          p.tags.map((t) => el("tr", {}, el("td", {}, tagName(t.tag)), el("td", {}, t.attempts), el("td", {}, `${t.rate}%`)))))
       : el("p", { class: "muted" }, "No attempts yet: try the Practice tab."),
   );
 }
@@ -767,7 +859,6 @@ async function loadProgress(speed) {
 // Your rating week by week (read from your games; bullet left out) next to the practice you did.
 function trendSection(t) {
   if (!t.speed) return null;
-  const signed = (n) => `${n > 0 ? "+" : ""}${n}`;
   const pick = el("select", {}, t.speeds.map((s) => el("option", s === t.speed ? { value: s, selected: "" } : { value: s }, s)));
   pick.addEventListener("change", () => loadProgress(pick.value));
   const cell = (v) => el("td", {}, v ?? "");

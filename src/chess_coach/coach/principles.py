@@ -191,8 +191,17 @@ def _after(board: chess.Board, move: chess.Move) -> chess.Board:
 
 def hanging(board: chess.Board, color: chess.Color) -> dict[tuple[int, int], str]:
     """`color`'s pieces (knight or more) the side to move can take for free or for less, as
-    {(piece type, square): how}. Pins count: only legal captures are looked at."""
+    {(piece type, square): how}. Pins count: only legal captures are looked at. Nothing while the
+    side to move is in check: answering the check comes first."""
     if board.turn == color or board.is_check():
+        return {}
+    return en_prise(board, color)
+
+
+def en_prise(board: chess.Board, color: chess.Color) -> dict[tuple[int, int], str]:
+    """hanging() even when the side to move is in check: what its legal captures (which then
+    answer the check) win."""
+    if board.turn == color:
         return {}
     cheapest: dict[int, int] = {}
     for move in board.legal_moves:
@@ -440,11 +449,15 @@ def explain(fen: str, played: str, best: str | None, *, theirs: bool = False) ->
     return reasons
 
 
-def allows(fen: str, punish: str, *, yours: bool = False) -> list[str]:
+def allows(fen: str, punish: str, *, captures: bool = False, yours: bool = False) -> list[str]:
     """What the opponent's mistake lets you do, in chess terms: `fen` is the position after it
     (you to move) and `punish` the engine's answer (UCI). With `yours` the mistake was yours and
     `punish` is their answer, so the pieces it hits are yours. Empty when there's nothing to
-    name."""
+    name.
+
+    With `captures` it also names a capture of a piece the mistake left hanging or attacked by a
+    cheaper piece (When they blunder). The opening tree leaves that out: there explain() already
+    says their move left the piece hanging, and the two would say it twice."""
     board = chess.Board(fen)
     move = chess.Move.from_uci(punish)
     if move not in board.legal_moves:
@@ -456,10 +469,17 @@ def allows(fen: str, punish: str, *, yours: bool = False) -> list[str]:
     if after.is_check():
         return [f"It lets {san} come with check."]
     hit = sorted(threatened(after, me) - threatened(board, me), key=lambda ks: -PIECE_VALUES[ks[0]])
-    if not hit:
-        return []
     names = [f"{chess.piece_name(kind)} on {chess.square_name(square)}" for kind, square in hit]
     whose = "your" if yours else "their"
+    taken = (board.piece_type_at(move.to_square), move.to_square)
+    # en_prise, not hanging(): after a blunder that gives check you are in check (4.Bxf7+ Kxf7).
+    if captures and board.is_capture(move) and (how := en_prise(board, not me).get(taken)):
+        piece = f"{whose} {chess.piece_name(taken[0])} on {chess.square_name(taken[1])}"
+        if names:
+            return [f"It lets {san} take {piece}, which was {how}, and hit {whose} {names[0]}."]
+        return [f"It lets {san} take {piece}, which was {how}."]
+    if not names:
+        return []
     if len(names) > 1:
         return [f"It lets {san} hit {whose} {names[0]} and {names[1]} at once."]
     return [f"It lets {san} hit {whose} {names[0]}."]

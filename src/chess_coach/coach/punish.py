@@ -1,0 +1,546 @@
+"""When they blunder: what your replies to your opponents' blunders gave back, next to what
+theirs gave back after yours.
+
+A gift is a move that loses at least 20 points of win probability; the reply is the other
+player's next move. What the reply gave back sorts it (`Gift.outcome`): under 10 points it kept
+the gift, 10 to under 20 it took only part of it (a partial miss), 20 or more it missed it (a
+clear miss). Partial and clear misses are compared apart because they are different habits: on
+the owner's bullet games most of the gap is in partial misses (+6.5 of +7.7 points), and clear
+ones show no clear difference (+1.2, 95% interval -4.0 to +6.5). Your opponents' replies to your
+own gifts are the yardstick: players at your level with the same kind of chance (Lichess Insights
+calls the two rates Opportunism and Luck). A gap only counts when its 95% interval (Newcombe)
+leaves out zero.
+
+`Gift.missed` is partial and clear together: the engine's `missed_tactic` on the reply (an
+inaccuracy or worse right after a gift: engine/motifs.py), the same as a reply losing 10+ points.
+The kinds of punishing move, the trend and the openings use it, so nothing is re-derived there.
+Examples stand for a gap, so they come from the part (partial or clear) behind most of it.
+
+The owner's rules apply to the replying move, on both sides alike: in bullet only moves 1-10
+count (features.counted) and replies made short on time don't (features.rushed). Bullet is
+reported apart from blitz and rapid (rapid alone is too small); classical, correspondence and
+unknown-speed games count with blitz and rapid, and then the group's label names them.
+"""
+
+from __future__ import annotations
+
+import math
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass, field
+from statistics import NormalDist
+
+from chess_coach.coach.principles import allows
+from chess_coach.engine.evaluation import INACCURACY_WP_LOSS, MISTAKE_WP_LOSS
+from chess_coach.models import Color, Game, MoveFact, Speed
+from chess_coach.patterns.features import BULLET_MOVES, counted, is_bullet, punish_kind, rushed
+from chess_coach.patterns.mining import newcombe, wilson_lower, wilson_upper
+
+GIFT_WP_LOSS = 20.0  # the same bar as missed_tactic (engine/motifs.py)
+# What the reply gave back: under 10 points it kept the gift, from 20 it missed it outright.
+PARTIAL_WP_LOSS = INACCURACY_WP_LOSS  # 10, where missed_tactic starts
+CLEAR_WP_LOSS = MISTAKE_WP_LOSS  # 20
+BAND_MIDDLE = (PARTIAL_WP_LOSS + CLEAR_WP_LOSS) / 2  # 15: where typical partial examples sit
+OUTCOMES = {
+    "partial": "partial (10-20 points)",
+    "clear": "clear (20+ points)",
+    "missed": "partial and clear (10+ points)",
+}
+TREND_GIFTS = 150  # their blunders you could punish, per stretch of the trend: about ±8 points
+# An opening is only looked at with this many chances on each side (fewer can't show a gap), and
+# listed when its gap clears zero at 95% across all the openings looked at (`_clear_of_chance`).
+OPENING_CHANCES = 10
+# A level row (its gap's interval includes zero) whose interval still reaches a gap this big
+# either way is "too few to tell"; a narrower one is "no clear difference". Neither is "the same".
+UNSURE_GAP = 0.10
+GROUPS = {"bullet": f"Bullet, moves 1-{BULLET_MOVES}", "slower": "Blitz and rapid"}
+# Other speeds that count with blitz and rapid, named in the label when there are any.
+OTHER_SPEEDS = {
+    Speed.CLASSICAL: "classical",
+    Speed.CORRESPONDENCE: "correspondence",
+    Speed.UNKNOWN: "games of unknown speed",
+}
+KINDS = {"capture": "a capture", "check": "a check", "quiet": "a quiet move"}
+# Only shown when you do it clearly more often than your opponents: take only part of their
+# blunders (partial), or miss a kind of punishment (everyone misses quiet punishments more than
+# captures, so that alone is no lesson).
+LESSONS = {
+    "partial": (
+        "After their slip, compare checks, captures and threats before your usual move, and take "
+        "the one that wins most."
+    ),
+    "capture": (
+        "When they blunder, look first at what their move left undefended: count attackers and "
+        "defenders, and take what is free."
+    ),
+    "check": (
+        "When they blunder, look at every check: one that forks, wins material or drives the "
+        "king into the open is often the punishment."
+    ),
+    "quiet": (
+        "When they blunder, look for quiet punishing moves too, not only captures and checks: a "
+        "move that attacks two things, traps a piece or threatens mate."
+    ),
+}
+
+
+def label(m: MoveFact, san: str | None = None) -> str:
+    """'12...Nf6': the move with its number, or another move (`san`) played at that point."""
+    return f"{m.move_number}{'.' if m.color is Color.WHITE else '...'}{san or m.san}"
+
+
+@dataclass(frozen=True, slots=True)
+class Gift:
+    """A blunder and the other player's reply to it."""
+
+    game: Game
+    blunder: MoveFact
+    reply: MoveFact
+
+    @property
+    def yours(self) -> bool:
+        """Yours to punish: your opponent blundered and you replied."""
+        return self.reply.is_user
+
+    @property
+    def missed(self) -> bool:
+        """Partial or clear: the engine tagged the reply missed_tactic (it lost 10+ points)."""
+        return "missed_tactic" in self.reply.motifs
+
+    @property
+    def outcome(self) -> str:
+        """What the reply gave back of the gift: kept (under 10 points), partial (10 to under
+        20: it took only part of it) or clear (20 or more: it missed it)."""
+        loss = self.reply.wp_loss
+        return "kept" if loss < PARTIAL_WP_LOSS else "partial" if loss < CLEAR_WP_LOSS else "clear"
+
+    @property
+    def given_back(self) -> float:
+        """What the reply gave back, cut (not rounded) to one decimal: 19.97 reads 19.9, so a
+        partial miss never reads as 20.0, the clear bar. wp_loss is stored to two decimals; the
+        inner round only clears float noise (19.6 * 10 is 196.00000000000003)."""
+        return math.floor(round(self.reply.wp_loss * 10, 6)) / 10
+
+    @property
+    def kind(self) -> str:
+        """capture, check or quiet: the engine's punishing move (the reply's best move)."""
+        return punish_kind(self.reply.best_san)
+
+    @property
+    def group(self) -> str:
+        return "bullet" if is_bullet(self.game) else "slower"
+
+    @property
+    def url(self) -> str | None:
+        return self.game.move_url(self.reply.ply)
+
+    def reasons(self) -> list[str]:
+        """What the blunder allowed, in chess terms (principles.allows), including taking a piece
+        it left hanging: the commonest punishment."""
+        if not self.reply.fen_before or not self.reply.best_move:
+            return []
+        return allows(self.reply.fen_before, self.reply.best_move, captures=True)
+
+
+def group_names(found: Iterable[Gift]) -> dict[str, str]:
+    """GROUPS, with the slower group's label naming any classical, correspondence or
+    unknown-speed games among `found`: 'Blitz, rapid and classical'."""
+    speeds = {g.game.speed for g in found}
+    words = ["blitz", "rapid", *(name for speed, name in OTHER_SPEEDS.items() if speed in speeds)]
+    if len(words) == 2:
+        return GROUPS
+    return {**GROUPS, "slower": f"{', '.join(words[:-1])} and {words[-1]}".capitalize()}
+
+
+def gifts(games: Iterable[Game], pairs: Iterable[tuple[MoveFact, MoveFact]]) -> list[Gift]:
+    """The gifts in `games` whose reply counts: coached at all (in bullet, moves 1-10) and not
+    made short on time. `pairs` are (move, next move) as Store.gifts returns them."""
+    by_id = {g.id: g for g in games}
+    out = []
+    for blunder, reply in pairs:
+        game = by_id.get(reply.game_id)
+        if game is None or blunder.wp_loss < GIFT_WP_LOSS:
+            continue
+        if counted(reply, game) and not rushed(reply, game):
+            out.append(Gift(game, blunder, reply))
+    return out
+
+
+@dataclass(frozen=True, slots=True)
+class Rate:
+    missed: int
+    n: int
+
+    @property
+    def rate(self) -> float:
+        return self.missed / self.n if self.n else 0.0
+
+    @property
+    def low(self) -> float:
+        return wilson_lower(self.missed, self.n)
+
+    @property
+    def high(self) -> float:
+        return wilson_upper(self.missed, self.n)
+
+
+@dataclass(frozen=True, slots=True)
+class Compare:
+    """Over one slice: how often you missed the punishment, and how often your opponents did."""
+
+    label: str
+    yours: Rate  # your replies to their blunders
+    theirs: Rate  # their replies to yours
+
+    @property
+    def gap(self) -> float | None:
+        """Your rate minus theirs; None when either side had no chances (0 of 0 is no rate)."""
+        if not (self.yours.n and self.theirs.n):
+            return None
+        return self.yours.rate - self.theirs.rate
+
+    @property
+    def interval(self) -> tuple[float, float] | None:
+        """The gap's 95% interval (Newcombe); None with the gap."""
+        if not (self.yours.n and self.theirs.n):
+            return None
+        return newcombe(self.yours.missed, self.yours.n, self.theirs.missed, self.theirs.n)
+
+    @property
+    def verdict(self) -> str:
+        """worse, better or same: a gap only counts when its 95% interval leaves out zero."""
+        if (interval := self.interval) is None:
+            return "same"
+        low, high = interval
+        return "worse" if low > 0 else "better" if high < 0 else "same"
+
+    @property
+    def excess(self) -> float:
+        """How many more of their blunders you missed than your opponents' rate predicts."""
+        return self.yours.missed - self.yours.n * self.theirs.rate
+
+
+def compare(
+    name: str, found: Iterable[Gift], hit: Callable[[Gift], bool] = lambda g: g.missed
+) -> Compare:
+    """How often `hit` holds for your replies and for theirs; by default missed (partial or
+    clear)."""
+    yours, theirs = [0, 0], [0, 0]
+    for g in found:
+        side = yours if g.yours else theirs
+        side[0] += hit(g)
+        side[1] += 1
+    return Compare(name, Rate(*yours), Rate(*theirs))
+
+
+@dataclass(frozen=True, slots=True)
+class Split:
+    """One group's chances by what the reply gave back: how often it took only part of the gift
+    (partial), how often it missed it (clear), and the two together (missed: what the openings,
+    kinds and trend count), yours against your opponents'. The labels of `partial`, `clear` and
+    `missed` are OUTCOMES keys."""
+
+    label: str
+    partial: Compare
+    clear: Compare
+    missed: Compare
+
+    @property
+    def chances(self) -> int:
+        """Gifts in the group, both sides'."""
+        return self.partial.yours.n + self.partial.theirs.n
+
+
+def split(name: str, found: Iterable[Gift]) -> Split:
+    found = list(found)
+    return Split(
+        name,
+        compare("partial", found, lambda g: g.outcome == "partial"),
+        compare("clear", found, lambda g: g.outcome == "clear"),
+        compare("missed", found),
+    )
+
+
+_ORDER = {"worse": 0, "better": 1, "same": 2}
+
+
+def headline(s: Split) -> str:
+    """The group in plain words, a gap first (worse before better, partial before clear). A gap
+    is only named when its 95% interval leaves out zero. When neither part has one, the two
+    together can (`Split.missed`, the gap the openings below are looked at by), so the headline
+    never says you do as well while the rest of the section says you miss more."""
+    p, c, m = s.partial, s.clear, s.missed
+    if p.gap is None or c.gap is None:
+        return "Not enough blunders on both sides to compare yet."
+    if p.verdict == c.verdict == "same":
+        if m.verdict == "same" and _unsure(m):
+            lead = (
+                "When they blunder there are too few chances yet to tell you apart from your "
+                "opponents."
+            )
+        elif m.verdict == "same":
+            lead = "When they blunder there is no clear difference between you and your opponents."
+        else:
+            more = "more" if m.verdict == "worse" else "less"
+            lead = (
+                f"When they blunder you miss it {more} often than your opponents, partial and "
+                f"clear misses together: {_facts(m, '10 or more')}. Apart, neither is clear."
+            )
+        return f"{lead} {_partial(p)} {_clear(c)}"
+    if _ORDER[c.verdict] < _ORDER[p.verdict]:
+        return f"{_clear(c, lead=True)} {_partial(p)}"
+    return f"{_partial(p, lead=True)} {_clear(c, also=p.verdict == c.verdict)}"
+
+
+def _unsure(c: Compare) -> bool:
+    """A gap's interval that still reaches UNSURE_GAP either way: too few chances to tell."""
+    low, high = c.interval
+    return max(-low, high) >= UNSURE_GAP
+
+
+def _level(c: Compare, name: str) -> str:
+    """A row whose gap's interval includes zero. That shows no gap, not equal rates, so the row
+    keeps its numbers and says no clear difference, or too few to tell (`_unsure`)."""
+    low, high = c.interval
+    words = "too few to tell" if _unsure(c) else "no clear difference"
+    return (
+        f"{name}: {words}, {c.yours.rate:.1%} vs {c.theirs.rate:.1%} ({100 * c.gap:+.1f} points, "
+        f"95% interval {100 * low:+.1f} to {100 * high:+.1f})."
+    )
+
+
+def _partial(p: Compare, lead: bool = False) -> str:
+    if p.verdict == "same":
+        return _level(p, "Partial misses")
+    facts = _facts(p, "10-20")
+    if p.verdict == "worse":  # always the lead: partial goes first on a tie
+        return f"When they blunder you often take only part of it: {facts}."
+    if lead:
+        return (
+            f"When they blunder you take only part of it less often than your opponents: {facts}."
+        )
+    return f"You take only part of it less often than they do: {facts}."
+
+
+def _clear(c: Compare, lead: bool = False, also: bool = False) -> str:
+    if c.verdict == "same":
+        return _level(c, "Clear misses")
+    facts = _facts(c, "20 or more")
+    more = "more" if c.verdict == "worse" else "less"
+    if lead:
+        return f"When they blunder you miss it outright {more} often than your opponents: {facts}."
+    if also:
+        return f"You also miss it outright {more} often: {facts}."
+    return f"You miss it outright {more} often than they do: {facts}."
+
+
+def _facts(c: Compare, band: str) -> str:
+    """Both rates and the gap with its interval. Only for a gap that clears zero: a verdict
+    other than same always has a gap and an interval."""
+    low, high = c.interval
+    return (
+        f"your reply gave back {band} points after {c.yours.rate:.1%} of their blunders (your "
+        f"opponents: {c.theirs.rate:.1%}), {100 * c.gap:+.1f} points (95% interval "
+        f"{100 * low:+.1f} to {100 * high:+.1f})"
+    )
+
+
+def _when(g: Gift) -> str:
+    return g.game.played_at.isoformat() if g.game.played_at else ""
+
+
+def costliest(misses: Iterable[Gift], limit: int) -> list[Gift]:
+    """The misses that gave back the most (the reply's loss), newest first among equals."""
+    return sorted(misses, key=lambda g: (g.reply.wp_loss, _when(g)), reverse=True)[:limit]
+
+
+def typical(misses: Iterable[Gift], limit: int) -> list[Gift]:
+    """Partial misses to show: those whose blunder has a reason in chess terms first, then those
+    nearest the middle of the band (BAND_MIDDLE), newest first among equals. Not the costliest:
+    they sit just under the clear bar, where another engine depth may call them clear."""
+    newest = sorted(misses, key=_when, reverse=True)
+    return sorted(newest, key=lambda g: (not g.reasons(), abs(g.reply.wp_loss - BAND_MIDDLE)))[
+        :limit
+    ]
+
+
+def trend(found: Sequence[Gift], size: int = TREND_GIFTS) -> list[Compare]:
+    """Your rate against theirs over time, oldest first: stretches of consecutive games holding
+    `size` of your gifts each, counted back from the newest game (the oldest may hold fewer).
+    Both rates in a stretch come from the same games, so a change in the mix of speeds or
+    openings moves both."""
+    dated = sorted(
+        (g for g in found if g.game.played_at),
+        key=lambda g: (_when(g), g.game.id, g.reply.ply),
+        reverse=True,
+    )
+    stretches: list[list[Gift]] = []
+    current: list[Gift] = []
+    for i, g in enumerate(dated):
+        current.append(g)
+        last_of_game = i + 1 == len(dated) or dated[i + 1].game.id != g.game.id
+        if last_of_game and sum(x.yours for x in current) >= size:
+            stretches.append(current)
+            current = []
+    if any(x.yours for x in current):
+        stretches.append(current)
+    return [compare(_span(s), s) for s in reversed(stretches)]
+
+
+def _span(stretch: Sequence[Gift]) -> str:
+    """'2025-07-02 to 2025-08-15' for a stretch listed newest first."""
+    first, last = stretch[-1].game.played_at, stretch[0].game.played_at
+    return f"{first:%Y-%m-%d} to {last:%Y-%m-%d}"
+
+
+def main_part(found: Iterable[Gift]) -> Compare:
+    """The part (partial or clear) behind more of your gap over `found`: the one where you miss
+    most above your opponents' rate (`Compare.excess`; the two add up to the gap of partial and
+    clear together), partial on a tie as in the headline. Its label is an OUTCOMES key."""
+    s = split("", found)
+    return s.partial if s.partial.excess >= s.clear.excess else s.clear
+
+
+def part_examples(found: Iterable[Gift], part: str, limit: int) -> list[Gift]:
+    """Your misses of one part over `found`: typical partial ones, or the costliest clear ones."""
+    mine = [g for g in found if g.yours and g.outcome == part]
+    return typical(mine, limit) if part == "partial" else costliest(mine, limit)
+
+
+def part_note(c: Compare) -> str:
+    """'most of the gap is in partial misses (you 11 of 42, they 0 of 42)', for `Family.part`."""
+    return (
+        f"most of the gap is in {c.label} misses (you {c.yours.missed} of {c.yours.n}, they "
+        f"{c.theirs.missed} of {c.theirs.n})"
+    )
+
+
+@dataclass(slots=True)
+class Family:
+    """An opening where you clearly miss more than your opponents do, partial and clear together
+    (its gap clears zero across all the openings looked at: `_clear_of_chance`; `compare` keeps
+    the usual 95% interval), with the part behind most of that gap (`part`, labelled partial or
+    clear) and your misses of that part there. Examples stand for the gap, so a clear miss never
+    stands for a gap that is all partial misses."""
+
+    compare: Compare
+    part: Compare
+    examples: list[Gift] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class Report:
+    groups: list[Split]  # bullet (moves 1-10), then blitz and rapid (and slower: group_names)
+    # The groups where you take only part of their blunders more often than your opponents
+    # (`partial_focus`, their labels), and typical partial misses of yours there (`typical`).
+    partial_focus: list[str]
+    partials: list[Gift]
+    # The rest count a miss as partial or clear together (Gift.missed).
+    kinds: list[Compare]  # by the punishing move: capture, check, quiet (labels are KINDS keys)
+    trend: list[Compare]
+    # Where the gap comes from, inside the groups where you miss more than your opponents
+    # (`focus`, their labels): the openings where you clearly miss more too. None without such a
+    # group. Shown when no opening is: `worst`, examples from those groups of the part behind most
+    # of their gap (`worst_part`; none when the partial examples already show it), or with no such
+    # group your costliest misses, partial and clear together (`worst_part` None): `worst_title`.
+    focus: list[str]
+    families: list[Family]
+    worst: list[Gift]
+    worst_part: str | None
+
+    @property
+    def gifts(self) -> int:
+        return sum(s.chances for s in self.groups)
+
+    @property
+    def lessons(self) -> list[str]:
+        """Only for a kind of punishment you miss clearly more often than your opponents do."""
+        return [LESSONS[c.label] for c in self.kinds if c.verdict == "worse"]
+
+    @property
+    def partial_lesson(self) -> str | None:
+        """Take the whole gift: only where you take part of it more often than your opponents."""
+        return LESSONS["partial"] if self.partial_focus else None
+
+
+def report(
+    games: Sequence[Game],
+    pairs: Iterable[tuple[MoveFact, MoveFact]],
+    *,
+    families: int = 4,
+    examples: int = 2,
+    worst: int = 3,
+    partials: int = 3,
+) -> Report:
+    """Everything above over `games`. Openings are only looked at inside a group where you miss
+    (partial and clear together) more than your opponents, with OPENING_CHANCES on each side, and
+    one is listed only when its own gap clears zero as well, allowing for how many were looked at
+    (`_clear_of_chance`): a raw excess, or a 95% interval each, lists 1-of-1 samples and chance
+    gaps. They are ranked by `Compare.excess`, so the first are where most of the gap comes from,
+    not just where you play most. Partial misses are shown only from a group whose partial gap
+    clears zero. Examples stand for a gap, so they come from the part behind most of it
+    (`main_part`)."""
+    found = gifts(games, pairs)
+    names = group_names(found)
+    by_group = {key: [g for g in found if g.group == key] for key in names}
+    splits = {key: split(names[key], gs) for key, gs in by_group.items()}
+    # The same compare as the headline's 'partial and clear together', so the two always agree.
+    worse = [key for key, s in splits.items() if s.missed.verdict == "worse"]
+    taken_part = [key for key, s in splits.items() if s.partial.verdict == "worse"]
+    focused = [g for g in found if g.group in worse]
+    by_family: dict[str, list[Gift]] = {}
+    for g in focused:
+        if family := g.game.opening_family:
+            by_family.setdefault(family, []).append(g)
+    looked_at = [
+        c
+        for c in (compare(f, gs) for f, gs in by_family.items())
+        if min(c.yours.n, c.theirs.n) >= OPENING_CHANCES
+    ]
+    standing_out = [c for c in looked_at if _clear_of_chance(c, len(looked_at))]
+    listed = []
+    for c in sorted(standing_out, key=lambda c: -c.excess)[:families]:
+        part = main_part(by_family[c.label])
+        listed.append(Family(c, part, part_examples(by_family[c.label], part.label, examples)))
+    partial_misses = [
+        g for g in found if g.group in taken_part and g.yours and g.outcome == "partial"
+    ]
+    shown_partials = typical(partial_misses, partials)
+    if worse:
+        # Examples of the gap in those groups: the partial examples may already show it.
+        worst_part: str | None = main_part(focused).label
+        shown = {(g.game.id, g.reply.ply) for g in shown_partials}
+        unseen = [g for g in focused if (g.game.id, g.reply.ply) not in shown]
+        covered = worst_part == "partial" and all(key in taken_part for key in worse)
+        examples_of_gap = [] if covered else part_examples(unseen, worst_part, worst)
+    else:
+        worst_part = None
+        examples_of_gap = costliest((g for g in found if g.yours and g.missed), worst)
+    return Report(
+        groups=list(splits.values()),
+        partial_focus=[names[key] for key in taken_part],
+        partials=shown_partials,
+        kinds=[compare(kind, (g for g in found if g.kind == kind)) for kind in KINDS],
+        trend=trend(found),
+        focus=[names[key] for key in worse],
+        families=listed,
+        worst=examples_of_gap,
+        worst_part=worst_part,
+    )
+
+
+def _clear_of_chance(c: Compare, tests: int) -> bool:
+    """You miss more here even allowing for how many openings were looked at: the gap's interval
+    leaves out zero at 95% across all `tests` of them at once (Bonferroni). One 95% interval per
+    opening would let about one in 40 clear zero by chance."""
+    z = NormalDist().inv_cdf(1 - 0.05 / (2 * tests))
+    return newcombe(c.yours.missed, c.yours.n, c.theirs.missed, c.theirs.n, z)[0] > 0
+
+
+def worst_title(r: Report) -> str:
+    """What `Report.worst` holds, for its heading."""
+    where = f" in {' and '.join(r.focus).lower()}" if r.focus else ""
+    if r.worst_part == "clear":
+        return f"Your costliest clear misses (20+ points){where}"
+    if r.worst_part == "partial":
+        return f"Your partial misses (10-20 points){where}"
+    return f"Your costliest misses, partial and clear together{where}"

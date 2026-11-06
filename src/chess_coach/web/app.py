@@ -38,6 +38,20 @@ from chess_coach.coach.progress import (
     trend_speeds,
     weekly,
 )
+from chess_coach.coach.punish import (
+    GIFT_WP_LOSS,
+    KINDS,
+    OUTCOMES,
+    Compare,
+    Gift,
+    Rate,
+    Split,
+    headline,
+    label,
+    part_note,
+    report,
+    worst_title,
+)
 from chess_coach.coach.repeats import Repeat, repeats
 from chess_coach.coach.repertoire import (
     LEVEL_PLY,
@@ -153,6 +167,58 @@ def _habit(h: Habit) -> dict:
         "games": h.games,
         "practice": h.practice,
         "examples": [_example(e) for e in h.examples],
+    }
+
+
+def _rate(r: Rate) -> dict:
+    return {
+        "missed": r.missed,
+        "n": r.n,
+        "rate": round(r.rate * 100, 1),
+        "low": round(r.low * 100, 1),
+        "high": round(r.high * 100, 1),
+    }
+
+
+def _compare(c: Compare) -> dict:
+    """gap and interval are None when a side had no chances: 0 of 0 is no rate to compare."""
+    interval = c.interval
+    return {
+        "label": c.label,
+        "yours": _rate(c.yours),
+        "theirs": _rate(c.theirs),
+        "gap": None if c.gap is None else round(c.gap * 100, 1),
+        "interval": None if interval is None else [round(x * 100, 1) for x in interval],
+        "verdict": c.verdict,
+    }
+
+
+def _split(s: Split) -> dict:
+    """A group's headline and its rows: partial misses (10-20 points), clear ones (20+) and the
+    two together (what the kinds, the trend and the openings count)."""
+    return {
+        "label": s.label,
+        "headline": headline(s),
+        "partial": {**_compare(s.partial), "name": OUTCOMES["partial"]},
+        "clear": {**_compare(s.clear), "name": OUTCOMES["clear"]},
+        "missed": {**_compare(s.missed), "name": OUTCOMES["missed"]},
+    }
+
+
+def _miss(g: Gift) -> dict:
+    """One of your missed punishments: their blunder as the last move, your reply in red and the
+    punishment in green."""
+    r = g.reply
+    arrows = [(r.uci, PLAYED), (r.best_move, BETTER)]
+    return {
+        "svg": board_svg(r.fen_before, arrows, lastmove=g.blunder.uci) if r.fen_before else "",
+        "theirs": label(g.blunder),
+        "move": label(r),
+        "best": label(r, r.best_san),
+        "loss": g.given_back,  # one decimal, cut: a partial miss never reads as 20
+        "kind": g.kind,
+        "url": g.url,
+        "reasons": g.reasons(),
     }
 
 
@@ -362,6 +428,46 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             }
 
         return cached("overview", key, make)
+
+    @app.get("/api/punish")
+    def punish() -> dict:
+        """When they blunder: your punish rate against your opponents' (coach/punish.py)."""
+        with Store(db_path) as store:
+            games = [g for g in store.iter_games() if g.analyzed_depth]
+            key = (len(games), store.count_moves())
+
+        def make() -> dict:
+            with Store(db_path) as store:
+                r = report(games, store.gifts(GIFT_WP_LOSS))
+            return {
+                "gifts": r.gifts,
+                "groups": [_split(s) for s in r.groups],
+                # Where you take only part of their blunders more often than your opponents.
+                "partial_focus": r.partial_focus,
+                "partial_lesson": r.partial_lesson,
+                "partials": [_miss(g) for g in r.partials],
+                # From here on a miss is partial or clear together.
+                "kinds": [{**_compare(c), "name": KINDS[c.label]} for c in r.kinds],
+                "lessons": r.lessons,
+                "trend": [_compare(c) for c in r.trend],
+                "focus": r.focus,
+                # Each with the part behind most of its gap, which its examples come from.
+                "families": [
+                    {
+                        **_compare(f.compare),
+                        "part": {**_compare(f.part), "name": OUTCOMES[f.part.label]},
+                        "part_note": part_note(f.part),
+                        "examples": [_miss(g) for g in f.examples],
+                    }
+                    for f in r.families
+                ],
+                # Shown when no opening stands out (maybe none: worst_title says what they are).
+                "worst": [_miss(g) for g in r.worst],
+                "worst_part": r.worst_part,
+                "worst_title": worst_title(r),
+            }
+
+        return cached("punish", key, make)
 
     @app.get("/api/repeats")
     def repeat_offenders() -> list[dict]:

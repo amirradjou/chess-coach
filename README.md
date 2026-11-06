@@ -125,7 +125,12 @@ table for opening names. The web coach is FastAPI with plain JavaScript and pyth
 
 **v0–v7 done.** Import, analyse, find your patterns, turn your own mistakes into puzzles, drill
 them on a schedule, learn and fix your openings, and watch the numbers move, in the terminal or in
-the browser (`chess-coach serve`).
+the browser (`chess-coach serve`). New: *When they blunder* (`punish`), what your replies to your
+opponents' blunders give back against what theirs give back after yours. On the author's games,
+bullet moves 1-10: the reply took only part of the gift (gave back 10-20 points) after 14.7% of
+their blunders against their 8.2% (+6.5 points, 95% interval +2.8 to +10.3), while clear misses
+(20+) show no clear difference, 29.3% against 28.1% (+1.2, -4.0 to +6.5); blitz and rapid: no
+clear difference on either.
 
 **Bullet is not taken seriously.** In a 1-minute game only your first 10 moves count: after
 that the clock decides the game, so later moves are left out of everything (patterns, mistake
@@ -164,6 +169,29 @@ across 8+ games.
   openrouter --model …` uses any OpenAI-compatible server with `OPENROUTER_API_KEY`. The model
   only explains: any sentence that cites a move outside the evidence is removed. It checks moves,
   not every word, so read it as a gloss on the counted patterns above it.
+- `punish` (and a *When they blunder* section in the digest and on What you get wrong): when your
+  opponent blunders (loses 20+ points of win probability), what your reply gives back: under 10
+  points it kept the gift, 10-20 it took only part of it (a partial miss), 20 or more it missed
+  it (a clear miss). Each is set against your opponents' replies to your blunders: players at
+  your level with the same kind of chance. Bullet (moves 1-10, on both sides) and blitz + rapid
+  (with any slower games, named in the label) are compared apart, with partial misses, clear
+  misses and the two together as three rows, each with a 95% interval for the gap; you're only
+  called worse or better when that interval leaves out zero, and the headline names no other
+  gap (when neither part has one, the two together can). A row without a gap says no clear
+  difference, or too few to tell while the interval still allows 10 points either way, never
+  that you're the same. Where you take only part of it more often than your opponents there is
+  a lesson (compare checks, captures and threats before your usual move, and take the one that
+  wins most) and typical partial misses on boards (with a reason in chess terms, near the middle
+  of the band). The rest counts a miss as partial or clear together (the engine's
+  `missed_tactic`: the reply lost 10+ points): the same by the kind of punishing move (capture,
+  check, quiet; a lesson only when you miss a kind more than your opponents do), the trend in
+  stretches of about 150 chances, and on boards, with what the blunder allowed in chess terms:
+  the openings where you clearly miss more than your opponents (only inside a group where you
+  do, with 10+ chances on each side, and a gap clear of zero even allowing for how many openings
+  were looked at), each with examples of the part (partial or clear) behind most of its gap; or
+  else examples of the gap in those groups, or with no gap your costliest misses. Puzzles from a
+  missed punishment are tagged `punish_capture`, `punish_check` or `punish_quiet` to drill apart;
+  puzzles start at 20 points lost, so these are all clear misses.
 - `puzzles make` re-checks your costliest moves (20+ points of win probability lost) at depth 18
   with three lines, and keeps a position only when one move is the only mate or beats the next
   best by 150 centipawns, so there is one answer to find. `puzzles list` shows them with their
@@ -193,7 +221,8 @@ across 8+ games.
     checks you keep missing, motifs) and the situations where your mistake rate jumps, each with
     a *what to learn* note and your own positions on boards: red arrow your move, green the
     engine's. "Practise these positions" opens the matching drills. Then the same mistake in the
-    same position (as `repeats`), each on a board with their best answer.
+    same position (as `repeats`), each on a board with their best answer. *When they blunder* is
+    `punish` on the page.
   - **Practice**: due puzzles on a board you click (piece, then square), filtered by theme. A
     wrong move shows their best reply, what it costs in material and score, and lets you try
     again (only the first answer counts for the schedule). Once it's solved or shown you get the
@@ -285,6 +314,7 @@ uv run chess-coach analyze --depth 12 --threads 4
 uv run chess-coach stats
 uv run chess-coach digest -o digest.md                           # patterns across your games
 uv run chess-coach digest --since 7d                             # this week vs before
+uv run chess-coach punish                                        # when they blunder: you vs them
 uv run chess-coach puzzles make --limit 50                       # your mistakes as puzzles
 uv run chess-coach drill                                         # practise what is due
 uv run chess-coach progress --by week

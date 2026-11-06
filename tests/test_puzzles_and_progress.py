@@ -105,6 +105,15 @@ def test_a_clear_best_move_makes_a_puzzle():
     assert p is not None
     assert (p.solution, p.solution_san, p.played_san, p.gap_cp) == ("e2e4", "e4", "a3", 260)
     assert p.line == "e7e5" and "missed_tactic" in p.tags and "opening" in p.tags
+    assert "punish_quiet" in p.tags  # their blunder went unpunished, and 1.e4 is a quiet move
+
+
+def test_only_missed_punishments_get_a_punish_tag():
+    engine = FakeEngine([LineEval(300, None, E4), LineEval(40, None, D4)])
+    m = blunder("lichess:g1")
+    m.motifs = ["hanging_piece"]
+    p = verify(engine, m)
+    assert p is not None and not any(t.startswith("punish_") for t in p.tags)
 
 
 def test_close_alternatives_or_the_played_move_are_not_puzzles():
@@ -158,7 +167,8 @@ def test_a_slip_repeated_from_the_same_position_is_one_puzzle(tmp_path: Path):
         assert (result.checked, result.made) == (3, 1)
         (p,) = store.puzzles()
         assert p.id == "lichess:g2:1"  # the newest game is checked first
-        assert p.tags == ["missed_tactic", "opening", "pawn_grab", "hanging_piece"]
+        # g2's own blunder is a missed punishment (1.e4, quiet); the copies add their motifs
+        assert p.tags == ["missed_tactic", "opening", "punish_quiet", "pawn_grab", "hanging_piece"]
         assert make(store, engine, limit=10).checked == 0
 
 

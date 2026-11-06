@@ -145,6 +145,24 @@ def test_coach_pages(tmp_path):
     assert (off["games"], off["moves"], off["best"]) == (0, [], None)  # no games, no engine
 
 
+def test_a_hanging_piece_is_named_once(tmp_path):
+    """Their 2...Nd4?? leaves the knight to 3.Nxd4: explain() says so, and allows() (which names
+    such captures for When they blunder) must not say it a second time."""
+    db = tmp_path / "coach.db"
+    sans = ["e4", "Nc6", "Nf3", "Nd4", "Nxd4"]
+    with Store(db) as store:
+        for i in range(2):
+            g = game(i)
+            store.upsert_game(g)
+            store.replace_moves(g.id, facts(g.id, sans, {4: 30.0}, {4: "e5"}), depth=12)
+    client = TestClient(create_app(db, no_engine))
+    path = ",".join(["e2e4", "b8c6", "g1f3"])
+    q = {"family": "Italian Game", "color": "white", "path": path}
+    (nd4,) = client.get("/api/coach/node", params=q).json()["moves"]
+    assert (nd4["san"], nd4["verdict"], nd4["punish"]["san"]) == ("Nd4", "blunder", "Nxd4")
+    assert nd4["reasons"] == ["It leaves their knight on d4 hanging (attacked and not defended)."]
+
+
 def test_coach_check_without_an_engine(tmp_path):
     client = _client(tmp_path, no_engine)
     board = chess.Board()

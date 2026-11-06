@@ -41,6 +41,20 @@ def _wilson(hits: int, n: int, z: float, side: int) -> float:
     return min(1.0, max(0.0, (centre + side * margin) / (1 + z * z / n)))
 
 
+def newcombe(hits1: int, n1: int, hits2: int, n2: int, z: float = 1.96) -> tuple[float, float]:
+    """95% interval for hits1/n1 - hits2/n2, from the two Wilson intervals (Newcombe's hybrid
+    score method, which behaves near 0% and 100% where the plain normal one doesn't)."""
+    p1 = hits1 / n1 if n1 else 0.0
+    p2 = hits2 / n2 if n2 else 0.0
+    low1, high1 = wilson_lower(hits1, n1, z), wilson_upper(hits1, n1, z)
+    low2, high2 = wilson_lower(hits2, n2, z), wilson_upper(hits2, n2, z)
+    d = p1 - p2
+    return (
+        d - math.sqrt((p1 - low1) ** 2 + (high2 - p2) ** 2),
+        d + math.sqrt((high1 - p1) ** 2 + (p2 - low2) ** 2),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class Evidence:
     game_id: str

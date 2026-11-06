@@ -162,6 +162,7 @@ class Store:
         if "accept" not in columns:  # databases from before opening-fix drills
             self.conn.execute("ALTER TABLE puzzles ADD COLUMN accept TEXT NOT NULL DEFAULT '[]'")
         self._fix_lichess_ids()
+        self._tag_punishments()
 
     def _fix_lichess_ids(self) -> None:
         """Lichess games imported while the importer missed Site "lichess.org/game/<id>" got a
@@ -204,6 +205,24 @@ class Store:
                         (new, len(old) + 1, len(old) + 1, f"{old}:"),
                     )
                 self.conn.execute("UPDATE puzzles SET game_id = ? WHERE game_id = ?", (new, old))
+
+    def _tag_punishments(self) -> None:
+        """Puzzles made before the punish sub-tags: a missed punishment (missed_tactic) also gets
+        punish_capture, punish_check or punish_quiet from its solution, as new ones do."""
+        rows = self.conn.execute(
+            "SELECT id, solution_san, tags FROM puzzles "
+            "WHERE tags LIKE '%\"missed_tactic\"%' AND tags NOT LIKE '%\"punish_%'"
+        ).fetchall()
+        if not rows:
+            return
+        from chess_coach.patterns.features import punish_tag
+
+        with self.conn:
+            for puzzle_id, san, tags in rows:
+                tagged = sorted({*json.loads(tags), punish_tag(san)})
+                self.conn.execute(
+                    "UPDATE puzzles SET tags = ? WHERE id = ?", (json.dumps(tagged), puzzle_id)
+                )
 
     def close(self) -> None:
         self.conn.close()
@@ -371,6 +390,17 @@ class Store:
 
     def count_moves(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM moves").fetchone()[0]
+
+    def gifts(self, min_wp_loss: float) -> list[tuple[MoveFact, MoveFact]]:
+        """(move, the next move) for every move of either player that lost at least
+        `min_wp_loss` points of win probability and was answered, in game and ply order."""
+        pair = (
+            "FROM moves g JOIN moves r ON r.game_id = g.game_id AND r.ply = g.ply + 1 "
+            "WHERE g.wp_loss >= ? ORDER BY g.game_id, g.ply"
+        )
+        given = self.conn.execute(f"SELECT g.* {pair}", (min_wp_loss,))
+        replies = self.conn.execute(f"SELECT r.* {pair}", (min_wp_loss,))
+        return [(_row_to_move(g), _row_to_move(r)) for g, r in zip(given, replies, strict=True)]
 
     # -- puzzles -----------------------------------------------------------------
 
