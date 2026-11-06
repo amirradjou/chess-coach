@@ -381,6 +381,11 @@ def _line(line: review.Line) -> dict:
     }
 
 
+class WhatIfMove(BaseModel):
+    fen: str
+    uci: str
+
+
 class Answer(BaseModel):
     id: str
     uci: str  # "?" gives up
@@ -1029,7 +1034,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             "uci": move.uci(),
             "san": board.san(move),
             "best": {"uci": c.best.uci(), "san": board.san(c.best)} if c.best else None,
-            "loss": None if c.loss is None else round(c.loss / 100, 1),
+            "loss": c.pawns,
             "score": score,
             "faults": reasons.faults,
             "ideas": reasons.ideas,
@@ -1045,6 +1050,17 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         return check_json(board, move, stored)
+
+    @app.post("/api/coach/whatif")
+    def coach_what_if(w: WhatIfMove) -> dict:
+        """A move you try in the middle of a line: what happens then. Nothing is recorded."""
+        try:
+            board = chess.Board(w.fen)
+            move = review.legal(board, w.uci)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        t = training.what_if(board, move, analyst)
+        return {"ok": t.ok, "verdict": t.verdict, "line": _line(t.line) if t.line else None}
 
     def card_item(card: CoachCard) -> dict:
         """A due opening card as Today shows it. It doesn't name the move to find."""
@@ -1095,7 +1111,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             "correct": judged.correct,
             "answer": board.san(move) if move else None,
             "target": {"uci": t.uci(), "san": board.san(t)} if t else None,
-            "loss": None if check is None or check.loss is None else round(check.loss / 100, 1),
+            "loss": None if check is None else check.pawns,
             "faults": reasons.faults,
             "ideas": reasons.ideas,
             "line": punishment_json(board.fen(), move, check) if move and check else None,

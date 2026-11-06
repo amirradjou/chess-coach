@@ -79,7 +79,7 @@ th:first-child, td:first-child { text-align: left; }
 code { font-size: 14px; }
 a { color: var(--accent); }
 .boardcol { max-width: 420px; width: 100%; }
-.steps { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+.steps { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
 .steps button { padding: 4px 10px; }
 .line { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 8px 0; background: var(--card); }
 .line.on { border-color: var(--accent); }
@@ -108,3 +108,4 @@ button.line-step { display: block; width: 100%; padding: 3px 8px; border: 0; bor
 button.line-step b { color: var(--ink); }
 button.line-step.theirs b { color: var(--threat); }
 button.line-step.on { background: var(--soft); color: var(--ink); }
+button.line-step.shared { opacity: 0.6; }

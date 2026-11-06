@@ -16,7 +16,7 @@ import chess
 from chess_coach.coach.tree import Edge, Node, walk
 from chess_coach.engine.stockfish import LineEval
 from chess_coach.models import CoachCard, card_id
-from chess_coach.puzzles.review import Analyse
+from chess_coach.puzzles.review import Analyse, Line, move_text, punishment
 from chess_coach.puzzles.srs import schedule
 
 PUNISH = "punish"  # right after the opponent's mistake: find the punishment
@@ -60,6 +60,12 @@ class Check:
     best: chess.Move | None  # the engine's, or without one the move stored for the position
     loss: int | None = None  # centipawns against the best; None without an engine
     reply: LineEval | None = None  # the engine's line after your move
+    mate: bool = False  # a mate on the board either way: the loss is no number to show
+
+    @property
+    def pawns(self) -> float | None:
+        """The loss in pawns, to show; None when there is no sensible number."""
+        return None if self.loss is None or self.mate else round(self.loss / 100, 1)
 
 
 def check_move(
@@ -72,8 +78,42 @@ def check_move(
     ev, reply = analyse(board.fen()), analyse(after.fen())
     if ev is not None and ev.move is not None and reply is not None:
         loss = max(0, ev.cp + reply.cp)  # the reply is scored for the other side
-        return Check(move == ev.move or loss <= COACH_MARGIN_CP, ev.move, loss, reply)
+        mate = ev.mate is not None or reply.mate is not None
+        return Check(move == ev.move or loss <= COACH_MARGIN_CP, ev.move, loss, reply, mate)
     return Check(stored is None or move == stored, stored)
+
+
+@dataclass(slots=True)
+class WhatIf:
+    ok: bool
+    verdict: str  # the move against the engine's choice there
+    line: Line | None = None  # what happens next; None without an engine
+
+
+def what_if(board: chess.Board, move: chess.Move, analyse: Analyse) -> WhatIf:
+    """A move you try in the middle of a line, to see what happens then. Nothing is recorded, and
+    the engine's choice can be named: it isn't a question any more."""
+    c = check_move(board, move, analyse)
+    if c.reply is None or c.best is None:
+        return WhatIf(c.ok, "Stockfish isn't available here, so there is no line after this move.")
+    same, name = move == c.best, move_text(board, c.best)
+    line = punishment(
+        board.fen(), move.uci(), c.best.uci(), analyse, better=None if same else name, ok=c.ok
+    )
+    if same:
+        return WhatIf(True, "That's the engine's own move here.", line)
+    pawns = c.pawns or 0
+    if c.ok:
+        close = f"within {pawns:.1f} of" if pawns >= 0.05 else "as good as"
+        return WhatIf(True, f"That holds up: {close} the engine's {name}.", line)
+    ev = analyse(board.fen())
+    if c.reply.mate is not None and c.reply.mate > 0:
+        return WhatIf(
+            False, f"It walks into mate in {c.reply.mate}: the engine plays {name}.", line
+        )
+    if ev is not None and ev.mate is not None and ev.mate > 0:
+        return WhatIf(False, f"It misses the engine's {name}, which mates in {ev.mate}.", line)
+    return WhatIf(False, f"It gives away {pawns:.1f} against the engine's {name}.", line)
 
 
 @dataclass(slots=True)

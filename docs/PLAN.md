@@ -750,12 +750,21 @@ nothing to show why. The engine's line was already computed for the check and th
 - On the page the line plays itself at 1.8 s a move until you touch it. Step 0 is the position you
   answered from, so "Try again", Home or a click on the board go back there. The first answer is the
   one recorded, as before. Without an engine there is no line and the page says what it did.
-- A due opening card in Today gets the same line through the steps Practice already has. `today
-  --cli` doesn't: it still gives the faults and the move to learn.
+- What-ifs, because the owner found one line too little: at any of your moves in the line, play
+  another. `training.what_if` compares it with the engine's choice there, which can be named now (the
+  question is already answered), and `punishment` plays out what follows. It can say the move holds up
+  and claim nothing against it. They nest, each stacking on the line it came from, and record nothing.
+  Material in a what-if counts from where you changed the move, so the sentence is about your choice.
+  At their moves the board only says it's their move: asking "what if they played something else" is
+  a different question from the one asked for.
+- "Punished" needs the move to have done it: being clearly worse only counts if the move cost a
+  point against the best, since a line can start from a position already lost.
+- A due opening card in Today gets the same line through the steps Practice already has, and any move
+  on the board there gets the engine's answer, in Practice's plainer analysis wording. `today --cli`
+  has neither: it still gives the faults and the move to learn.
 
-The line is one line, the engine's best play. It doesn't answer "what if I take the knight?": for
-that, Explore. Looking at real positions showed Stockfish answering 2...f6 with 3.Nxe5 or 3.d4
-depending on depth, so no test or text assumes which.
+Looking at real positions showed Stockfish answering 2...f6 with 3.Nxe5 or 3.d4 depending on depth, so
+no test or text assumes which.
 
 ## Remaining (in order)
 

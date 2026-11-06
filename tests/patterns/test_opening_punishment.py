@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import chess
 import pytest
 
+from chess_coach.coach import training
 from chess_coach.coach.principles import line_leaves, line_notes
 from chess_coach.db import Store
 from chess_coach.engine.stockfish import Engine, EngineNotFoundError, LineEval
@@ -155,7 +156,7 @@ def test_a_mate_is_said_plainly():
         play(after, "h5f7"): LineEval(-10_000, 0, None),
     }
     line = review.punishment(fen, "g8f6", "g7g6", lines.get)
-    assert line.punishes
+    assert line.punishes and line.faults == []
     assert line.why == (
         "If you play 3...Nf6, they answer 4.Qxf7#, checkmate. "
         "The engine scores it mate in 1 for them, while a better move gets -0.5 for you."
@@ -201,6 +202,97 @@ def test_a_score_of_nothing_has_no_sign_to_read():
     assert review.Score(-80).words == "-0.8 for you"
 
 
+def test_already_losing_a_slightly_worse_move_isnt_called_a_punishment():
+    fen = chess.STARTING_FEN
+    lines = {fen: line_eval(-300, "e2e4"), play(fen, "a2a3"): line_eval(340, "e7e5 g1f3")}
+    line = review.punishment(fen, "a2a3", "e2e4", lines.get)
+    assert not line.punishes and "no quick punishment" in line.why
+
+
+# In the Damiano line, after 2...f6 3.Nxe5: what if you take the knight?
+TAKEN = play(DAMIANO, F6, "f3e5")
+
+
+def taken(reply_cp: int, best_cp: int = -200) -> dict[str, LineEval]:
+    return {
+        TAKEN: line_eval(best_cp, "d8e7 e5f3"),
+        play(TAKEN, "f6e5"): line_eval(reply_cp, "d1h5 g7g6 h5e5 d8e7 e5h8"),
+    }
+
+
+def _what_if(lines: dict[str, LineEval], uci: str = "f6e5") -> training.WhatIf:
+    return training.what_if(chess.Board(TAKEN), chess.Move.from_uci(uci), lines.get)
+
+
+def test_what_if_you_take_the_knight():
+    t = _what_if(taken(600))
+    assert not t.ok and t.verdict == "It gives away 4.0 against the engine's 3...Qe7."
+    line = t.line
+    assert line is not None and line.punishes and line.label == "If you play 3...fxe5"
+    assert line.why == (
+        "If you play 3...fxe5, they answer 4.Qh5+, with check. "
+        "By 6.Qxh8 you have lost a piece. "
+        "The engine scores it -6.0 for you, while 3...Qe7 gets -2.0 for you."
+    )
+    assert [p.note for p in line.plies][:2] == [
+        "your move, taking their knight on e5",
+        "with check",
+    ]
+
+
+def test_what_if_the_move_holds_up():
+    t = _what_if(taken(210))
+    assert t.ok and t.verdict == "That holds up: within 0.1 of the engine's 3...Qe7."
+    line = t.line
+    assert line is not None and not line.punishes and line.faults == [] and line.ideas == []
+    assert "no quick punishment" not in line.why and "isn't enough" not in line.why
+    assert line.why.endswith("The engine scores it -2.1 for you, about the same as 3...Qe7.")
+
+
+def test_what_if_the_move_is_just_as_good():
+    t = _what_if(taken(200))
+    assert t.ok and t.verdict == "That holds up: as good as the engine's 3...Qe7."
+
+
+def test_what_if_you_walk_into_mate():
+    lines = {
+        TAKEN: line_eval(-200, "d8e7 e5f3"),
+        play(TAKEN, "f6e5"): line_eval(10_000, "d1h5", mate=3),
+    }
+    t = _what_if(lines)
+    assert not t.ok and t.verdict == "It walks into mate in 3: the engine plays 3...Qe7."
+    assert t.line is not None and t.line.punishes and t.line.faults == []
+
+
+def test_what_if_you_miss_a_mate():
+    lines = {
+        TAKEN: line_eval(10_000, "d8e7", mate=2),
+        play(TAKEN, "f6e5"): line_eval(600, "d1h5"),
+    }
+    t = _what_if(lines)
+    assert not t.ok and t.verdict == "It misses the engine's 3...Qe7, which mates in 2."
+
+
+def test_a_mate_is_no_number_of_pawns(tmp_path):
+    fen = fen_after("e4 e5 Bc4 Nc6 Qh5")
+    lines = {fen: line_eval(-50, "g7g6"), play(fen, "g8f6"): line_eval(10_000, "h5f7", mate=1)}
+    client = _client(tmp_path, lambda: Scripted(lines))
+    miss = client.post("/api/coach/check", json={"fen": fen, "uci": "g8f6"}).json()
+    assert not miss["ok"] and miss["loss"] is None and "checkmate" in miss["line"]["why"]
+
+
+def test_what_if_you_find_the_engines_own_move():
+    lines = {TAKEN: line_eval(-200, "d8e7 e5f3"), play(TAKEN, "d8e7"): line_eval(200, "e5f3")}
+    t = _what_if(lines, "d8e7")
+    assert t.ok and t.verdict == "That's the engine's own move here."
+    assert t.line is not None and t.line.why.endswith("The engine scores it -2.0 for you.")
+
+
+def test_what_if_without_an_engine_says_so():
+    t = training.what_if(chess.Board(TAKEN), chess.Move.from_uci("f6e5"), lambda fen: None)
+    assert t.line is None and "Stockfish" in t.verdict
+
+
 class Scripted:
     """An engine that answers from a table of positions."""
 
@@ -232,6 +324,30 @@ def test_a_right_move_has_no_line(tmp_path):
     client = _client(tmp_path, lambda: Scripted(lines))
     hit = client.post("/api/coach/check", json={"fen": DAMIANO, "uci": "b8c6"}).json()
     assert hit["ok"] and hit["line"] is None
+
+
+def test_a_what_if_answers_and_records_nothing(tmp_path):
+    client = _client(tmp_path, lambda: Scripted(taken(600)))
+    r = client.post("/api/coach/whatif", json={"fen": TAKEN, "uci": "f6e5"}).json()
+    assert not r["ok"] and r["verdict"].startswith("It gives away 4.0")
+    assert r["line"]["punishes"] and r["line"]["plies"][0]["san"] == "fxe5"
+    assert r["line"]["plies"][1]["note"] == "with check"
+    with Store(tmp_path / "coach.db") as store:
+        assert store.coach_attempts() == []
+
+
+def test_a_what_if_refuses_what_isnt_a_move(tmp_path):
+    client = _client(tmp_path, lambda: Scripted(taken(600)))
+    assert client.post("/api/coach/whatif", json={"fen": TAKEN, "uci": "a1a8"}).status_code == 400
+    assert (
+        client.post("/api/coach/whatif", json={"fen": "nonsense", "uci": "e2e4"}).status_code == 400
+    )
+
+
+def test_a_what_if_without_an_engine_has_no_line(tmp_path):
+    client = _client(tmp_path, no_engine)
+    r = client.post("/api/coach/whatif", json={"fen": TAKEN, "uci": "f6e5"}).json()
+    assert r["line"] is None and "Stockfish" in r["verdict"]
 
 
 def test_without_an_engine_a_wrong_move_still_gets_an_answer(tmp_path):
