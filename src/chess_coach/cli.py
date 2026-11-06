@@ -280,10 +280,8 @@ def sync(
                 console.print(f"Looking for their threats before {todo} mistakes and blunders")
                 checked = _check_threats(store, engine, todo, depth=THREAT_DEPTH)
         total = len(store.puzzles())
-        today = practice_day().isoformat()
-        due = len(store.due(today))
-        cards = sum(c.due <= today for c in store.coach_cards())
         alerts = _repeat_alerts(store, new) if new else []
+        status = _today_status(store)
     console.print(
         f"Analysed {len(pending)} games. Checked {made.checked + fixes.checked} moves, made "
         f"[green]{made.made + fixes.made}[/green] puzzles ({total} in all)."
@@ -292,12 +290,9 @@ def sync(
         f"Looked for their threats before {checked} mistakes and blunders not checked before "
         "(yours and your opponents'): `chess-coach threats` shows how your mistakes happen."
     )
-    console.print(
-        f"Due today: {due} puzzles (`chess-coach drill`) and {cards} opening positions "
-        "(Learn openings in `chess-coach serve`)."
-    )
     for line in alerts:
         console.print(f"[yellow]{line}[/yellow]")
+    console.print(status, highlight=False)
 
 
 def _repeat_alerts(store: Store, new: list[Game]) -> list[str]:
@@ -821,72 +816,128 @@ def drill(
 ) -> None:
     """Practise the puzzles due again, then new ones. Answer in SAN (Nf3) or UCI (g1f3); ? shows
     the answer."""
-    from datetime import UTC, datetime
-
-    import chess
-
-    from chess_coach.puzzles.srs import schedule
     from chess_coach.puzzles.today import practice_queue, read_facts
 
     settings: Settings = ctx.obj
-    now = datetime.now(UTC)
     with Store(settings.db_path) as store:
-        day = practice_day(now)
-        again, new = practice_queue(store, read_facts(store), day, tag)
+        again, new = practice_queue(store, read_facts(store), practice_day(), tag)
         due = [*again, *new][:count]
         if not due:
             console.print(
                 "Nothing due. Make more with `chess-coach puzzles make`, or come back tomorrow."
             )
             return
-        solved = 0
-        for i, p in enumerate(due, 1):
-            board = chess.Board(p.fen)
-            side = "White" if board.turn == chess.WHITE else "Black"
-            game = store.get_game(p.game_id)
-            console.print(
-                f"\n[bold]Puzzle {i} of {len(due)}[/bold]  ({side} to move; {', '.join(p.tags)})"
-            )
-            console.print(_board_text(p.fen))
-            console.print(f"In the game you played [red]{p.played_san}[/red]. Find the best move.")
-            answer = ""
-            correct = False
-            for _ in range(3):
-                answer = typer.prompt("Your move").strip()
-                if answer == "?":
-                    break
-                try:
-                    move = (
-                        chess.Move.from_uci(answer)
-                        if len(answer) in (4, 5) and answer[1].isdigit()
-                        else board.parse_san(answer)
-                    )
-                except ValueError:
-                    console.print(
-                        "That isn't a legal move here; try again (or ? to see the answer)."
-                    )
-                    continue
-                if move not in board.legal_moves:
-                    console.print(
-                        "That isn't a legal move here; try again (or ? to see the answer)."
-                    )
-                    continue
-                correct = p.is_right(move.uci())
-                break
-            line = _san_line(board, p.solution, p.line)
-            if correct:
-                solved += 1
-                console.print(f"[green]Correct.[/green] {line}")
-            else:
-                console.print(f"[yellow]The move was {p.solution_san}.[/yellow] {line}")
-            review = store.review(p.id)
-            if review is not None:
-                after = schedule(review, correct, day)
-                store.save_attempt(after, answer, correct, now)
-                console.print(f"[dim]Next time: {after.due}.[/dim]")
-            if game is not None and game.url:
-                console.print(f"[dim]The game: {game.move_url(p.ply)}[/dim]")
+        solved = sum(
+            _puzzle_turn(store, p, f"Puzzle {i} of {len(due)}") for i, p in enumerate(due, 1)
+        )
         console.print(f"\nSolved {solved} of {len(due)}.")
+
+
+def _ask_move(board) -> tuple[str, object | None]:
+    """Your answer, as you typed it, and the move: None when you asked to see it (?) or after three
+    tries that weren't legal moves."""
+    import chess
+
+    answer = ""
+    for _ in range(3):
+        answer = typer.prompt("Your move").strip()
+        if answer == "?":
+            return answer, None
+        try:
+            move = (
+                chess.Move.from_uci(answer)
+                if len(answer) in (4, 5) and answer[1].isdigit()
+                else board.parse_san(answer)
+            )
+        except ValueError:
+            console.print("That isn't a legal move here; try again (or ? to see the answer).")
+            continue
+        if move not in board.legal_moves:
+            console.print("That isn't a legal move here; try again (or ? to see the answer).")
+            continue
+        return answer, move
+    return answer, None
+
+
+def _puzzle_turn(store: Store, p, title: str) -> bool:
+    """Ask one puzzle in the terminal and record the answer. Returns whether you found it."""
+    from datetime import UTC, datetime
+
+    import chess
+
+    from chess_coach.puzzles.srs import schedule
+
+    board = chess.Board(p.fen)
+    side = "White" if board.turn == chess.WHITE else "Black"
+    game = store.get_game(p.game_id)
+    console.print(f"\n[bold]{title}[/bold]  ({side} to move; {', '.join(p.tags)})")
+    console.print(_board_text(p.fen))
+    console.print(f"In the game you played [red]{p.played_san}[/red]. Find the best move.")
+    answer, move = _ask_move(board)
+    correct = move is not None and p.is_right(move.uci())
+    line = _san_line(board, p.solution, p.line)
+    if correct:
+        console.print(f"[green]Correct.[/green] {line}")
+    else:
+        console.print(f"[yellow]The move was {p.solution_san}.[/yellow] {line}")
+    review = store.review(p.id)
+    if review is not None:
+        now = datetime.now(UTC)
+        after = schedule(review, correct, practice_day(now))
+        store.save_attempt(after, answer, correct, now)
+        console.print(f"[dim]Next time: {after.due}.[/dim]")
+    if game is not None and game.url:
+        console.print(f"[dim]The game: {game.move_url(p.ply)}[/dim]")
+    return correct
+
+
+def _card_turn(store: Store, card, title: str, analyse) -> bool:
+    """Ask one due opening card in the terminal and record the answer: judged as on the page."""
+    from datetime import UTC, datetime
+
+    import chess
+
+    from chess_coach.coach import training
+    from chess_coach.coach import tree as optree
+
+    moves = [chess.Move.from_uci(u) for u in card.path]
+    board = chess.Board()
+    line = board.variation_san(moves) if moves else ""
+    for m in moves:
+        board.push(m)
+    games = [
+        g
+        for g in store.iter_games()
+        if g.analyzed_depth and g.opening_family == card.family and g.user_color.value == card.color
+    ]
+    ids = {g.id for g in games}
+    facts = [m for m in store.iter_moves(max_ply=optree.TREE_PLIES) if m.game_id in ids]
+    root = optree.build(games, facts)
+    console.print(f"\n[bold]{title}[/bold]  (your {card.family}; {card.color} to move)")
+    console.print(_board_text(board.fen()))
+    if line:
+        console.print(f"[dim]{line}[/dim]")
+    kind = training.kind_at(root, card.path)
+    console.print(
+        "Their last move was a mistake you've met before. Punish it."
+        if kind == training.PUNISH
+        else "What do you play here?"
+    )
+    answer, move = _ask_move(board)
+    judged = training.judge(kind, optree.walk(root, card.path), board, move, analyse)
+    target = board.san(judged.target) if judged.target else None
+    if judged.correct:
+        console.print(f"[green]{board.san(move)}: good.[/green]")
+    if not judged.correct or (target and move and target != board.san(move)):
+        console.print(f"[yellow]The move to remember: {target}.[/yellow]")
+    now = datetime.now(UTC)
+    if not store.coach_answered(card.id, practice_day(now).isoformat()):
+        after = training.answer(
+            card, card.family, card.color, card.path, kind, judged.correct, practice_day(now)
+        )
+        store.save_coach_attempt(after, answer, judged.correct, now)
+        console.print(f"[dim]Next time: {after.due}.[/dim]")
+    return judged.correct
 
 
 def _san_line(board, solution: str, line: str) -> str:
@@ -1098,6 +1149,72 @@ def repeats(
         console.print(f"  It has a puzzle ({r.puzzle})." if r.puzzle else "  No puzzle for it yet.")
         for url in r.urls[:3]:
             console.print(f"  [dim]{url}[/dim]")
+
+
+def _today_status(store: Store) -> str:
+    from datetime import timedelta
+
+    from chess_coach.puzzles.today import read_facts, session, status_line, upcoming
+
+    facts = read_facts(store)
+    day = practice_day()
+    return status_line(session(store, facts, day), upcoming(store, facts, day + timedelta(days=1)))
+
+
+def _today_in_the_terminal(store: Store, settings: Settings) -> None:
+    from chess_coach.engine.stockfish import Engine
+    from chess_coach.puzzles.today import read_facts, session
+    from chess_coach.web.app import Analyst
+
+    facts = read_facts(store)
+    analyse = Analyst(
+        lambda: Engine(
+            settings.stockfish_path,
+            threads=settings.engine_threads,
+            hash_mb=settings.engine_hash_mb,
+        )
+    )
+    try:
+        while (now := session(store, facts, practice_day())).items:
+            item = now.items[0]
+            title = f"{now.done + 1} of {now.total}"
+            if item.card is not None:
+                _card_turn(store, item.card, title, analyse)
+            else:
+                _puzzle_turn(store, item.puzzle, title)
+    finally:
+        analyse.close()
+    console.print(f"\n{_today_status(store)}")
+
+
+@app.command("today")
+def today_command(
+    ctx: typer.Context,
+    in_terminal: Annotated[bool, typer.Option("--cli", help="Practise in the terminal.")] = False,
+    status: Annotated[bool, typer.Option("--status", help="Print one line: what's left.")] = False,
+    port: Annotated[int, typer.Option(help="Port on localhost.")] = 8765,
+) -> None:
+    """Today's practice, a session you can finish: opens it in the browser (or --cli)."""
+    import socket
+    import webbrowser
+
+    settings: Settings = ctx.obj
+    with Store(settings.db_path) as store:
+        if status:
+            console.print(_today_status(store), highlight=False)
+            return
+        if in_terminal:
+            _today_in_the_terminal(store, settings)
+            return
+    with socket.socket() as probe:
+        probe.settimeout(0.2)
+        running = probe.connect_ex(("127.0.0.1", port)) == 0
+    if running:
+        url = f"http://127.0.0.1:{port}"
+        console.print(f"Already running: opening [bold]{url}[/bold].")
+        webbrowser.open(url)
+        return
+    serve(ctx, port=port, host="127.0.0.1", open_browser=True)
 
 
 @app.command()

@@ -988,6 +988,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
 
     def card_item(card: CoachCard) -> dict:
         """A due opening card as Today shows it. It doesn't name the move to find."""
+        root, _, _ = opening_tree(card.family, card.color)
         moves = [chess.Move.from_uci(u) for u in card.path]
         board = chess.Board()
         line = board.variation_san(moves) if moves else ""
@@ -998,7 +999,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             "id": card.id,
             "fen": board.fen(),
             "side": card.color,
-            "punish": card.kind == training.PUNISH,
+            "punish": training.kind_at(root, card.path) == training.PUNISH,
             "opening": card.family,
             "opening_idea": opening_idea(card.family),
             "line": line,
@@ -1020,7 +1021,8 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         root, _, _ = opening_tree(card.family, card.color)
-        judged = training.judge(card.kind, optree.walk(root, card.path), board, move, analyst)
+        kind = training.kind_at(root, card.path)
+        judged = training.judge(kind, optree.walk(root, card.path), board, move, analyst)
         _, _, saved = save_card_answer(card.family, card.color, card.path, a.uci, judged.correct)
         t = judged.target
         check = judged.check

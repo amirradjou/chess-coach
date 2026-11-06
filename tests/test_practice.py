@@ -1,5 +1,6 @@
 """Practice: what gets served, what is remembered, and which day it counts for."""
 
+import socket
 import time
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -488,3 +489,57 @@ def test_today_serves_a_puzzle_then_says_how_practice_is_going(tmp_path: Path) -
 def test_today_works_on_an_empty_database(tmp_path: Path) -> None:
     done = TestClient(create_app(tmp_path / "c.db")).get("/api/today/next").json()
     assert done["done"] and done["puzzles"] == 0 and done["progress"]["total"] == 0
+
+
+def test_today_status_prints_one_line(tmp_path: Path) -> None:
+    db = tmp_path / "c.db"
+    _practice_db(db, 2)
+    result = runner.invoke(app, ["--db", str(db), "today", "--status"])
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == "Today: 2 to practise (about 1 min): 0 due again, 2 new"
+
+
+def test_today_in_the_terminal_goes_through_the_session(tmp_path: Path) -> None:
+    db = tmp_path / "c.db"
+    _practice_db(db, 2)
+    # First an illegal move, then the right one; then give up on the second.
+    result = runner.invoke(app, ["--db", str(db), "today", "--cli"], input="Ke2\ne4\n?\n")
+    assert result.exit_code == 0, result.output
+    assert "1 of 2" in result.output and "2 of 2" in result.output
+    assert "Correct." in result.output and "The move was e4." in result.output
+    assert "Today: done, 2 practised. Tomorrow: 2 due again, 0 new" in result.output
+    with Store(db) as store:
+        assert [correct for _, _, correct in store.attempts()] == [True, False]
+    again = runner.invoke(app, ["--db", str(db), "today", "--cli"])
+    assert again.exit_code == 0 and "Today: done, 2 practised." in again.output
+
+
+def test_today_opens_the_page_or_the_server_already_running(tmp_path: Path, monkeypatch) -> None:
+    db = tmp_path / "c.db"
+    opened: list[str] = []
+    served: list[int] = []
+    monkeypatch.setattr("webbrowser.open", opened.append)
+    monkeypatch.setattr("uvicorn.run", lambda _app, **kw: served.append(kw["port"]))
+    with socket.socket() as busy:
+        busy.bind(("127.0.0.1", 0))
+        busy.listen()
+        port = busy.getsockname()[1]
+        result = runner.invoke(app, ["--db", str(db), "today", "--port", str(port)])
+    assert result.exit_code == 0, result.output
+    assert opened == [f"http://127.0.0.1:{port}"] and served == []
+
+    result = runner.invoke(app, ["--db", str(db), "today", "--port", str(port)])
+    assert result.exit_code == 0, result.output
+    assert opened == [f"http://127.0.0.1:{port}"] * 2 and served == [port]
+
+
+def test_drill_serves_due_again_then_new(tmp_path: Path) -> None:
+    db = tmp_path / "c.db"
+    _practice_db(db, 2)
+    with Store(db) as store:
+        attempt(store, "lichess:g1:1", datetime(2026, 1, 1, 12, tzinfo=UTC), correct=False)
+    result = runner.invoke(app, ["--db", str(db), "drill", "-n", "1"], input="?\n")
+    assert result.exit_code == 0, result.output
+    assert "Puzzle 1 of 1" in result.output and "Solved 0 of 1." in result.output
+    with Store(db) as store:  # it was the one due again, not the new one
+        assert [a[0] for a in store.attempts()] == ["lichess:g1:1", "lichess:g1:1"]

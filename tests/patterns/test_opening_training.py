@@ -1,7 +1,9 @@
 from datetime import UTC, date, datetime, timedelta
 
 import chess
+from typer.testing import CliRunner
 
+from chess_coach.cli import app as cli_app
 from chess_coach.coach import training
 from chess_coach.coach import tree as optree
 from chess_coach.db import Store
@@ -188,3 +190,28 @@ def test_check_move_uses_the_engine_within_its_margin_and_the_stored_move_withou
     assert not training.check_move(board, a3, lambda fen: None, e4).ok
     assert training.check_move(board, e4, lambda fen: None, e4).ok
     assert training.check_move(board, a3, lambda fen: None).ok  # nothing to compare it with
+
+
+class _NoEngine:
+    def __init__(self, _start):
+        pass
+
+    def __call__(self, fen):
+        return None
+
+    def close(self):
+        pass
+
+
+def test_today_in_the_terminal_asks_a_due_card(tmp_path, monkeypatch):
+    _client(tmp_path, no_engine)  # stores the games
+    db = tmp_path / "coach.db"
+    card = _due_card(db)
+    monkeypatch.setattr("chess_coach.web.app.Analyst", _NoEngine)
+    result = CliRunner().invoke(cli_app, ["--db", str(db), "today", "--cli"], input="e5\n")
+    assert result.exit_code == 0, result.output
+    assert "Punish it." in result.output and "e5: good." in result.output
+    with Store(db) as store:
+        assert store.coach_answered(card.id, _today().isoformat())
+        saved = store.coach_card(card.id)
+    assert saved is not None and saved.due == (_today() + timedelta(days=1)).isoformat()
