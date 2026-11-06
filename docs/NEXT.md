@@ -1,13 +1,11 @@
 # Next steps (written 2026-11-02, updated 2026-11-05)
 
 Where the work after `sync` (#15) stands, and what comes next. docs/PLAN.md stays the record of
-what was built and why; this file is the to-do list until these branches are merged.
+what was built and why; this file is the to-do list.
 
-## Branches, in merge order
+## Merged (2026-11-05)
 
-Each one builds on the one before it, and each PR is based on the branch before it, so its diff is
-only its own work. Merge in this order, with merge commits, not squash. If a base branch isn't
-deleted when its PR merges, retarget the next PR to `main` first.
+\#16 to #20 are merged in order, with merge commits, and main CI is green.
 
 | PR | Branch | What it holds |
 |----|--------|---------------|
@@ -17,23 +15,16 @@ deleted when its PR merges, retarget the next PR to `main` first.
 | #19 | `feat/practice-today` | The practice bugs, and Today: 10 items a day from today's answers |
 | #20 | `feat/next-level` | The next-level card, and this file |
 
-The independent check of the merges in #17 and #18 is done (2026-11-05); they are sound. Every
-function and module-level statement each side changed was compared with both parents, the test ids,
-routes and CLI options are the union of both, and the suite passes at each merge and at both parents
-of each. A fresh copy of the database opened twice changes nothing the second time. Every tab was
-walked at 1280 px and 375 px.
+The independent check of the merges in #17 and #18 found them sound. Every function and module-level
+statement each side changed was compared with both parents, the test ids, routes and CLI options are
+the union of both, and the suite passes at each merge and at both parents of each. A fresh copy of
+the database opened twice changes nothing the second time. Every tab was walked at 1280 px and 375 px.
 
-## After merging
-
-On the real database, in this order:
-
-1. Back it up: `cp data/amirradjou.db data/amirradjou-before-today.db`. The first open adds the
-   `threats` table, `punish_*` tags on 228 puzzles, and renames 48 opening fixes.
-2. `uv run chess-coach --db data/amirradjou.db puzzles dedupe` (525 puzzles left of 544).
-3. `uv run chess-coach --db data/amirradjou.db sync`. The first one checks the backlog of about
-   2,500 threats: 126 s on the default 1 thread, tried on a copy with 28 new games (2026-11-05). Keep
-   to 1 thread: more than one relabels about 100 rows, and the numbers in the docs are from one.
-4. Set `db` in `~/.config/chess-coach/config.toml`, so `chess-coach today` works from anywhere.
+The real database is done too (backup: `data/amirradjou-before-today.db`). `puzzles dedupe` removed 19
+copies, leaving 525 puzzles. The first `sync` took 181 s on 1 thread: 28 new games, 2,541 threats
+checked, 2 new puzzles (527 in all). The 5 attempts are kept and foreign keys are clean. `db` is set
+in `~/.config/chess-coach/config.toml`, so `chess-coach today` works from anywhere. Keep `sync` to 1
+thread: more than one relabels about 100 threat rows, and the numbers in the docs are from one.
 
 ## What the research found (two rounds, 2026-10-31 and 2026-11-01)
 
