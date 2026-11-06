@@ -293,8 +293,8 @@ async function openPractice(tag) {
   const tags = await api("/api/drill/tags");
   const select = $("#tag");
   const keep = tag ?? select.value;
-  fill(select, el("option", { value: "" }, "everything due"),
-    tags.map((t) => el("option", { value: t.tag }, `${tagName(t.tag)} (${t.due} due of ${t.puzzles})`)));
+  fill(select, el("option", { value: "" }, "everything"),
+    tags.map((t) => el("option", { value: t.tag }, `${tagName(t.tag)} (${t.due} due, ${t.new} new)`)));
   select.value = keep || "";
   await nextPuzzle();
 }
@@ -325,7 +325,7 @@ async function nextPuzzle() {
     return;
   }
   drill = fresh(p);
-  $("#due").textContent = `${p.due} due`;
+  $("#due").textContent = `${p.again} due again · ${p.new} new`;
   if (p.ask_threat) return askThreat(p);
   await startPuzzle();
 }

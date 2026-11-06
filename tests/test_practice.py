@@ -1,7 +1,7 @@
 """Practice: what gets served, what is remembered, and which day it counts for."""
 
 import time
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,8 +15,10 @@ from chess_coach.coach.repertoire import Fix
 from chess_coach.db import Store
 from chess_coach.engine.stockfish import LineEval
 from chess_coach.models import CoachCard, Color, Game, Judgement, MoveFact, Phase, Puzzle, Speed
+from chess_coach.openings import epd
 from chess_coach.puzzles.make import verify_fix
 from chess_coach.puzzles.srs import schedule
+from chess_coach.puzzles.today import Facts, new_first, read_facts
 from chess_coach.util import practice_day
 from chess_coach.web.app import create_app
 
@@ -173,7 +175,7 @@ def test_practice_never_serves_a_puzzle_the_bullet_rule_leaves_out(tmp_path: Pat
     client = TestClient(create_app(db))
 
     assert client.get("/api/drill/next").json()["id"] == early
-    assert client.get("/api/drill/next").json()["due"] == 1
+    assert client.get("/api/drill/next").json()["again"] == 1
     tags = {t["tag"]: t for t in client.get("/api/drill/tags").json()}
     assert (tags["middlegame"]["puzzles"], tags["middlegame"]["due"]) == (1, 1)
 
@@ -231,3 +233,70 @@ def test_a_late_evening_answer_is_scheduled_from_the_local_day(toronto, tmp_path
             "/api/drill/answer", json={"id": "lichess:a:1", "uci": "e2e4"}
         )
     assert answered.json()["next_due"] == "2026-11-04"  # tomorrow, not the day after
+
+
+def test_a_new_puzzle_isnt_due_and_practice_counts_them_apart(tmp_path: Path) -> None:
+    db = tmp_path / "c.db"
+    with Store(db) as store:
+        store.upsert_game(game("lichess:a"))
+        store.add_puzzle(puzzle("lichess:a", 1))
+        store.add_puzzle(puzzle("lichess:a", 3))
+        attempt(store, "lichess:a:1", datetime(2026, 1, 1, 12, tzinfo=UTC), correct=False)
+        today = practice_day().isoformat()
+        assert [p.id for p in store.due(today)] == ["lichess:a:1"]
+        assert [p.id for p in store.untried()] == ["lichess:a:3"]
+    client = TestClient(create_app(db))
+    p = client.get("/api/drill/next").json()
+    assert (p["id"], p["again"], p["new"]) == ("lichess:a:1", 1, 1)  # due again comes first
+    tags = {t["tag"]: t for t in client.get("/api/drill/tags").json()}
+    assert (tags["middlegame"]["due"], tags["middlegame"]["new"]) == (1, 1)
+
+
+FEN_A = "r1bqkbnr/pppppppp/2n5/8/8/2N5/PPPPPPPP/R1BQKBNR w KQkq - 2 2"
+FEN_B = "rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq - 2 2"
+TODAY = date(2026, 11, 5)
+
+
+def _facts(**played: date) -> Facts:
+    return Facts(frozenset(), {}, {f"lichess:{k}": v for k, v in played.items()})
+
+
+def test_new_puzzles_come_from_what_you_keep_reaching_then_recent_games_then_the_rest() -> None:
+    old, recent, newer = (puzzle(f"lichess:{g}", 1) for g in ("old", "recent", "newer"))
+    often, oftener = puzzle("lichess:old", 3, FEN_A), puzzle("lichess:older", 3, FEN_B)
+    facts = Facts(
+        frozenset(),
+        {epd(FEN_A): 2, epd(FEN_B): 5, epd(START): 1},
+        {
+            "lichess:old": date(2026, 1, 1),
+            "lichess:older": date(2025, 1, 1),
+            "lichess:recent": date(2026, 9, 1),
+            "lichess:newer": date(2026, 10, 1),
+        },
+    )
+    in_order = new_first([old, recent, newer, often, oftener], facts, TODAY)
+    assert [p.id for p in in_order] == [oftener.id, often.id, newer.id, recent.id, old.id]
+
+
+def test_90_days_ago_is_still_recent() -> None:
+    edge, past = puzzle("lichess:edge", 1), puzzle("lichess:past", 1)
+    facts = _facts(edge=TODAY - timedelta(days=90), past=TODAY - timedelta(days=91))
+    assert [p.id for p in new_first([past, edge], facts, TODAY)] == [edge.id, past.id]
+    # and one with no date comes last among the rest
+    undated = puzzle("lichess:undated", 1)
+    assert new_first([undated, past], facts, TODAY)[-1] == undated
+
+
+def test_a_bullet_position_after_move_10_doesnt_count_as_reached(tmp_path: Path) -> None:
+    db = tmp_path / "c.db"
+    with Store(db) as store:
+        for name in ("x", "y"):
+            store.upsert_game(game(f"lichess:{name}", Speed.BULLET))
+            store.replace_moves(
+                f"lichess:{name}",
+                [move(f"lichess:{name}", 15), move(f"lichess:{name}", 25, FEN_A)],
+                12,
+            )
+        facts = read_facts(store)
+    assert facts.reached.get(epd(START)) == 2  # move 8, twice
+    assert epd(FEN_A) not in facts.reached  # move 13: bullet doesn't count from move 11

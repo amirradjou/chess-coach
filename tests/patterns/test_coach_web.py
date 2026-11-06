@@ -210,7 +210,7 @@ def test_overview_has_boards_and_lessons(tmp_path):
 def test_drill_round_trip(tmp_path):
     client = _app(tmp_path)
     tags = {t["tag"]: t for t in client.get("/api/drill/tags").json()}
-    assert sum(tags[t]["due"] for t in ("middlegame", "endgame") if t in tags) == 2
+    assert sum(tags[t]["new"] for t in ("middlegame", "endgame") if t in tags) == 2
     p = client.get("/api/drill/next").json()
     assert not p["done"] and p["played"] == "Qh5" and p["side"] == "white" and "<svg" in p["svg"]
     assert client.post("/api/drill/answer", json={"id": p["id"], "uci": "e2e5"}).status_code == 400

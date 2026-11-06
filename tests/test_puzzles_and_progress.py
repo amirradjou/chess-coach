@@ -150,7 +150,7 @@ def test_make_checks_each_candidate_once(tmp_path: Path):
     with Store(db) as store:
         assert (make(store, engine, limit=10).made, engine.calls) == (3, 3)
         assert make(store, engine, limit=10).checked == 0  # nothing new to check
-        assert len(store.due(practice_day().isoformat())) == 3
+        assert len(store.untried()) == 3 and store.due(practice_day().isoformat()) == []
 
 
 def test_a_slip_repeated_from_the_same_position_is_one_puzzle(tmp_path: Path):

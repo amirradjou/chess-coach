@@ -563,14 +563,25 @@ class Store:
         return [p for p in out if tag is None or tag in p.tags]
 
     def due(self, today: str, tag: str | None = None, limit: int | None = None) -> list[Puzzle]:
-        """Puzzles due on or before `today`, most overdue first."""
+        """Puzzles you've tried that are due again on or before `today`, most overdue first. A new
+        puzzle isn't due: see `untried`."""
         rows = self.conn.execute(
             "SELECT p.* FROM puzzles p JOIN reviews r ON r.puzzle_id = p.id "
-            "WHERE r.due <= ? ORDER BY r.due, p.id",
+            "WHERE r.due <= ? AND EXISTS (SELECT 1 FROM attempts a WHERE a.puzzle_id = p.id) "
+            "ORDER BY r.due, p.id",
             (today,),
         )
         out = [p for p in (_row_to_puzzle(r) for r in rows) if tag is None or tag in p.tags]
         return out[:limit] if limit is not None else out
+
+    def untried(self, tag: str | None = None) -> list[Puzzle]:
+        """Puzzles you have never answered, oldest first."""
+        rows = self.conn.execute(
+            "SELECT p.* FROM puzzles p "
+            "WHERE NOT EXISTS (SELECT 1 FROM attempts a WHERE a.puzzle_id = p.id) "
+            "ORDER BY p.created_at, p.id"
+        )
+        return [p for p in (_row_to_puzzle(r) for r in rows) if tag is None or tag in p.tags]
 
     def review(self, puzzle_id: str) -> Review | None:
         row = self.conn.execute(

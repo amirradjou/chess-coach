@@ -74,8 +74,8 @@ from chess_coach.openings import opening_families, opening_table
 from chess_coach.patterns.features import ERRORS, move_rows, result_of
 from chess_coach.patterns.mining import Evidence
 from chess_coach.puzzles import review
-from chess_coach.puzzles.make import left_out
 from chess_coach.puzzles.srs import schedule
+from chess_coach.puzzles.today import Facts, practice_queue, read_facts
 from chess_coach.util import practice_day
 
 PLAYED = "#d1495b"  # your move
@@ -567,25 +567,27 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
 
         return cached("openings", key, make)
 
-    def served(store: Store) -> Callable[[Puzzle], bool]:
-        """Whether Practice serves a puzzle: not one the rules leave out, kept for its history."""
+    def practice_facts(store: Store) -> Facts:
         key = (store.count_games(), store.count_moves(), len(store.puzzles()))
-        out = cached("left_out", key, lambda: frozenset(left_out(store)))
-        return lambda p: p.id not in out
+        return cached("practice", key, lambda: read_facts(store))
 
     @app.get("/api/drill/next")
     def drill_next(tag: str | None = None) -> dict:
-        today = practice_day().isoformat()
         with Store(db_path) as store:
-            due = list(filter(served(store), store.due(today, tag)))
-            if not due:
-                return {
-                    "done": True,
-                    "puzzles": len(list(filter(served(store), store.puzzles(tag)))),
-                }
-            p, total_due = due[0], len(due)
-            game = store.get_game(p.game_id)
-            threat = None if "opening-fix" in p.tags else store.threat(p.game_id, p.ply)
+            again, new = practice_queue(store, practice_facts(store), practice_day(), tag)
+            if not again and not new:
+                left = practice_facts(store).left_out
+                return {"done": True, "puzzles": sum(p.id not in left for p in store.puzzles(tag))}
+            return {
+                "again": len(again),
+                "new": len(new),
+                **drill_item(store, [*again, *new][0], tag),
+            }
+
+    def drill_item(store: Store, p: Puzzle, tag: str | None = None) -> dict:
+        """A puzzle as the page shows it."""
+        game = store.get_game(p.game_id)
+        threat = None if "opening-fix" in p.tags else store.threat(p.game_id, p.ply)
         board = chess.Board(p.fen)
         ask = None
         if threat is not None and threat.label == IGNORED and threat.last_uci:
@@ -601,7 +603,6 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             "side": "white" if board.turn == chess.WHITE else "black",
             "played": p.played_san,
             "tags": p.tags,
-            "due": total_due,
             "opening_fix": "opening-fix" in p.tags,
             "opening": family,
             "opening_idea": opening_idea(family) if early else None,
@@ -974,19 +975,21 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
 
     @app.get("/api/drill/tags")
     def drill_tags() -> list[dict]:
-        today = practice_day().isoformat()
         with Store(db_path) as store:
-            puzzles = list(filter(served(store), store.puzzles()))
-            due = {p.id for p in store.due(today)}
+            facts = practice_facts(store)
+            puzzles = [p for p in store.puzzles() if p.id not in facts.left_out]
+            again, new = practice_queue(store, facts, practice_day())
+        due, fresh = {p.id for p in again}, {p.id for p in new}
         counts: dict[str, list[int]] = {}
         for p in puzzles:
             for t in p.tags:
-                c = counts.setdefault(t, [0, 0])
+                c = counts.setdefault(t, [0, 0, 0])
                 c[0] += 1
                 c[1] += p.id in due
+                c[2] += p.id in fresh
         return [
-            {"tag": t, "puzzles": n, "due": d}
-            for t, (n, d) in sorted(counts.items(), key=lambda kv: -kv[1][0])
+            {"tag": t, "puzzles": n, "due": d, "new": f}
+            for t, (n, d, f) in sorted(counts.items(), key=lambda kv: -kv[1][0])
         ]
 
     @app.get("/api/progress")

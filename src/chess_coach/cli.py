@@ -819,20 +819,21 @@ def drill(
     count: Annotated[int, typer.Option("--count", "-n", help="Puzzles this session.")] = 10,
     tag: Annotated[str | None, typer.Option(help="Only puzzles with this tag.")] = None,
 ) -> None:
-    """Practise the puzzles that are due. Answer in SAN (Nf3) or UCI (g1f3); ? shows the answer."""
+    """Practise the puzzles due again, then new ones. Answer in SAN (Nf3) or UCI (g1f3); ? shows
+    the answer."""
     from datetime import UTC, datetime
 
     import chess
 
-    from chess_coach.puzzles.make import left_out
     from chess_coach.puzzles.srs import schedule
+    from chess_coach.puzzles.today import practice_queue, read_facts
 
     settings: Settings = ctx.obj
     now = datetime.now(UTC)
     with Store(settings.db_path) as store:
-        skip = set(left_out(store))
         day = practice_day(now)
-        due = [p for p in store.due(day.isoformat(), tag) if p.id not in skip][:count]
+        again, new = practice_queue(store, read_facts(store), day, tag)
+        due = [*again, *new][:count]
         if not due:
             console.print(
                 "Nothing due. Make more with `chess-coach puzzles make`, or come back tomorrow."
