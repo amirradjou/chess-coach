@@ -485,14 +485,16 @@ class Store:
             )
 
     def add_puzzle(self, p: Puzzle) -> None:
-        """Store a puzzle and schedule it for today."""
+        """Store a puzzle and schedule it for today. One already stored stays as it is: replacing
+        the row would delete its practice history with it (ON DELETE CASCADE)."""
         with self.conn:
             self.conn.execute(
                 """
-                INSERT OR REPLACE INTO puzzles (
+                INSERT INTO puzzles (
                     id, game_id, ply, fen, solution, solution_san, played_san, line, gap_cp,
                     depth, tags, created_at, accept
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (id) DO NOTHING
                 """,
                 (
                     p.id,
