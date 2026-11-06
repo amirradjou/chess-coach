@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 96" role="img" aria-label="Your games go to Stockfish, which checks every move. That gives the mistakes you repeat, which become puzzles and opening drills, which become today's practice.">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#2a9d8f"/>
+    </marker>
+  </defs>
+  <style>
+    rect { fill: #eef6f4; stroke: #2a9d8f; stroke-width: 1.5; }
+    rect.last { fill: #2a9d8f; }
+    text { font: 15px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #1d1f24; text-anchor: middle; }
+    text.last { fill: #ffffff; font-weight: 600; }
+    line { stroke: #2a9d8f; stroke-width: 2; marker-end: url(#arrow); }
+  </style>
+  <rect x="2" y="14" width="136" height="68" rx="8"/>
+  <text x="70" y="53">Your games</text>
+  <line x1="140" y1="48" x2="170" y2="48"/>
+
+  <rect x="172" y="14" width="136" height="68" rx="8"/>
+  <text x="240" y="44">Stockfish checks</text>
+  <text x="240" y="64">every move</text>
+  <line x1="310" y1="48" x2="340" y2="48"/>
+
+  <rect x="342" y="14" width="136" height="68" rx="8"/>
+  <text x="410" y="44">Mistakes</text>
+  <text x="410" y="64">you repeat</text>
+  <line x1="480" y1="48" x2="510" y2="48"/>
+
+  <rect x="512" y="14" width="136" height="68" rx="8"/>
+  <text x="580" y="44">Puzzles and</text>
+  <text x="580" y="64">opening drills</text>
+  <line x1="650" y1="48" x2="680" y2="48"/>
+
+  <rect class="last" x="682" y="14" width="216" height="68" rx="8"/>
+  <text class="last" x="790" y="44">Today's practice</text>
+  <text class="last" x="790" y="64" style="font-weight:400">10 things a day</text>
+</svg>
