@@ -193,7 +193,7 @@ def verify_fix(engine: Engine, fix, family: str, depth: int = VERIFY_DEPTH) -> P
         return None
     game_id, ply, _ = fix.games[0]
     return Puzzle(
-        id=f"{game_id}:{ply}",
+        id=f"fix:{game_id}:{ply}",  # a puzzle from that same move has the id without "fix:"
         game_id=game_id,
         ply=ply,
         fen=fix.fen,

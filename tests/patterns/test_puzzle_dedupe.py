@@ -214,7 +214,7 @@ def test_puzzles_dedupe_says_what_it_did(tmp_path: Path, monkeypatch):
     result = CliRunner().invoke(cli.app, ["--db", str(db), "puzzles", "dedupe"])
     assert result.exit_code == 0, result.output
     assert (
-        "4.O-O (you played Kf1): kept lichess:g0:7, removed lichess:g1:7; it now also has "
+        "4.O-O (you played Kf1): kept fix:lichess:g0:7, removed fix:lichess:g1:7; it now also has "
         "Two Knights Defense" in result.output
     )
     assert "1 positions were stored more than once: removed 1 copies, 1 puzzles left." in (

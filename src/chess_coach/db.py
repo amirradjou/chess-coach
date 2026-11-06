@@ -183,6 +183,7 @@ class Store:
         if "accept" not in columns:  # databases from before opening-fix drills
             self.conn.execute("ALTER TABLE puzzles ADD COLUMN accept TEXT NOT NULL DEFAULT '[]'")
         self._fix_lichess_ids()
+        self._fix_opening_fix_ids()
         self._tag_punishments()
 
     def _fix_lichess_ids(self) -> None:
@@ -229,6 +230,33 @@ class Store:
                         (new, len(old) + 1, len(old) + 1, f"{old}:"),
                     )
                 self.conn.execute("UPDATE puzzles SET game_id = ? WHERE game_id = ?", (new, old))
+
+    def _fix_opening_fix_ids(self) -> None:
+        """Opening fixes were stored under the id of a game move ("<game>:<ply>"), which a puzzle
+        from that same move would overwrite. Give them their own ("fix:<game>:<ply>")."""
+        old = [
+            r[0]
+            for r in self.conn.execute(
+                "SELECT id FROM puzzles WHERE id NOT LIKE 'fix:%' "
+                "AND EXISTS (SELECT 1 FROM json_each(tags) WHERE value = 'opening-fix')"
+            )
+        ]
+        if not old:
+            return
+        self.conn.commit()
+        with self.conn:
+            # Reviews and attempts point at the puzzle id; check them at commit
+            self.conn.execute("BEGIN")
+            self.conn.execute("PRAGMA defer_foreign_keys = ON")
+            for table, column in (
+                ("puzzles", "id"),
+                ("reviews", "puzzle_id"),
+                ("attempts", "puzzle_id"),
+            ):
+                self.conn.executemany(
+                    f"UPDATE {table} SET {column} = ? WHERE {column} = ?",
+                    [(f"fix:{id_}", id_) for id_ in old],
+                )
 
     def _tag_punishments(self) -> None:
         """Puzzles made before the punish sub-tags: a missed punishment (missed_tactic) also gets
