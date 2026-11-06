@@ -1,5 +1,6 @@
 """Lines for going over a puzzle: the best move, each move you tried and the move from the game,
-each continued by the engine, with a plain reason taken from the material and the score.
+each continued by the engine, with a plain reason taken from the material and the score. Opening
+training uses them too: `punishment` is the line after a wrong move.
 
 Scores are from the solver's side (the side to move in the puzzle), so "+2.1" is good for you.
 Without an engine (`analyse` returns None) the lines stop after the chosen moves and have no score.
@@ -12,13 +13,16 @@ from dataclasses import dataclass, field
 
 import chess
 
-from chess_coach.coach.principles import explain
+from chess_coach.coach.principles import explain, line_leaves, line_notes
 from chess_coach.engine.motifs import material
 from chess_coach.engine.stockfish import LineEval
 from chess_coach.models import Puzzle
 
 LINE_PLIES = 8  # how much of the engine's continuation to show
 SETTLE_PLIES = 12  # ...running on while captures and checks continue, so material is counted after
+WORSE_CP = -100  # scored this low you are clearly worse: more than just a better game for them
+PUNISH_LOSS_CP = 100  # ...and it has to be the move that did it, by this much against the best
+MAX_PUNISHMENT_REASONS = 4
 
 Analyse = Callable[[str], LineEval | None]  # FEN -> the engine's best line, None without an engine
 
@@ -32,6 +36,7 @@ class Ply:
     capture: bool
     check: bool
     engine: bool = False  # the engine's continuation, not a move someone chose
+    note: str = ""  # what the move does, in chess terms (opening training only)
 
     @property
     def text(self) -> str:
@@ -49,7 +54,7 @@ class Score:
     def text(self) -> str:
         """Short, as on Lichess: +2.1, #3 (you mate), #-3 (you get mated)."""
         if self.mate is None:
-            return f"{self.cp / 100:+.1f}"
+            return f"{round(self.cp / 100, 1) + 0.0:+.1f}"  # adding 0.0 turns -0.0 into 0.0
         if self.mate == 0:
             return "#" if self.cp > 0 else "#-"
         return f"#{self.mate}"
@@ -75,6 +80,7 @@ class Line:
     why: str = ""
     faults: list[str] = field(default_factory=list)  # in chess terms, see coach.principles
     ideas: list[str] = field(default_factory=list)  # what the better move does instead
+    punishes: bool = False  # the line costs you material or a clearly worse game
 
     @property
     def chosen(self) -> list[Ply]:
@@ -245,6 +251,100 @@ def why_analysis(line: Line) -> str:
     reply = next((p for p in line.plies if p.engine), None)
     text = f"After {chosen[-1].text}: {line.score.words}."
     return text + (f" The engine's move: {reply.text}." if reply else "")
+
+
+def move_text(board: chess.Board, move: chess.Move) -> str:
+    """ "3...Qe7": the move with its number, in the position before it."""
+    return f"{board.fullmove_number}{'.' if board.turn == chess.WHITE else '...'}{board.san(move)}"
+
+
+def _score_sentence(s: Score, best: Score | None, better: str | None, ok: bool) -> str:
+    if best is None or (ok and better is None):
+        return f"The engine scores it {s.words}."
+    if ok:
+        return f"The engine scores it {s.words}, about the same as {better}."
+    return f"The engine scores it {s.words}, while {better or 'a better move'} gets {best.words}."
+
+
+def _what_happens(line: Line, best: Score | None, better: str | None, ok: bool) -> str:
+    """What follows a move in opening training. `better` names the better move, when it's no secret;
+    `ok` says the move holds up."""
+    first, s = line.plies[0], line.score
+    reply = next((p for p in line.plies if p.engine), None)
+    parts = []
+    if reply is not None:
+        does = f", {reply.note}." if reply.note else "."
+        parts.append(f"If you play {first.text}, they answer {reply.text}{does}")
+        if s is None or s.mate is None or s.mate >= 0:
+            change, last = material_change(line), line.plies[-1].text
+            if change < 0:
+                parts.append(f"By {last} you have lost {amount(-change)}.")
+            elif change > 0:
+                enough = ", but that isn't enough." if line.punishes else "."
+                parts.append(f"By {last} you have won {amount(change)}{enough}")
+            elif line.punishes:
+                parts.append(
+                    "Material stays level over this line, so what it costs is the position."
+                )
+            elif ok:
+                parts.append("Material stays level over this line.")
+            else:
+                parts.append(
+                    "Material stays level over this line. There's no quick punishment here: you "
+                    "just get less from the position."
+                )
+    if s is not None:
+        parts.append(_score_sentence(s, best, better, ok))
+    return " ".join(parts)
+
+
+def punishment(
+    fen: str,
+    uci: str,
+    best_uci: str | None,
+    analyse: Analyse,
+    *,
+    better: str | None = None,
+    ok: bool = False,
+) -> Line:
+    """What happens after a move: the engine's line with a note on each move, what it costs, and
+    why. Unless `better` names the better move (a what-if, where nothing is left to find) it stays
+    unnamed, so you can still try again. With `ok` the move holds up, so nothing is held against
+    it."""
+    board = chess.Board(fen)
+    move = legal(board, uci)
+    label = f"If you play {move_text(board, move)}"
+    line = build(fen, [move.uci()], analyse, kind="tried", label=label)
+    s, ev = line.score, analyse(fen)
+    best = Score(ev.cp, ev.mate) if ev else None
+    mate = -s.mate if s is not None and s.mate is not None and s.mate < 0 else None
+    notes = line_notes(fen, [p.uci for p in line.plies], mate=mate)
+    for ply, note in zip(line.plies, notes, strict=True):
+        ply.note = note
+    cost = best.cp - s.cp if best is not None and s is not None else 0
+    line.punishes = (
+        not ok
+        and s is not None
+        and (
+            mate is not None
+            or material_change(line) < 0
+            or (s.cp <= WORSE_CP and cost >= PUNISH_LOSS_CP)
+        )
+    )
+    line.why = _what_happens(line, best, better, ok)
+    if ok:
+        return line
+    reasons = explain(fen, move.uci(), best_uci)
+    faults = reasons.faults
+    if better is not None:
+        line.ideas = reasons.ideas
+    if mate is not None:  # next to a mate, nothing else is worth saying about your position
+        return line
+    leaves = line_leaves(line.plies[0].fen, line.plies[-1].fen) if len(line.plies) > 1 else []
+    if any("minor pieces" in f for f in faults):  # both can speak of development: once is enough
+        leaves = [x for x in leaves if "minor pieces" not in x]
+    line.faults = [*faults, *leaves][:MAX_PUNISHMENT_REASONS]
+    return line
 
 
 def played_uci(puzzle: Puzzle) -> str | None:

@@ -12,6 +12,7 @@ in coach.habits.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 import chess
@@ -27,6 +28,7 @@ OPENING_MOVES = 12  # development and early-queen checks apply up to this move
 CENTRE_MOVES = 20  # centre advice stops here: later the position decides
 MAX_FAULTS = 3
 MAX_IDEAS = 2
+BEHIND_MINORS = 2  # this many more minor pieces at home than theirs is clearly behind
 
 _MINOR_HOME = {
     chess.WHITE: (chess.B1, chess.G1, chess.C1, chess.F1),
@@ -481,29 +483,113 @@ def allows(fen: str, punish: str, *, captures: bool = False, yours: bool = False
     return [f"It lets {san} hit {whose} {names[0]}."]
 
 
-def _does(board: chess.Board, move: chess.Move, mate: int | None = None) -> str:
-    """What `move` (legal in `board`) does to the side not moving, said to that side: "Nxd6,
-    taking your queen on d6", "Qxf7#, checkmate", "Nd5, hitting your queen on c7"."""
-    me, san = board.turn, board.san(move)
+def _effect(
+    board: chess.Board, move: chess.Move, mate: int | None = None, whose: str = "your"
+) -> str:
+    """What `move` (legal in `board`) does to the side not moving, whose pieces are `whose`:
+    "taking your queen on d6", "checkmate", "hitting your queen on c7". Empty when it does none
+    of that."""
+    me = board.turn
     after = _after(board, move)
     if after.is_checkmate():
-        return f"{san}, checkmate"
+        return "checkmate"
     if mate is not None and mate > 0:
-        return f"{san}, with mate in {mate}"
+        return f"with mate in {mate}"
     if board.is_capture(move):
         kind = chess.PAWN if board.is_en_passant(move) else board.piece_type_at(move.to_square)
         square = move.to_square
         if board.is_en_passant(move):
             square += -8 if me == chess.WHITE else 8
         check = " with check" if after.is_check() else ""
-        return f"{san}, taking your {chess.piece_name(kind)} on {chess.square_name(square)}{check}"
+        return f"taking {whose} {chess.piece_name(kind)} on {chess.square_name(square)}{check}"
     hit = sorted(threatened(after, me) - threatened(board, me), key=lambda ks: -PIECE_VALUES[ks[0]])
     names = [f"{chess.piece_name(kind)} on {chess.square_name(square)}" for kind, square in hit]
     if after.is_check():
-        return f"{san}, a check that also hits your {names[0]}" if names else f"{san}, with check"
+        return f"a check that also hits {whose} {names[0]}" if names else "with check"
     if len(names) > 1:
-        return f"{san}, hitting your {names[0]} and {names[1]} at once"
-    return f"{san}, hitting your {names[0]}" if names else san
+        return f"hitting {whose} {names[0]} and {names[1]} at once"
+    return f"hitting {whose} {names[0]}" if names else ""
+
+
+def _does(board: chess.Board, move: chess.Move, mate: int | None = None) -> str:
+    """`move` with what it does, said to the side not moving: "Nxd6, taking your queen on d6"."""
+    san, effect = board.san(move), _effect(board, move, mate)
+    return f"{san}, {effect}" if effect else san
+
+
+def _quiet(board: chess.Board, move: chess.Move, own: str) -> str:
+    """The point of a move that takes and attacks nothing, as far as the board shows it, with the
+    mover's pieces called `own`. Empty when it shows nothing."""
+    me = board.turn
+    if board.is_check():
+        return "answering the check"
+    if board.is_castling(move):
+        return "castling"
+    kind = board.piece_type_at(move.from_square)
+    name = chess.piece_name(kind)
+    danger = threatened(_after(board, move), not me)
+    saved = sorted(threatened(board, not me) - danger, key=lambda ks: -PIECE_VALUES[ks[0]])
+    if (kind, move.from_square) in saved and (kind, move.to_square) not in danger:
+        return f"moving {own} {name} out of attack"
+    for piece, square in saved:
+        if square != move.from_square:
+            return f"protecting {own} {chess.piece_name(piece)} on {chess.square_name(square)}"
+    if move.from_square in _MINOR_HOME[me] and kind in (chess.KNIGHT, chess.BISHOP):
+        return f"developing {own} {name}"
+    if kind == chess.PAWN and move.to_square in CENTRE:
+        return "a pawn into the centre"
+    return ""
+
+
+def line_notes(fen: str, moves: Sequence[str], *, mate: int | None = None) -> list[str]:
+    """What each move of a line does, in chess terms. The first move, from `fen`, is the one you
+    tried; the rest are the engine's. `mate` is the mate their first reply starts, if any."""
+    board = chess.Board(fen)
+    me = board.turn
+    notes = []
+    for i, uci in enumerate(moves):
+        move = chess.Move.from_uci(uci)
+        mine = board.turn == me
+        whose, own = ("their", "your") if mine else ("your", "their")
+        what = _effect(board, move, mate if i == 1 else None, whose) or _quiet(board, move, own)
+        who = {0: "your move", 2: "your best answer"}.get(i, "")
+        notes.append(", ".join(part for part in (who, what) if part))
+        board.push(move)
+    return notes
+
+
+def _castled(board: chess.Board, color: chess.Color) -> bool:
+    king = board.king(color)
+    home = 0 if color == chess.WHITE else 7
+    return (
+        king is not None and chess.square_rank(king) == home and chess.square_file(king) in (2, 6)
+    )
+
+
+def line_leaves(after_your_move: str, end: str) -> list[str]:
+    """What a line does to your position beyond the move itself (explain() covers that):
+    `after_your_move` and `end` are its first and last positions. Facts about the end of the line,
+    since a position can cost you without any material going."""
+    start, last = chess.Board(after_your_move), chess.Board(end)
+    me = not start.turn
+    out = []
+    if (
+        start.has_castling_rights(me)
+        and not last.has_castling_rights(me)
+        and not _castled(last, me)
+    ):
+        out.append("By the end of it you can no longer castle.")
+    if new_doubled := doubled(last, me) - doubled(start, me):
+        out.append(f"Your pawns end up doubled on the {_file(min(new_doubled))}-file.")
+    if new_isolated := isolated(last, me) - isolated(start, me):
+        out.append(f"Your {_file(min(new_isolated))}-pawn ends up isolated.")
+    home, theirs = minors_at_home(last, me), minors_at_home(last, not me)
+    if home >= theirs + BEHIND_MINORS:
+        out.append(
+            f"You end up behind in development: {home} of your minor pieces are still at home "
+            f"against {theirs} of theirs."
+        )
+    return out
 
 
 def their_threat(

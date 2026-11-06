@@ -79,7 +79,7 @@ th:first-child, td:first-child { text-align: left; }
 code { font-size: 14px; }
 a { color: var(--accent); }
 .boardcol { max-width: 420px; width: 100%; }
-.steps { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+.steps { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
 .steps button { padding: 4px 10px; }
 .line { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 8px 0; background: var(--card); }
 .line.on { border-color: var(--accent); }
@@ -102,3 +102,10 @@ button.chip.on { background: var(--accent); border-color: var(--accent); color: 
 .verdict.inaccuracy { background: #f4e3c1; color: #7a5a12; }
 .verdict.mistake, .verdict.blunder { background: #f6d5d9; color: var(--bad); }
 #coach-feedback { margin: 10px 0; }
+.line-title { margin: 12px 0 4px; font-size: 16px; }
+.line-steps { display: grid; gap: 1px; margin: 8px 0; }
+button.line-step { display: block; width: 100%; padding: 3px 8px; border: 0; border-radius: 4px; background: none; text-align: left; font-size: 14px; font-weight: 400; line-height: 1.35; color: var(--muted); }
+button.line-step b { color: var(--ink); }
+button.line-step.theirs b { color: var(--threat); }
+button.line-step.on { background: var(--soft); color: var(--ink); }
+button.line-step.shared { opacity: 0.6; }
