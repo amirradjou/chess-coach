@@ -13,6 +13,7 @@ from chess_coach.engine.stockfish import LineEval
 from chess_coach.models import Color, Game, Judgement, MoveFact, Phase, Review, Speed
 from chess_coach.puzzles.make import make, verify
 from chess_coach.puzzles.srs import schedule
+from chess_coach.util import practice_day
 
 START = chess.STARTING_FEN
 E4, D4, A3 = (chess.Move.from_uci(u) for u in ("e2e4", "d2d4", "a2a3"))
@@ -149,7 +150,7 @@ def test_make_checks_each_candidate_once(tmp_path: Path):
     with Store(db) as store:
         assert (make(store, engine, limit=10).made, engine.calls) == (3, 3)
         assert make(store, engine, limit=10).checked == 0  # nothing new to check
-        assert len(store.due(datetime.now(UTC).date().isoformat())) == 3
+        assert len(store.untried()) == 3 and store.due(practice_day().isoformat()) == []
 
 
 def test_a_slip_repeated_from_the_same_position_is_one_puzzle(tmp_path: Path):
@@ -188,7 +189,7 @@ def test_drill_records_attempts_and_reschedules(tmp_path: Path):
         assert [a[2] for a in attempts] == [True, False]
         reviews = [store.review(p.id) for p in store.puzzles()]
         assert sorted(r.lapses for r in reviews) == [0, 1]
-        assert store.due(datetime.now(UTC).date().isoformat()) == []
+        assert store.due(practice_day().isoformat()) == []
     again = runner.invoke(app, ["--db", str(db), "drill"])
     assert "Nothing due" in again.output
 
