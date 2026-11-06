@@ -195,6 +195,12 @@ def test_with_no_real_punishment_it_doesnt_claim_one():
     )
 
 
+def test_a_score_of_nothing_has_no_sign_to_read():
+    assert review.Score(-2).text == "+0.0"
+    assert review.Score(0).text == "+0.0"
+    assert review.Score(-80).words == "-0.8 for you"
+
+
 class Scripted:
     """An engine that answers from a table of positions."""
 

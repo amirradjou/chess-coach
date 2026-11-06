@@ -53,7 +53,7 @@ class Score:
     def text(self) -> str:
         """Short, as on Lichess: +2.1, #3 (you mate), #-3 (you get mated)."""
         if self.mate is None:
-            return f"{self.cp / 100:+.1f}"
+            return f"{round(self.cp / 100, 1) + 0.0:+.1f}"  # adding 0.0 turns -0.0 into 0.0
         if self.mate == 0:
             return "#" if self.cp > 0 else "#-"
         return f"#{self.mate}"

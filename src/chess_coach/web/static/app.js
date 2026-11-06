@@ -718,7 +718,7 @@ async function openCoach() {
   fill($("#coach-opening"), [["white", "With White"], ["black", "With Black"]].map(([color, label]) => (o[color].length
     ? el("optgroup", { label }, o[color].map((x) => el("option", { value: `${color}|${x.family}` }, optionLabel(x))))
     : null)));
-  coach = { openings: o, color: null, family: null, mode: "explore", path: [], node: null, from: null, check: null, reveal: false, deck: null, card: 0, pending: null, cards: null, answered: false, drawn: 0, line: null, lineTimer: null };
+  coach = { openings: o, color: null, family: null, mode: "explore", path: [], node: null, from: null, check: null, reveal: false, deck: null, card: 0, pending: null, cards: null, answered: false, drawn: 0, going: 0, line: null, lineTimer: null };
   await pickOpening();
 }
 $("#coach-opening").addEventListener("change", pickOpening);
@@ -800,13 +800,15 @@ function coachStart() {
 async function coachGo(path, note) {
   endLine();
   const q = new URLSearchParams({ family: coach.family, color: coach.color, path: path.join(",") });
+  const go = ++coach.going;
   coach.loading = true;
   let node;
   try {
     node = await api(`/api/coach/node?${q}`);
   } finally {
-    coach.loading = false;
+    if (go === coach.going) coach.loading = false;
   }
+  if (go !== coach.going) return; // a later request took over: an opening's first load is slow
   coach.path = [...path];
   coach.node = node;
   coach.reveal = false;
