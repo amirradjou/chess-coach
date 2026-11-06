@@ -74,6 +74,7 @@ from chess_coach.openings import opening_families, opening_table
 from chess_coach.patterns.features import ERRORS, move_rows, result_of
 from chess_coach.patterns.mining import Evidence
 from chess_coach.puzzles import review
+from chess_coach.puzzles.make import left_out
 from chess_coach.puzzles.srs import schedule
 
 PLAYED = "#d1495b"  # your move
@@ -565,15 +566,23 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
 
         return cached("openings", key, make)
 
+    def served(store: Store) -> Callable[[Puzzle], bool]:
+        """Whether Practice serves a puzzle: not one the rules leave out, kept for its history."""
+        key = (store.count_games(), store.count_moves(), len(store.puzzles()))
+        out = cached("left_out", key, lambda: frozenset(left_out(store)))
+        return lambda p: p.id not in out
+
     @app.get("/api/drill/next")
     def drill_next(tag: str | None = None) -> dict:
         today = datetime.now(UTC).date().isoformat()
         with Store(db_path) as store:
-            due = store.due(today, tag, 1)
-            total_due = len(store.due(today, tag))
+            due = list(filter(served(store), store.due(today, tag)))
             if not due:
-                return {"done": True, "puzzles": len(store.puzzles(tag))}
-            p = due[0]
+                return {
+                    "done": True,
+                    "puzzles": len(list(filter(served(store), store.puzzles(tag)))),
+                }
+            p, total_due = due[0], len(due)
             game = store.get_game(p.game_id)
             threat = None if "opening-fix" in p.tags else store.threat(p.game_id, p.ply)
         board = chess.Board(p.fen)
@@ -965,7 +974,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
     def drill_tags() -> list[dict]:
         today = datetime.now(UTC).date().isoformat()
         with Store(db_path) as store:
-            puzzles = store.puzzles()
+            puzzles = list(filter(served(store), store.puzzles()))
             due = {p.id for p in store.due(today)}
         counts: dict[str, list[int]] = {}
         for p in puzzles:

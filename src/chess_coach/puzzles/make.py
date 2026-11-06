@@ -294,20 +294,27 @@ def dedupe(store: Store) -> list[Merge]:
     return merges
 
 
-def prune(store: Store) -> list[str]:
-    """Remove puzzles never attempted that `keep` would no longer make: from bullet after move
-    10, or from a move made short on time and not repeated often enough. Returns the removed
-    ids."""
+def left_out(store: Store) -> list[str]:
+    """Puzzles `keep` would no longer make: from bullet after move 10, or from a move made short on
+    time and not repeated often enough. Opening fixes aren't made from one move, so they stand."""
     games = {g.id: g for g in store.iter_games()}
     moves = {(m.game_id, m.ply): m for m in store.iter_moves(user_only=True)}
     repeated = repeated_tags(games.values(), moves.values())
-    tried = {pid for pid, _, _ in store.attempts()}
-    removed = []
+    out = []
     for p in store.puzzles():
         m = moves.get((p.game_id, p.ply))
-        if p.id in tried or FIX_TAG in p.tags or m is None or p.game_id not in games:
+        if FIX_TAG in p.tags or m is None or p.game_id not in games:
             continue
         if not keep(m, games[p.game_id], repeated):
-            store.delete_puzzle(p.id)
-            removed.append(p.id)
+            out.append(p.id)
+    return out
+
+
+def prune(store: Store) -> list[str]:
+    """Remove the puzzles `left_out` names that were never attempted. One with attempts stays, for
+    its history, but Practice doesn't serve it. Returns the removed ids."""
+    tried = {pid for pid, _, _ in store.attempts()}
+    removed = [pid for pid in left_out(store) if pid not in tried]
+    for pid in removed:
+        store.delete_puzzle(pid)
     return removed

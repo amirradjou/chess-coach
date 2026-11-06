@@ -825,12 +825,14 @@ def drill(
 
     import chess
 
+    from chess_coach.puzzles.make import left_out
     from chess_coach.puzzles.srs import schedule
 
     settings: Settings = ctx.obj
     now = datetime.now(UTC)
     with Store(settings.db_path) as store:
-        due = store.due(now.date().isoformat(), tag, count)
+        skip = set(left_out(store))
+        due = [p for p in store.due(now.date().isoformat(), tag) if p.id not in skip][:count]
         if not due:
             console.print(
                 "Nothing due. Make more with `chess-coach puzzles make`, or come back tomorrow."
