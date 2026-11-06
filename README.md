@@ -215,11 +215,13 @@ across 8+ games.
   6-10 and 11-20. Your opponents can't show this, because rating matching makes you level with them
   almost everywhere. The public games are scored the same way, with the same bullet and
   short-on-time rules (`scripts/level_reference.py`), and what most separates one rating from the
-  next is accuracy early on. Your interval is read off that ladder as a range of ratings: wider
-  than 300 points, it says "not enough games to place you" and gives only the range it can. On the
-  author's bullet games, moves 6-10 are the clear gap: 6.4% (95% interval 5.4 to 7.5) against 4.8%
-  for players 300 points higher. Twelve months of games still only place the author around 1200-1700. The
-  card is also on Progress, with one line in the digest.
+  next is accuracy early on. Only rated Lichess games analysed at depth 12 count. Your interval is
+  read off that ladder as a range of ratings: wider than 300 points, it says "not enough games to
+  place you" and gives only the range it can. Your opponents' rating is known, so the ladder is
+  tried on them too, and where it misreads them it won't place you. On the author's bullet games,
+  moves 6-10 are the clear gap: 6.4% (95% interval 5.5 to 7.5) against 4.8% for players 300 points
+  higher. Twelve months of games still only place the author around 1200-1700. The card is also on
+  Progress, with one line in the digest.
 - `today` opens the day's session in the browser (`--cli` for the terminal, `--status` for one
   line: "Today: 10 to practise (about 5 min): 5 due again, 5 new"). It is 10 items: what's due
   again and due opening positions first, most overdue first, then at most 5 new puzzles, from

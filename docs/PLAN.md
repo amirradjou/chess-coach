@@ -682,26 +682,53 @@ separates levels.
 - Counts counted, non-rushed mistakes and blunders (20+ points) in the reference's segments, by plain
   move number, over the last 12 months, with the opponents in the same games. A "book exit" split
   means nothing here: the opening table's named lines end around move 2.
-- Only games at the time controls the reference sampled: 60+0, and 300+3 and 180+2. Games at other
-  controls are named as left out, not mixed in. In the last 12 months that leaves 40 of the owner's 63
-  blitz games, all 180+2.
-- Blitz bands are weighted to the player's time-control mix, per segment (`by_time_control`).
-- 95% Wilson intervals use n over the design effect, the median of the public bands for that segment:
-  moves of one game are alike, and one player's games are too few to estimate it. Bullet moves 6-10
-  go from 3,605 moves to about 2,000 effective.
+- Only games like the public ones: on Lichess, not casual, analysed at depth 12, at the time controls
+  the reference sampled (60+0, and 300+3 and 180+2). Others are named as left out, not mixed in. Depth
+  matters: 400 of the owner's games re-run at depth 18 went from 6.34% to 7.07% in bullet moves 6-10,
+  up to half the gap below. In the last 12 months this leaves 40 of the owner's 63 blitz games, all
+  180+2.
+- Blitz bands are weighted to the player's time-control mix, per segment (`by_time_control`), and
+  pooled by the moves behind the rates actually used.
+- 95% Wilson intervals use errors and moves over the design effect, the median of the public bands
+  for that segment: moves of one game are alike. Bullet moves 6-10 go from 3,700 moves to about 2,200
+  effective. A player's own effect varies with what they repeat. The owner's in moves 6-10 is mostly
+  below the 1.695 used (1.23 by game, 1.30 by day, 1.13 by position; 2.51 by opening, tried below). In
+  moves 1-5 repeated positions put it at 2.36 against the 1.495 used, and the next rule catches that.
+- The ladder is tried on the opponents first, since their rating is known. If their interval doesn't
+  read back to it, the row names the misreading and claims neither a place nor a gap.
 - The ladder is pooled so it never rises with rating (sampled bands wobble), then read linearly. The
-  player's interval gives a range of ratings. Wider than a 300-point step: "not enough games to
-  place you", and the range the interval does allow, since that is still true and useful.
+  player's interval gives a range of ratings. Wider than a 300-point step as printed: "not enough
+  games to place you", and the range the interval does allow, since that is still true and useful.
 - A gap is only called one when the interval's low end clears the rate at the median rating + 300.
-- A speed with no game for over 30 days says so and stays out of the headline.
+- A speed with no counted game for over 30 days gives the dates its numbers come from and stays out
+  of the headline. The headline says the numbers are from the last 12 months, since it sits under
+  whatever `digest --since` asked for.
 
-What it says on the owner's games (2026-11-05, rating about 1446 in bullet):
-- Bullet moves 6-10: 6.4% (5.4 to 7.5), opponents 5.8% (4.9 to 6.9), 300 points higher 4.8%: a
-  clear gap, and the one the digest names. Placed only around 1200-1700. This matches round 2 of the
-  research (6.35%), which used more games.
-- Bullet moves 1-5: 0.9% (0.6 to 1.4), above about 1800 and open-ended.
-- Blitz: 40 games in the window and the last on 2026-09-20. Nothing can be placed, and the card says
-  so.
+What it says on the owner's games (2026-11-05, after a `sync` on a copy; 760 bullet games, median
+rating 1452):
+- Bullet moves 6-10: 6.4% (5.5 to 7.5), opponents 5.7% (4.8 to 6.8), 300 points higher 4.8%: a
+  clear gap, and the one the digest names. Placed only around 1200-1700: "clear" would take several
+  times the games. This matches round 2 of the research (6.35%), which used more games.
+- Bullet moves 1-5: 0.9% (0.6 to 1.3), no place. The ladder reads the opponents, rated about 1470,
+  as around 1600-2200.
+- Blitz: 40 games from 2025-12-01 to 2026-09-20. Nothing can be placed, and the card says so.
+
+An independent review tried to break the bullet 6-10 gap before these numbers were kept, on the 732
+games of that day. A separate SQL recount gave the same 231 of 3,605. The difference stays clear of
+zero with the ladder's own error included (+0.45 to +2.70), with a design effect of 2.51 (+0.24 to
++2.91), and with the public players re-weighted to the owner's colour and first move (+0.32 to +2.25)
+or first two plies (+1.16 to +3.40). Re-scoring all 732 games on 1 thread gave 222 to 229 errors, and
+hash 64 or 128 MB made no difference beyond the noise: two runs of one recipe disagree on 85 of 14,505
+moves. Not measured: 4 or more threads (too slow), and the threads behind the stored analysis aren't
+recorded.
+
+Left as they are:
+- The rating read is the window's median, so "300 points above" is about 215 above the owner's current
+  1538. The rate at that rating would be lower, so this understates the gap rather than inventing one.
+- With several clear gaps "widest" ranks by the point estimate, which favours rows with high rates.
+  There is one today.
+- Two numbers can print alike after rounding (5.04% and 4.96%).
+- Colour isn't in the reference, so the card can't show that the gap is in White games (docs/NEXT.md).
 
 ## Remaining (in order)
 
