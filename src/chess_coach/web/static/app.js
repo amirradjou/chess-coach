@@ -107,7 +107,6 @@ function repeatCard(r) {
 // is only called yours to work on when the difference's interval is above zero.
 function threatSection(t) {
   const share = (x) => [`${x.rate}%`, el("div", { class: "muted small" }, `${x.low}–${x.high}%`)];
-  const signed = (n) => `${n > 0 ? "+" : ""}${n}`;
   const mine = t.steps.filter((s) => s.yours);
   return [
     el("h2", {}, "Their threats and your blunder check"),
