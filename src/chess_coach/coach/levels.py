@@ -7,7 +7,8 @@ those games what most separates one rating from the next is accuracy early on.
 
 The wording never claims more than the numbers allow. Your rate carries a 95% interval, and the
 interval is read off the ladder as a range of ratings: when that range is wider than a 300-point
-step you get "not enough games to place you", not a rating.
+step you get "not enough games to place you", not a rating. Your opponents' rating is known, so the
+ladder is checked on them first: when it misreads them it doesn't get to place you.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from __future__ import annotations
 import json
 import math
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from importlib import resources
@@ -28,6 +29,8 @@ from chess_coach.patterns.mining import wilson
 
 MAX_PLY = 40  # move 20: the last segment any speed has
 WINDOW_DAYS = 365
+DEPTH = 12  # the public games' engine depth: a deeper analysis of yours would find other errors
+SOURCE = "lichess"  # the public games' site: a rating elsewhere is on another scale
 STEP = 300  # rating points: the next level, and how wide a place can be and still be one
 STALE_DAYS = 30  # no game at this speed for this long: say the numbers are from back then
 SPEEDS = {"bullet": Speed.BULLET, "blitz": Speed.BLITZ}
@@ -85,16 +88,17 @@ def ladder(
     mix = mix or {}
     points = []
     for band in bands:
-        row = band["rows"][segment]
-        errors, moves = row["errors"]
-        rate = errors / moves
+        errors, weight = band["rows"][segment]["errors"]
+        rate = errors / weight
         by_control = band.get("by_time_control")
         if by_control and (total := sum(mix.get(tc, 0) for tc in by_control)):
-            rate = 0.0
+            rate = weight = 0
             for tc, rows in by_control.items():
-                e, m = rows["rows"][segment]["errors"]
-                rate += mix.get(tc, 0) / total * e / m
-        points.append(((band["lo"] + band["hi"]) / 2, rate, moves))
+                if share := mix.get(tc, 0) / total:
+                    e, m = rows["rows"][segment]["errors"]
+                    rate += share * e / m
+                    weight += m
+        points.append(((band["lo"] + band["hi"]) / 2, rate, weight))
     return _pooled(points)
 
 
@@ -135,8 +139,10 @@ class Place:
 
     @property
     def clear(self) -> bool:
-        """Close enough to call a place: no wider than a 300-point step, on the ladder."""
-        return min(self.high, self.top) - max(self.low, self.bottom) <= STEP
+        """Close enough to call a place: no wider than a 300-point step as `words` prints it."""
+        low = min(max(self.low, self.bottom), self.top)
+        high = min(max(self.high, self.bottom), self.top)
+        return _up(high) - _down(low) <= STEP
 
     @property
     def words(self) -> str | None:
@@ -174,17 +180,20 @@ class Row:
     place: Place | None  # None with no moves of yours
     above: float | None  # the rate of players 300 points above your rating
     gap: bool  # your interval is clear of `above`: this is a real difference
+    misread: str | None = None  # how the ladder gets your opponents wrong, when it does
 
     @property
     def placed(self) -> str | None:
-        """Where you stand, when the interval allows saying so."""
-        return self.place.words if self.place and self.place.clear else None
+        """Where you stand, when the interval and the check on your opponents allow saying so."""
+        return self.place.words if self.place and self.place.clear and not self.misread else None
 
     @property
     def sentence(self) -> str:
         where = f"Moves {self.segment}"
         if self.place is None:
             return f"{where}: no moves of yours to count yet."
+        if self.misread:
+            return f"{where}: this ladder reads {self.misread}, so it can't place you here."
         if self.place.clear and self.place.words:
             return f"{where}: you play like players {self.place.words}."
         if self.place.words:
@@ -195,10 +204,11 @@ class Row:
 @dataclass(slots=True)
 class SpeedReport:
     speed: str
-    games: int  # in the window, at time controls the reference covers
-    other_games: int  # in the window, at time controls it doesn't
+    games: int  # in the window and like the public games (`_comparable`)
+    other_games: int  # in the window and not like them
     rating: int | None  # your median rating in those games
-    last: date | None  # your last game at this speed, whatever its time control
+    first: date | None  # your first and last of those games
+    last: date | None  # with nothing in the window, your last comparable game before it
     stale: bool
     controls: list[str] = field(default_factory=list)
     rows: list[Row] = field(default_factory=list)
@@ -207,13 +217,51 @@ class SpeedReport:
     def stale_note(self) -> str | None:
         if not self.stale or self.last is None:
             return None
-        return f"Your last {self.speed} game was on {self.last}, so these numbers are from then."
+        if self.first is None:
+            return (
+                f"Your last {self.speed} game counted here was on {self.last}, "
+                "more than 12 months ago."
+            )
+        dates = str(self.first) if self.first == self.last else f"{self.first} to {self.last}"
+        return (
+            f"No {self.speed} game counted here since {self.last}: these numbers are from {dates}."
+        )
+
+    @property
+    def left_out_note(self) -> str | None:
+        if not self.other_games:
+            return None
+        count = f"{self.other_games} more game{'s' if self.other_games != 1 else ''}"
+        return (
+            f"Not counted: {count} the public games are no yardstick for "
+            "(another time control, site or analysis depth, or casual)."
+        )
 
 
 @dataclass(slots=True)
 class Report:
     speeds: list[SpeedReport]
     built: str  # when the public ladder was built
+
+
+def _comparable(game: Game, controls: Collection[str]) -> bool:
+    """Played and scored as the public games were: rated, on Lichess, at the same depth and time
+    controls. `rated` can be unknown: a Lichess tournament's PGN doesn't always say."""
+    return (
+        game.source == SOURCE
+        and game.rated is not False
+        and game.analyzed_depth == DEPTH
+        and game.time_control in controls
+    )
+
+
+def _misread(them: Place, rating: int | None) -> str | None:
+    """Your opponents' rating is known, so the ladder can be tried on them. When their interval
+    misses it, what the ladder says of the same games can't stand for you either: openings you keep
+    repeating make that happen."""
+    if rating is None or them.low <= rating <= them.high:
+        return None
+    return f"your opponents, rated about {rating}, as {them.words}"
 
 
 def _speed_report(
@@ -229,10 +277,14 @@ def _speed_report(
     since = today - timedelta(days=WINDOW_DAYS)
     same_speed = [g for g in games if g.speed is SPEEDS[speed] and g.played_at]
     in_window = [g for g in same_speed if g.played_at.date() >= since]
-    chosen = [g for g in in_window if g.time_control in controls]
-    last = max((g.played_at.date() for g in same_speed), default=None)
+    chosen = [g for g in in_window if _comparable(g, controls)]
+    last = max((g.played_at.date() for g in same_speed if _comparable(g, controls)), default=None)
+    first = min((g.played_at.date() for g in chosen), default=None)
     ratings = [g.user_elo for g in chosen if g.user_elo]
     rating = round(median(ratings)) if ratings else None
+    theirs = [g.opponent_elo for g in chosen if g.opponent_elo]
+    them_rating = round(median(theirs)) if theirs else None
+    played = {g.time_control for g in chosen}
     tallies = {name: Counter() for name in segments}
     mix = {name: Counter() for name in segments}
     spans = {name: tuple(int(x) for x in name.split("-")) for name in segments}
@@ -251,23 +303,26 @@ def _speed_report(
     rows = []
     for name in segments:
         t = tallies[name]
-        # The public bands' typical design effect: this player's own would need more games.
+        # The public bands' typical design effect, for everyone: a player's own varies with what
+        # they repeat, which is one reason a row has to read their opponents right as well.
         effect = median(b["rows"][name]["design_effect"][0] or 1.0 for b in bands)
         you = _rate(t["you_errors"], t["you_moves"], effect)
         them = _rate(t["them_errors"], t["them_moves"], effect)
         points = ladder(bands, name, mix[name])
         where = place(you, points) if you.moves else None
-        above = rate_at(rating + STEP, points) if rating else None
-        gap = above is not None and you.moves > 0 and you.low > above
-        rows.append(Row(name, you, them, where, above, gap))
+        above = rate_at(rating + STEP, points) if rating and you.moves else None
+        misread = _misread(place(them, points), them_rating)
+        gap = above is not None and you.low > above and misread is None
+        rows.append(Row(name, you, them, where, above, gap, misread))
     return SpeedReport(
         speed=speed,
         games=len(chosen),
         other_games=len(in_window) - len(chosen),
         rating=rating,
+        first=first,
         last=last,
         stale=last is not None and (today - last).days > STALE_DAYS,
-        controls=list(controls),
+        controls=[c for c in controls if c in played] or list(controls),
         rows=rows,
     )
 
@@ -275,8 +330,8 @@ def _speed_report(
 def report(
     games: Iterable[Game], moves: Iterable[MoveFact], today: date, table: Mapping | None = None
 ) -> Report:
-    """`moves` are both players'. Only your last 12 months count, at the time controls the public
-    games were sampled at, so like is compared with like."""
+    """`moves` are both players'. Only your last 12 months count, and only games like the public
+    ones, so like is compared with like."""
     table = table or reference()
     analysed = [g for g in games if g.analyzed_depth]
     ids = {g.id for g in analysed}
@@ -290,7 +345,7 @@ def report(
         )
         for speed in SPEEDS
     ]
-    return Report([s for s in speeds if s.games or s.last], table["built"])
+    return Report([s for s in speeds if s.games or s.last or s.other_games], table["built"])
 
 
 def headline(rep: Report) -> str | None:
@@ -303,12 +358,16 @@ def headline(rep: Report) -> str | None:
     if gaps:
         s, r, above = max(gaps, key=lambda g: g[1].you.rate - g[2])
         return (
-            f"In {s.speed}, moves {r.segment} are your widest clear gap to the next level: "
-            f"mistakes or blunders on {r.you.rate:.1%} of them (95% interval {r.you.low:.1%} to "
-            f"{r.you.high:.1%}), against {above:.1%} for players 300 points above you."
+            f"In {s.speed} over the last 12 months, moves {r.segment} are your widest clear gap to "
+            f"the next level: mistakes or blunders on {r.you.rate:.1%} of them (95% interval "
+            f"{r.you.low:.1%} to {r.you.high:.1%}), against {above:.1%} for players 300 points "
+            f"above your median rating of {s.rating}."
         )
     placed = [(s, r) for s, r in rows if r.placed]
     if placed:
         s, r = placed[0]
-        return f"In {s.speed}, you play moves {r.segment} like players {r.placed}."
-    return "Not enough recent games to place you against public players yet."
+        return (
+            f"In {s.speed} over the last 12 months, you play moves {r.segment} "
+            f"like players {r.placed}."
+        )
+    return "Your recent games can't place you against public players yet."

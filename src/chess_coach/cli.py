@@ -1190,7 +1190,7 @@ def levels(ctx: typer.Context) -> None:
     if line := headline(rep):
         console.print(line, highlight=False)
     for s in rep.speeds:
-        rated = f", your rating about {s.rating}" if s.rating else ""
+        rated = f", your median rating {s.rating}" if s.rating else ""
         title = f"{s.speed.capitalize()}: {s.games} games at {' or '.join(s.controls)}{rated}"
         table = Table(title=title, title_justify="left")
         for column in ("moves", "you", "your opponents", "300 points above you"):
@@ -1201,15 +1201,13 @@ def levels(ctx: typer.Context) -> None:
         console.print(table)
         for r in s.rows:
             console.print(r.sentence, highlight=False)
-        if s.other_games:
-            console.print(
-                f"[dim]{s.other_games} more game{'s' if s.other_games != 1 else ''} at other time "
-                "controls aren't counted: the public games have no yardstick for them.[/dim]"
-            )
+        if note := s.left_out_note:
+            console.print(f"[dim]{note}[/dim]", highlight=False)
         if note := s.stale_note:
             console.print(f"[dim]{note}[/dim]", highlight=False)
     console.print(
-        f"\n[dim]Mistakes and blunders (20+ points of win probability), with 95% intervals. The "
+        f"\n[dim]From your last 12 months. Mistakes and blunders (20+ points of win probability), "
+        "with 95% intervals. The "
         f"public games are unanalysed Lichess games, scored the same way (built {rep.built}). "
         "`digest` has this in one line.[/dim]",
         highlight=False,

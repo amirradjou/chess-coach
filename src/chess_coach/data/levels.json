@@ -23,7 +23,7 @@
  },
  "built": "2026-11-01",
  "yardstick": {
-  "engine": "Stockfish 19, depth 12, 1 thread, hash 64 MB, through chess_coach.engine.analysis.analyze_game (start position, then the position after each ply), as the owner's games are analysed",
+  "engine": "Stockfish 19, depth 12, 1 thread, hash 64 MB, through chess_coach.engine.analysis.analyze_game (start position, then the position after each ply), the pipeline `analyze` uses",
   "plies": {
    "bullet": 20,
    "blitz": 40

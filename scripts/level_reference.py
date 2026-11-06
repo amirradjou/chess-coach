@@ -747,7 +747,7 @@ def main(argv: list[str] | None = None) -> None:
         "yardstick": {
             "engine": f"{engine_name}, depth {DEPTH}, {ENGINE_THREADS} thread, hash "
             f"{ENGINE_HASH_MB} MB, through chess_coach.engine.analysis.analyze_game (start "
-            "position, then the position after each ply), as the owner's games are analysed",
+            "position, then the position after each ply), the pipeline `analyze` uses",
             "plies": PLIES,
             "error": f"wp_loss >= {MISTAKE_WP_LOSS:g} (mistake or blunder; Lichess's "
             "win-probability model, mates clamped to +-10000, the engine's best move and forced "

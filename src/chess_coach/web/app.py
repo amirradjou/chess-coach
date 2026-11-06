@@ -427,7 +427,7 @@ def _levels(rep: LevelReport) -> dict:
             {
                 "speed": s.speed,
                 "games": s.games,
-                "other_games": s.other_games,
+                "left_out": s.left_out_note,
                 "controls": s.controls,
                 "rating": s.rating,
                 "stale": s.stale_note,
