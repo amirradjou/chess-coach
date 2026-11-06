@@ -3,23 +3,43 @@
 For each colour: the openings you play most, how you score, the line you usually play, and the
 fixes: positions you reached in more than one game where your habitual move loses ground (by the
 engine's numbers) and what it prefers instead.
+
+And how each opening comes out, by the engine rather than results (`after_ten`): your eval after
+both sides' 10th moves, how often you stand at -1 or worse there, your mistake rate on moves 1-10,
+and what you lost since book, so a gambit's pawn isn't put down to you. Move 10 is where bullet
+stops counting, so bullet games get an outcome too.
+
+The eval is read after ply 20, Black's 10th move, whatever your colour: with Black that is your
+own 10th move. For White, yours is ply 19: read there, the number would always include your last
+slip and never their reply.
+Since book runs to ply 20 from the last position the opening table names, or from the ply before
+it when a White move reached it, so both sides make the same number of moves in between: that
+White move, the book's last, is then counted too (`book_ply`).
 """
 
 from __future__ import annotations
 
 import re
 from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from functools import lru_cache
+from statistics import median
 
 import chess
 
+from chess_coach.engine.evaluation import CP_LOSS_CEILING
 from chess_coach.models import Game, MoveFact
-from chess_coach.openings import book_line, opening_table
-from chess_coach.patterns.features import ERRORS, counted, result_of
+from chess_coach.openings import book_line, epd, opening_table
+from chess_coach.patterns.features import BULLET_MOVES, ERRORS, counted, move_rows, result_of
+from chess_coach.patterns.mining import wilson_lower, wilson_upper
 
 OPENING_MOVES = 15  # look for fixes up to this move number
 MIN_CP_LOSS = 50  # an average loss this big makes a habitual move worth fixing
+TEN = BULLET_MOVES  # openings are judged after both sides' 10th moves, the last bullet counts
+LEVEL_PLY = 2 * TEN  # ply 20, Black's 10th move: White and Black have made 10 moves each
+BAD_CP = -100  # "at -1 or worse" there
+BOOK_FALLBACK_PLY = 8  # a game that never matched the opening table: from after Black's 4th move
 
 
 @dataclass(slots=True)
@@ -136,9 +156,11 @@ def fixes(games: Sequence[Game], moves: Sequence[MoveFact], top: int = 5) -> lis
     return sorted(out.values(), key=lambda f: (-f.times * f.avg_cp_loss, f.move_number))[:top]
 
 
+@lru_cache(maxsize=1 << 16)
 def is_book(fen: str, uci: str) -> bool:
     """True when the move leads to a named position in the opening table: a theory choice, not a
-    slip (1...g6 is the Modern Defense, not a mistake to fix)."""
+    slip (1...g6 is the Modern Defense, not a mistake to fix). Cached: your games keep reaching
+    the same positions."""
     board = chess.Board(fen)
     move = chess.Move.from_uci(uci)
     if move not in board.legal_moves:
@@ -186,4 +208,138 @@ def favorites(
         )
     for color in out:
         out[color] = sorted(out[color], key=lambda f: (-f.games, f.family))[:top]
+    return out
+
+
+def clamp(cp: int) -> int:
+    """Evals as Lichess averages them: within ±10 pawns, so a mate weighs like a won game."""
+    return max(-CP_LOSS_CEILING, min(CP_LOSS_CEILING, cp))
+
+
+def user_evals(moves: Iterable[MoveFact]) -> dict[int, int]:
+    """{ply: your eval (cp, your side, clamped) in the position after that ply} from one game's
+    moves, both sides'. Ply 0 is the start position: the eval before the first move."""
+    out: dict[int, int] = {}
+    for m in moves:
+        sign = 1 if m.is_user else -1  # stored from the mover's side
+        out[m.ply] = clamp(sign * m.eval_after)
+        if m.ply == 1:
+            out[0] = clamp(sign * m.eval_before)
+    return out
+
+
+def book_ply(own: Sequence[MoveFact]) -> int:
+    """Where "since book" is measured from. The last position up to your 10th move that the
+    opening table names (so a transposition back into a named line counts), moved back to the even
+    ply at or before it: after Black's move, so both sides make the same number of moves from
+    there to ply 20. Ply 8 (after Black's 4th move) when none is named; ply 0 is the start.
+    `own` is your moves in order; the positions their moves left are read from them."""
+    table = opening_table()
+    found = None
+    for m in own:
+        if m.ply > 1 and epd(m.fen_before) in table:  # the position their move left
+            found = m.ply - 1
+        if is_book(m.fen_before, m.uci):
+            found = m.ply
+    return BOOK_FALLBACK_PLY if found is None else found - found % 2
+
+
+def at_ten(moves: Iterable[MoveFact]) -> tuple[int, int] | None:
+    """(your eval after both sides' 10th moves, its change since book) for one game, from its
+    moves, both sides' (ply 20 is their move when you're White); None when the game ended before
+    ply 20."""
+    early = sorted((m for m in moves if m.ply <= LEVEL_PLY), key=lambda m: m.ply)
+    after = user_evals(early)
+    book = book_ply([m for m in early if m.is_user])
+    if LEVEL_PLY not in after or book not in after:
+        return None
+    return after[LEVEL_PLY], after[LEVEL_PLY] - after[book]
+
+
+def _by_game(moves: Iterable[MoveFact], ids: set[str]) -> dict[str, list[MoveFact]]:
+    """These games' moves up to ply 20, both sides'."""
+    out: dict[str, list[MoveFact]] = defaultdict(list)
+    for m in moves:
+        if m.ply <= LEVEL_PLY and m.game_id in ids:
+            out[m.game_id].append(m)
+    return out
+
+
+def evals_after_ten(games: Iterable[Game], moves: Iterable[MoveFact]) -> dict[str, int]:
+    """{game id: your eval (cp, clamped) after both sides' 10th moves} for the games that got that
+    far, the value `after_ten` reads. `moves` must hold both sides' moves up to ply 20."""
+    by_game = _by_game(moves, {g.id for g in games})
+    return {gid: found[0] for gid, ms in by_game.items() if (found := at_ten(ms)) is not None}
+
+
+@dataclass(slots=True)
+class AfterTen:
+    """How your games in one opening stand after both sides' 10th moves, by the engine (not
+    results)."""
+
+    family: str
+    color: str
+    games: int  # the games that got to both sides' 10th moves (ply 20)
+    median_cp: int  # your eval there (the median: evals are clamped, and blowouts skew a mean)
+    bad: int  # games at -1 or worse there
+    since_book: int  # the median change in your eval from the book point (`book_ply`) to there
+    errors: int  # mistakes and blunders on your counted moves 1-10, in all the opening's games
+    moves: int
+
+    @property
+    def bad_rate(self) -> float:
+        return self.bad / self.games
+
+    @property
+    def bad_interval(self) -> tuple[float, float]:
+        return wilson_lower(self.bad, self.games), wilson_upper(self.bad, self.games)
+
+    @property
+    def error_rate(self) -> float:
+        return self.errors / self.moves if self.moves else 0.0
+
+    @property
+    def error_interval(self) -> tuple[float, float]:
+        return wilson_lower(self.errors, self.moves), wilson_upper(self.errors, self.moves)
+
+
+def after_ten(
+    games: Sequence[Game], moves: Sequence[MoveFact], min_games: int = 5
+) -> dict[str, list[AfterTen]]:
+    """Your openings by colour (at least `min_games` games that got to both sides' 10th moves),
+    worst first: by the low end of the 95% interval on your mistake rate in moves 1-10, then by
+    what you lost since book. Never by the mean eval, which a few blowouts decide. `moves` must
+    hold both sides' moves up to ply 20 (`Store.iter_moves(max_ply=LEVEL_PLY)`)."""
+    analysed = [g for g in games if g.analyzed_depth and g.opening_family]
+    by_game = _by_game(moves, {g.id for g in analysed})
+    hits: Counter[str] = Counter()
+    counted_moves: Counter[str] = Counter()
+    for r in move_rows(analysed, moves):  # yours, counted, and not played short on time
+        if r.fact.move_number <= TEN:
+            counted_moves[r.game.id] += 1
+            hits[r.game.id] += r.error
+    groups: dict[tuple[str, str], list[Game]] = defaultdict(list)
+    for g in analysed:
+        groups[(g.opening_family, g.user_color.value)].append(g)
+    out: dict[str, list[AfterTen]] = {"white": [], "black": []}
+    for (family, color), gs in groups.items():
+        # the games that got to ply 20: (eval there, change since book) each
+        found = [x for g in gs if (x := at_ten(by_game[g.id])) is not None]
+        if not found or len(found) < min_games:  # none got there: nothing to say, whatever the min
+            continue
+        evals = [level for level, _ in found]
+        out[color].append(
+            AfterTen(
+                family=family,
+                color=color,
+                games=len(found),
+                median_cp=round(median(evals)),
+                bad=sum(e <= BAD_CP for e in evals),
+                since_book=round(median(since for _, since in found)),
+                errors=sum(hits[g.id] for g in gs),
+                moves=sum(counted_moves[g.id] for g in gs),
+            )
+        )
+    for color in out:
+        out[color].sort(key=lambda a: (-a.error_interval[0], a.since_book, a.family))
     return out

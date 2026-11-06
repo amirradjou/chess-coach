@@ -16,6 +16,12 @@ from chess_coach.puzzles.srs import schedule
 
 START = chess.STARTING_FEN
 E4, D4, A3 = (chess.Move.from_uci(u) for u in ("e2e4", "d2d4", "a2a3"))
+# White to move with 1.e4 and 1.a3 legal: the start, after 1.Nc3 Nc6, after 1.Nf3 Nf6.
+POSITIONS = [
+    START,
+    "r1bqkbnr/pppppppp/2n5/8/8/2N5/PPPPPPPP/R1BQKBNR w KQkq - 2 2",
+    "rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq - 2 2",
+]
 
 
 class FakeEngine:
@@ -117,12 +123,14 @@ def test_the_only_mate_is_a_puzzle_whatever_the_gap():
 # -- store, make and drill ------------------------------------------------------------------
 
 
-def _store_with_blunders(path: Path, n: int = 3) -> None:
+def _store_with_blunders(path: Path, n: int = 3, same_position: bool = False) -> None:
     with Store(path) as store:
         for i in range(n):
             g = game(i)
             store.upsert_game(g)
-            store.replace_moves(g.id, [blunder(g.id)], depth=12)
+            m = blunder(g.id)
+            m.fen_before = START if same_position else POSITIONS[i]
+            store.replace_moves(g.id, [m], depth=12)
 
 
 def test_make_checks_each_candidate_once(tmp_path: Path):
@@ -133,6 +141,25 @@ def test_make_checks_each_candidate_once(tmp_path: Path):
         assert (make(store, engine, limit=10).made, engine.calls) == (3, 3)
         assert make(store, engine, limit=10).checked == 0  # nothing new to check
         assert len(store.due(datetime.now(UTC).date().isoformat())) == 3
+
+
+def test_a_slip_repeated_from_the_same_position_is_one_puzzle(tmp_path: Path):
+    db = tmp_path / "c.db"
+    _store_with_blunders(db, same_position=True)
+    with Store(tmp_path / "c.db") as store:
+        for i, tag in enumerate(("hanging_piece", "pawn_grab")):
+            store.conn.execute(
+                "UPDATE moves SET motifs = ? WHERE game_id = ?", (f'["{tag}"]', f"lichess:g{i}")
+            )
+        store.conn.commit()
+    engine = FakeEngine([LineEval(300, None, E4), LineEval(0, None, D4)])
+    with Store(db) as store:
+        result = make(store, engine, limit=10)
+        assert (result.checked, result.made) == (3, 1)
+        (p,) = store.puzzles()
+        assert p.id == "lichess:g2:1"  # the newest game is checked first
+        assert p.tags == ["missed_tactic", "opening", "pawn_grab", "hanging_piece"]
+        assert make(store, engine, limit=10).checked == 0
 
 
 def test_drill_records_attempts_and_reschedules(tmp_path: Path):

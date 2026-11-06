@@ -38,11 +38,20 @@ from chess_coach.coach.progress import (
     trend_speeds,
     weekly,
 )
-from chess_coach.coach.repertoire import Favorite, Fix, favorites
+from chess_coach.coach.repeats import Repeat, repeats
+from chess_coach.coach.repertoire import (
+    LEVEL_PLY,
+    AfterTen,
+    Favorite,
+    Fix,
+    after_ten,
+    evals_after_ten,
+    favorites,
+)
 from chess_coach.db import Store
 from chess_coach.engine.stockfish import Engine, EngineNotFoundError, LineEval
 from chess_coach.models import Puzzle, card_id
-from chess_coach.openings import opening_table
+from chess_coach.openings import opening_families, opening_table
 from chess_coach.patterns.features import move_rows, result_of
 from chess_coach.patterns.mining import Evidence
 from chess_coach.puzzles import review
@@ -159,7 +168,51 @@ def _fix(f: Fix) -> dict:
     }
 
 
-def _favorite(f: Favorite) -> dict:
+def _repeat(r: Repeat) -> dict:
+    return {
+        "svg": board_svg(r.fen, [(r.uci, PLAYED), (r.best_uci, BETTER)]),
+        "move": r.move,
+        "better": r.better,
+        "family": r.family,
+        "games": r.games,
+        "last": r.last.date().isoformat() if r.last else None,
+        "punish": r.punish,
+        "punished": r.punished,
+        "replies": r.replies,
+        "reasons": r.reasons,
+        "urls": r.urls,
+        "puzzle": r.puzzle is not None,
+    }
+
+
+def _eval(cp: int) -> str:
+    """'-0.5' from your side, and 0.0 rather than -0.0."""
+    return review.Score(cp).text if abs(cp) >= 5 else "0.0"
+
+
+def _after_ten(a: AfterTen | None) -> dict | None:
+    if a is None:
+        return None
+    (bad_low, bad_high), (error_low, error_high) = a.bad_interval, a.error_interval
+    return {
+        "family": a.family,
+        "games": a.games,
+        "median": _eval(a.median_cp),
+        "bad": _pct(a.bad_rate),
+        "bad_low": _pct(bad_low),
+        "bad_high": _pct(bad_high),
+        "error_rate": round(a.error_rate * 100, 1),
+        "error_low": round(error_low * 100, 1),
+        "error_high": round(error_high * 100, 1),
+        "since_book": _eval(a.since_book),
+    }
+
+
+def _at_ten(found: tuple[int, int] | None) -> dict | None:
+    return None if found is None else {"games": found[0], "median": _eval(found[1])}
+
+
+def _favorite(f: Favorite, after: AfterTen | None = None) -> dict:
     return {
         "family": f.family,
         "color": f.color,
@@ -174,6 +227,7 @@ def _favorite(f: Favorite) -> dict:
         "idea": opening_idea(f.family),
         "opening_error_rate": round(f.opening_error_rate * 100, 1),
         "fixes": [_fix(x) for x in f.fixes],
+        "after_ten": _after_ten(after),
     }
 
 
@@ -226,6 +280,17 @@ def _number(board: chess.Board) -> str:
     return f"{board.fullmove_number}{'.' if board.turn == chess.WHITE else '...'}"
 
 
+def _drill_opening(p: Puzzle, tag: str | None, game_family: str | None) -> str | None:
+    """The opening a drill is shown under: an opening fix's own opening (its tag after
+    "opening-fix"), any other puzzle's game's. A fix two openings share (Modern and Pirc 3...Bg7)
+    has both names: drilled as one of them (the tag asked for), it is that one's."""
+    if "opening-fix" not in p.tags:
+        return game_family
+    if tag in p.tags[1:] and tag in opening_families():  # not a theme such as "opening"
+        return tag
+    return p.tags[1] if len(p.tags) > 1 else None
+
+
 def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
     analyst = Analyst(engine)
 
@@ -248,7 +313,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
         moves = list(store.iter_moves(user_only=True))
         return games, moves, (sum(1 for g in games if g.analyzed_depth), len(moves))
 
-    def cached(name: str, key: tuple[int, int], make) -> dict:
+    def cached(name: str, key: tuple[int, ...], make):
         if name in cache and cache[name][0] == key:
             return cache[name][1]
         value = make()
@@ -298,15 +363,38 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
 
         return cached("overview", key, make)
 
+    @app.get("/api/repeats")
+    def repeat_offenders() -> list[dict]:
+        """The mistakes you repeat from the same position (coach.repeats), most games first."""
+        with Store(db_path) as store:
+            games, moves, key = data(store)
+            puzzles = store.puzzles()
+            return cached(
+                "repeats",
+                (*key, len(puzzles)),
+                lambda: [
+                    _repeat(r) for r in repeats(games, moves, store.replies_to_errors(), puzzles)
+                ],
+            )
+
     @app.get("/api/openings")
     def openings() -> dict:
         with Store(db_path) as store:
             games, moves, key = data(store)
-        return cached(
-            "openings",
-            key,
-            lambda: {c: [_favorite(f) for f in fs] for c, fs in favorites(games, moves).items()},
-        )
+
+        def make() -> dict:
+            with Store(db_path) as store:  # both sides' moves: ply 20 is Black's move
+                early = list(store.iter_moves(max_ply=LEVEL_PLY))
+            ranked = after_ten(games, early)
+            by_key = {(a.family, a.color): a for rows in ranked.values() for a in rows}
+            out: dict = {
+                c: [_favorite(f, by_key.get((f.family, f.color))) for f in fs]
+                for c, fs in favorites(games, moves).items()
+            }
+            out["after_ten"] = {c: [_after_ten(a) for a in rows] for c, rows in ranked.items()}
+            return out
+
+        return cached("openings", key, make)
 
     @app.get("/api/drill/next")
     def drill_next(tag: str | None = None) -> dict:
@@ -319,7 +407,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             p = due[0]
             game = store.get_game(p.game_id)
         board = chess.Board(p.fen)
-        family = p.tags[1] if "opening-fix" in p.tags else (game.opening_family if game else None)
+        family = _drill_opening(p, tag, game.opening_family if game else None)
         early = board.fullmove_number <= OPENING_NOTE_MOVES
         return {
             "done": False,
@@ -412,7 +500,9 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             raise HTTPException(400, str(exc)) from exc
         return Response(svg, media_type="image/svg+xml")
 
-    def opening_tree(family: str, color: str) -> tuple[optree.Node, dict[str, str]]:
+    def opening_tree(family: str, color: str) -> tuple[optree.Node, dict[str, str], dict[str, int]]:
+        """The tree, each game's result as it counts, and each game's eval after both sides'
+        10th moves (past the tree's last ply, which `tree.build` stops at)."""
         with Store(db_path) as store:
             games = [
                 g
@@ -424,8 +514,13 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             if name in cache and cache[name][0] == key:
                 return cache[name][1]  # type: ignore[return-value]
             ids = {g.id for g in games}
-            moves = [m for m in store.iter_moves(max_ply=optree.TREE_PLIES) if m.game_id in ids]
-        value = (optree.build(games, moves), {g.id: result_of(g) for g in games})
+            # both sides' moves to ply 20: the tree keeps the first 16 plies
+            moves = [m for m in store.iter_moves(max_ply=LEVEL_PLY) if m.game_id in ids]
+        value = (
+            optree.build(games, moves),
+            {g.id: result_of(g) for g in games},
+            evals_after_ten(games, moves),
+        )
         cache[name] = (key, value)
         return value
 
@@ -433,7 +528,13 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
         mate = None if fact.mate_before is None else sign * fact.mate_before
         return review.Score(sign * fact.eval_before, mate).text
 
-    def node_json(root: optree.Node, results: dict[str, str], path: list[str], color: str):
+    def node_json(
+        root: optree.Node,
+        results: dict[str, str],
+        path: list[str],
+        color: str,
+        evals: dict[str, int],
+    ):
         board = chess.Board()
         plies = []
         for uci in path:
@@ -468,6 +569,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
                 "scored": optree.scored(edge.child.games, results),
                 "verdict": edge.verdict,
                 "loss": round(edge.cp_loss),
+                "after_ten": _at_ten(optree.at_move_ten(edge.child.games, evals)),
             }
             if edge.punishable:
                 f = edge.child.best
@@ -497,6 +599,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
             "games": len(node.games) if node else 0,
             "score": _pct(optree.score(node.games, results)) if node else None,
             "scored": optree.scored(node.games, results) if node else 0,
+            "after_ten": _at_ten(optree.at_move_ten(node.games, evals)) if node else None,
             "best": best,
             "moves": moves,
         }
@@ -525,15 +628,15 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
     def coach_node(family: str, color: str, path: str = "") -> dict:
         if color not in ("white", "black"):
             raise HTTPException(400, "colour is white or black")
-        root, results = opening_tree(family, color)
+        root, results, evals = opening_tree(family, color)
         try:
-            return node_json(root, results, [u for u in path.split(",") if u], color)
+            return node_json(root, results, [u for u in path.split(",") if u], color, evals)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
     def coach_deck(family: str, color: str):
         """This opening's punish deck in practice order, its cards, and today's date."""
-        root, _ = opening_tree(family, color)
+        root, _, _ = opening_tree(family, color)
         today = datetime.now(UTC).date().isoformat()
         with Store(db_path) as store:
             cards = store.coach_cards(family, color)
@@ -603,7 +706,7 @@ def create_app(db_path: Path, engine: Callable[[], Engine] = Engine) -> FastAPI:
         if board.turn != (chess.WHITE if a.color == "white" else chess.BLACK):
             raise HTTPException(400, "it isn't your move there")
         path = [m.uci() for m in board.move_stack]
-        root, _ = opening_tree(a.family, a.color)
+        root, _, _ = opening_tree(a.family, a.color)
         parent = optree.walk(root, path[:-1]) if path else None
         edge = parent.edges.get(path[-1]) if parent else None
         kind = training.PUNISH if edge is not None and edge.punishable else training.LINE

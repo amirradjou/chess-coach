@@ -66,6 +66,8 @@ def test_what_their_mistake_allows():
     for san in "e4 e5 d4 exd4 c3 dxc3 Nxc3 Nf6".split():
         danish.push_san(san)
     assert allows(danish.fen(), "e4e5") == ["It lets e5 hit their knight on f6."]
+    # when the mistake is yours, the knight is yours
+    assert allows(danish.fen(), "e4e5", yours=True) == ["It lets e5 hit your knight on f6."]
     fork = "r1bqkb1r/pppp1ppp/2n5/4p3/2B1n3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4"  # 3...Nxe4?
     assert allows(fork, "c4f7") == ["It lets Bxf7+ come with check."]
     mate = "rnbqkbnr/ppppp2p/5p2/6p1/4P3/8/PPPP1PPP/RNBQKBNR w KQkq g6 0 3"  # 2...g5??
